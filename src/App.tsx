@@ -465,8 +465,10 @@ function Shell({
                 <Unavailable
                   busy={busy}
                   description={
-                    status?.message ??
-                    "Could not read the owned engine. Refresh or inspect diagnostics."
+                    busy
+                      ? "Verifying the OrbWin engine and reading its resources…"
+                      : (status?.message ??
+                        "Could not read the owned engine. Refresh or inspect diagnostics.")
                   }
                   onDiagnostics={() => navigate("diagnostics")}
                 />
@@ -545,10 +547,10 @@ function Shell({
                   <dd>{status?.version ?? "Unavailable"}</dd>
                 </dl>
                 <p className="notice">
-                  OrbWin uses its own endpoint and leaves other engines untouched.
-                  Local Windows drive bind paths are translated by the owned
-                  backend; UNC/device paths require a separate supported sharing
-                  flow.
+                  OrbWin uses its own endpoint and leaves other engines
+                  untouched. Local Windows drive bind paths are translated by
+                  the owned backend; UNC/device paths require a separate
+                  supported sharing flow.
                 </p>
                 <h2>WSL host</h2>
                 <p>

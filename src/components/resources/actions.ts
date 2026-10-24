@@ -9,9 +9,11 @@ import {
 } from "../Operations";
 import {
   composeFile,
+  containerActionUnavailable,
+  containerRemovalUnavailable,
   isRunning,
   name,
-  ports,
+  publishedPorts,
   type Page,
   type Row,
 } from "./model";
@@ -21,7 +23,7 @@ export type Action = {
   label: string;
   destructive?: boolean;
   spec?: OperationSpec;
-  href?: string;
+  port?: number;
   copy?: string;
   // Present when the action cannot run; shown instead of silently hiding it.
   unavailable?: string;
@@ -74,31 +76,33 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
   if (!rows.length) return [];
   const actions: Action[] = [];
   if (page === "containers") {
-    const running = rows.filter(isRunning);
-    const stopped = rows.filter((row) => !isRunning(row));
-    if (stopped.length)
-      actions.push({
-        id: "start",
-        label: "Start",
-        spec: containerSpec("start", stopped),
-      });
-    if (running.length)
-      actions.push(
-        { id: "stop", label: "Stop", spec: containerSpec("stop", running) },
-        {
-          id: "restart",
-          label: "Restart",
-          spec: containerSpec("restart", running),
-        },
+    const stopped = rows.filter((row) => !containerRemovalUnavailable(row));
+    const activeCount = rows.length - stopped.length;
+    for (const action of [
+      "start",
+      "stop",
+      "restart",
+      "pause",
+      "unpause",
+    ] as const) {
+      const eligible = rows.filter(
+        (row) => !containerActionUnavailable(action, row),
       );
+      if (eligible.length)
+        actions.push({
+          id: action,
+          label: verbs[action],
+          spec: containerSpec(action, eligible),
+        });
+    }
     if (rows.length === 1)
-      for (const port of ports(rows[0].Ports))
+      for (const port of publishedPorts(rows[0]))
         if (port.url && isRunning(rows[0]))
           actions.push(
             {
               id: `open-${port.hostPort}`,
               label: `Open localhost:${port.hostPort}`,
-              href: port.url,
+              port: port.hostPort,
             },
             {
               id: `copy-${port.hostPort}`,
@@ -115,8 +119,8 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
             spec: removeSpec(
               page,
               stopped,
-              running.length
-                ? `${running.length} running container${running.length === 1 ? " is" : "s are"} not included; stop ${running.length === 1 ? "it" : "them"} first.`
+              activeCount
+                ? `${activeCount} active or unverified container${activeCount === 1 ? " is" : "s are"} not included; stop or inspect ${activeCount === 1 ? "it" : "them"} first.`
                 : "",
             ),
           }
@@ -124,7 +128,8 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
             id: "remove",
             label: "Remove",
             destructive: true,
-            unavailable: "Stop running containers before removing them.",
+            unavailable:
+              "Stop active containers and verify their state before removing them.",
           },
     );
     return actions;
@@ -180,7 +185,7 @@ export function groupActions(project: string, rows: Row[]): Action[] {
         };
   return [
     ...actionsFor("containers", rows).filter(
-      (action) => !action.href && !action.copy,
+      (action) => !action.port && !action.copy,
     ),
     compose("logs", "Project logs…"),
     compose("down", "Compose down…", true),

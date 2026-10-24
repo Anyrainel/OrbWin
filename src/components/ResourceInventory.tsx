@@ -435,7 +435,7 @@ export function ResourceList({
           >
             <span aria-live="polite">{selectedRows.length} selected</span>
             {batch
-              .filter((action) => !action.href && !action.copy)
+              .filter((action) => !action.port && !action.copy)
               .map((action) => (
                 <button
                   key={action.id}

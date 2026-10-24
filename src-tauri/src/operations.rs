@@ -1057,7 +1057,7 @@ pub async fn run(
             }
         )
     } else if exit_code == Some(0) {
-        "Command completed. Refreshing engine state.".into()
+        "Command completed.".into()
     } else {
         format!("Engine client exited with code {exit_code:?}. Review output and refresh state before retrying.")
     };

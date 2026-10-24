@@ -58,6 +58,32 @@ export function isRunning(row: Row) {
   return String(row.State).toLowerCase() === "running";
 }
 
+export function containerActionUnavailable(
+  action: "start" | "stop" | "restart" | "pause" | "unpause",
+  row: Row,
+): string | undefined {
+  const state = String(row.State ?? "").toLowerCase();
+  const allowed = {
+    start: ["created", "exited"],
+    stop: ["running", "paused", "restarting"],
+    restart: ["running", "paused"],
+    pause: ["running"],
+    unpause: ["paused"],
+  };
+  if (allowed[action].includes(state)) return;
+  if (action === "start" && state === "paused")
+    return "Resume this paused container.";
+  return `This action is unavailable while the container is ${state || "in an unknown state"}. Refresh or inspect its state first.`;
+}
+
+export function containerRemovalUnavailable(row: Row): string | undefined {
+  const state = String(row.State ?? "").toLowerCase();
+  if (["created", "exited", "dead"].includes(state)) return;
+  return ["running", "paused", "restarting"].includes(state)
+    ? "Stop the container before removing it."
+    : "Refresh and inspect the container's state before removing it.";
+}
+
 export type Port = {
   hostIp: string;
   hostPort: number;

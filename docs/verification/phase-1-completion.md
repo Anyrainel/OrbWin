@@ -259,3 +259,21 @@ preservation), and `owned_interactive_terminal` (SDK input/resize/Ctrl+C/exit,
 backpressure and container survival). These are adapter tests, not substitutes
 for rendered native UI acceptance. Frontend build, Clippy and the ordinary Rust
 and Node tests pass; opt-in cluster/setup cases remain separately gated.
+
+Native follow-up observed the maintained `nginx:1.29-alpine` fixture through
+the verified localhost link in Chrome (port 57851, rendered welcome page); followed
+container logs showed that browser's HTTP 200 request. The native terminal
+accepted physical-key `echo proof`, reported `stty size` as 36x102 then 36x100
+after the keyboard-accessible list divider changed, and displayed shell exit
+code 7. The server continued running. Computer-use text injection did not reach
+xterm in either screen-reader mode; disabling that mode did not solve it and was
+reverted. This is a tooling observation, not evidence of general typing failure.
+
+UI fixes from these checks route context-menu port links through the same
+verified native opener, constrain lifecycle/removal controls to observed states,
+provide a retry for failed full-detail reads, distinguish initial connection
+from read failure, and release operation controls even when the following refresh
+fails. Successful command output no longer claims a refresh is still underway.
+The frontend build and 36 Node tests pass after these changes. The earlier
+hand-written netcat HTTP fixture answered simple clients but reset Chrome requests;
+the maintained Nginx fixture supplied the browser acceptance check.

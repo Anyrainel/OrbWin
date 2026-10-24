@@ -29,13 +29,17 @@ that a subsequently implemented flow is absent.
   initial stopped state and its remaining zero-length stale IPC directory retained
   under a sibling backup. Its dedicated daemon passed the OrbWin coexistence pair
   proof (`orbwin-coexist-fb674c82`). Rancher then also started and both dedicated
-  endpoints remained healthy. Three-engine maintained traffic remains to test.
+  endpoints remained healthy. Three-engine maintained traffic, identity/data
+  retention, explicit foreign-port conflicts and owned-engine restart passed
+  `orbwin-coexist-ad3ae9dc` on binary `29073605…`.
 - BL-014: Windows allocation, stable bindings, explicit conflict refusal and
   publication status now pass scoped tests. Repeated Testcontainers found a second
   stale-publication acknowledgement race after restart. The adapter now requires
-  a fresh observed listener generation after start/restart; current repeated and
-  three-engine qualification are still in progress. Preserve failed evidence;
-  one passing run is not the phase gate.
+  a fresh observed listener generation after start/restart. Four consecutive
+  Testcontainers suites, concurrent Windows/WSL/delegated publication and the
+  three-engine proof passed on binary `29073605…`; see the active completion
+  record for exact evidence IDs. This closes these tested cases. Failed evidence
+  remains retained; broader compatibility and Phase 1 gates remain separate.
 
 ## BL-013 — Existing Docker Desktop cannot reach engine readiness
 

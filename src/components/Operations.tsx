@@ -8,6 +8,10 @@ import {
 } from "react";
 import * as backend from "../backend";
 import { LocalPortLink } from "./LocalPortLink";
+import {
+  containerActionUnavailable,
+  containerRemovalUnavailable,
+} from "./resources/model";
 import type { ResourcePage } from "../model/navigation";
 import { forwardUrls } from "./cluster/model";
 
@@ -470,7 +474,14 @@ export function OperationProvider({
       setResult(String(error));
     } finally {
       // Even a failed/cancelled mutation may have committed. Reconcile via reads.
-      if (mutation) await onMutation();
+      try {
+        if (mutation) await onMutation();
+      } catch (error) {
+        setResult(
+          (previous) =>
+            `${previous}\nState refresh failed: ${String(error)}. Refresh before another action.`,
+        );
+      }
       if (
         ["clusterApply", "clusterDelete", "configureCluster"].includes(
           spec.request.kind,
@@ -910,9 +921,13 @@ export function ResourceActions({
             <button
               className="button"
               key={action}
+              disabled={Boolean(containerActionUnavailable(action, row))}
+              title={containerActionUnavailable(action, row)}
               onClick={() => open(containerActionSpec(action, row))}
             >
-              {action}
+              {action === "unpause"
+                ? "Resume"
+                : action[0].toUpperCase() + action.slice(1)}
             </button>
           ),
         )}
@@ -930,6 +945,12 @@ export function ResourceActions({
       {page === "containers" && (
         <button
           className="button"
+          disabled={!String(row.State).match(/^running$/i)}
+          title={
+            String(row.State).match(/^running$/i)
+              ? undefined
+              : "Run commands require a running, unpaused container."
+          }
           onClick={() =>
             open({
               title: `Run command in ${title}`,
@@ -988,6 +1009,12 @@ export function ResourceActions({
         ))}
       <button
         className="button danger"
+        disabled={
+          page === "containers" && Boolean(containerRemovalUnavailable(row))
+        }
+        title={
+          page === "containers" ? containerRemovalUnavailable(row) : undefined
+        }
         onClick={() => open(removalSpec(page, row))}
       >
         Remove

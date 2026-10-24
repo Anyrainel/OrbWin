@@ -119,6 +119,7 @@ export function InfoPanel({
 }) {
   const id = target(page, row);
   const [inspect, setInspect] = useState<Inspect>({ state: "pending" });
+  const [retry, setRetry] = useState(0);
   // Read-only full inspect for structured sections. Re-read when the listed
   // state changes; a failed read falls back to the list fields only.
   const revision = `${id}:${text(row.State)}`;
@@ -156,7 +157,7 @@ export function InfoPanel({
           });
       });
     return () => abort.abort();
-  }, [page, revision]);
+  }, [page, revision, retry]);
   const data = inspect.state === "ready" ? inspect.data : undefined;
   const portList = publishedPorts(row);
   const linkable = isRunning(row);
@@ -343,7 +344,13 @@ export function InfoPanel({
       {inspect.state === "failed" && (
         <p role="status" className="info-status">
           Full details unavailable: {inspect.message} Showing listed fields
-          only.
+          only.{" "}
+          <button
+            className="button"
+            onClick={() => setRetry((value) => value + 1)}
+          >
+            Retry details
+          </button>
         </p>
       )}
       {body}

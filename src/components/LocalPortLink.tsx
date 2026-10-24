@@ -3,10 +3,12 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export function LocalPortLink({
   port,
+  onOpened,
   children,
   ...props
 }: Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "onClick"> & {
   port: number;
+  onOpened?: () => void;
 }) {
   const [error, setError] = useState("");
   return (
@@ -18,12 +20,15 @@ export function LocalPortLink({
         rel="noreferrer noopener"
         onClick={(event) => {
           event.stopPropagation();
-          if (!isTauri()) return;
+          if (!isTauri()) {
+            onOpened?.();
+            return;
+          }
           event.preventDefault();
           setError("");
-          void invoke("open_local_port", { port }).catch((cause) =>
-            setError(String(cause)),
-          );
+          void invoke("open_local_port", { port })
+            .then(() => onOpened?.())
+            .catch((cause) => setError(String(cause)));
         }}
       >
         {children}

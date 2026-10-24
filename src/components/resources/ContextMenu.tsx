@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Action } from "./actions";
+import { LocalPortLink } from "../LocalPortLink";
 
 export type MenuRequest = {
   x: number;
@@ -77,18 +78,16 @@ export function ContextMenu({
       }}
     >
       {menu.actions.map((action) =>
-        action.href ? (
-          <a
+        action.port ? (
+          <LocalPortLink
             key={action.id}
             role="menuitem"
             tabIndex={-1}
-            href={action.href}
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={() => onClose(true)}
+            port={action.port}
+            onOpened={() => onClose(true)}
           >
             {action.label}
-          </a>
+          </LocalPortLink>
         ) : (
           <button
             key={action.id}
