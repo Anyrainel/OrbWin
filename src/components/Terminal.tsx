@@ -8,7 +8,13 @@ type Event =
   | { kind: "ready" }
   | { kind: "data"; bytes: number[] }
   | { kind: "exit"; code: number | null; message: string };
-export function Terminal({ target }: { target: string }) {
+export function Terminal({
+  target,
+  pod,
+}: {
+  target: string;
+  pod?: { namespace: string; name: string; uid: string; container: string };
+}) {
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Xterm | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -142,9 +148,9 @@ export function Terminal({ target }: { target: string }) {
       }
     };
     try {
-      await invoke("terminal_open", {
+      await invoke(pod ? "terminal_open_pod" : "terminal_open", {
         id,
-        container: target,
+        ...(pod ? { pod } : { container: target }),
         shell,
         cols: Math.max(10, Math.min(400, term.cols)),
         rows: Math.max(2, Math.min(150, term.rows)),
@@ -172,7 +178,7 @@ export function Terminal({ target }: { target: string }) {
         if (mounted.current && !pending) setMessage(String(error));
       });
     setMessage(
-      "Disconnect requested. The container remains running; an exec process may remain inside it.",
+      "Disconnect requested. The workload remains running; an exec process may remain inside it.",
     );
   }
   return (

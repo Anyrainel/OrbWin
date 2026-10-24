@@ -181,6 +181,10 @@ pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
             "patches/rdd/0006-sequential-provisioning-proof.patch",
             include_bytes!("../../patches/rdd/0006-sequential-provisioning-proof.patch"),
         ),
+        (
+            "patches/rdd/0007-wsl-shared-socket.patch",
+            include_bytes!("../../patches/rdd/0007-wsl-shared-socket.patch"),
+        ),
     ];
     let actual = manifest["patches"]
         .as_array()
@@ -240,16 +244,63 @@ pub(crate) fn configure_client(config: &std::path::Path) -> Result<(), String> {
         .as_object_mut()
         .ok_or("Private Docker config is not an object; it was not changed")?;
     let expected = serde_json::json!([plugins]);
-    if object.get("cliPluginsExtraDirs") == Some(&expected) {
+    let same_plugins = object.get("cliPluginsExtraDirs") == Some(&expected);
+    object.insert("cliPluginsExtraDirs".into(), expected);
+    let auth_changed = private_auth_defaults(&mut value)?;
+    if same_plugins && !auth_changed {
         return Ok(());
     }
-    object.insert("cliPluginsExtraDirs".into(), expected);
     write_json(&path, &value)
+}
+
+// Docker CLI otherwise auto-detects a helper from PATH, even for an empty
+// private config. Avoid consulting another engine's store or a broken inherited
+// Linux helper for anonymous pulls. Explicit private auth/helper settings win.
+pub(crate) fn private_auth_defaults(value: &mut serde_json::Value) -> Result<bool, String> {
+    let object = value
+        .as_object_mut()
+        .ok_or("Private client config must be an object")?;
+    let has_auth = object
+        .get("auths")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|value| !value.is_empty());
+    let has_helpers = object
+        .get("credHelpers")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|value| !value.is_empty());
+    let has_store = object
+        .get("credsStore")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|value| !value.is_empty());
+    if has_auth || has_helpers || has_store {
+        return Ok(false);
+    }
+    object.insert(
+        "auths".into(),
+        serde_json::json!({"https://index.docker.io/v1/": {}}),
+    );
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn anonymous_client_does_not_inherit_helpers_or_erase_private_auth() {
+        let mut empty = serde_json::json!({"unknown": 9007199254740993u64});
+        assert!(private_auth_defaults(&mut empty).unwrap());
+        assert_eq!(empty["unknown"], 9007199254740993u64);
+        assert!(!private_auth_defaults(&mut empty).unwrap());
+        for value in [
+            serde_json::json!({"credsStore":"explicit"}),
+            serde_json::json!({"credHelpers":{"private.example":"explicit"}}),
+            serde_json::json!({"auths":{"private.example":{"auth":"disposable-test-token"}}}),
+        ] {
+            let mut configured = value.clone();
+            assert!(!private_auth_defaults(&mut configured).unwrap());
+            assert_eq!(configured, value);
+        }
+    }
     #[test]
     fn cli_paths_keep_drive_ownership_without_verbatim_slash_semantics() {
         assert_eq!(

@@ -28,7 +28,7 @@ writeFileSync(
       sdk: "github.com/moby/moby/client@v0.6.2",
       binarySha256: hash(binary),
       sources: Object.fromEntries(
-        ["main.go", "go.mod", "go.sum"].map((name) => [
+        ["main.go", "kube.go", "go.mod", "go.sum"].map((name) => [
           name,
           hash(resolve(directory, name)),
         ]),

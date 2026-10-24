@@ -21,7 +21,7 @@ const GROUPS: { role: DistroRole; title: string; note: string }[] = [
   {
     role: "user",
     title: "Your distributions",
-    note: "Untouched by OrbWin.",
+    note: "Connect a selected project explicitly.",
   },
   {
     role: "other-engine",
@@ -31,7 +31,7 @@ const GROUPS: { role: DistroRole; title: string; note: string }[] = [
 ];
 const ROLE_TEXT: Record<DistroRole, string> = {
   engine: "OrbWin engine — read-only",
-  user: "Your distribution — untouched",
+  user: "Your distribution",
   "other-engine": "Other engine — untouched",
 };
 
@@ -102,7 +102,9 @@ export function Wsl() {
       ),
     [snapshot, needle],
   );
-  const visible = GROUPS.flatMap((g) => matches.filter((d) => d.role === g.role));
+  const visible = GROUPS.flatMap((g) =>
+    matches.filter((d) => d.role === g.role),
+  );
   const detail = visible.find((d) => d.name === selected) ?? null;
 
   function body() {
@@ -133,8 +135,8 @@ export function Wsl() {
           <h2>No WSL distributions reported</h2>
           <p>
             WSL returned the message below. If WSL is not installed or has no
-            distributions, install it from an administrator terminal; OrbWin does
-            not install or change WSL for you.
+            distributions, install it from an administrator terminal; OrbWin
+            does not install or change WSL for you.
           </p>
           <p role="alert" className="k8s-error-text">
             {snapshot.listFailure}
@@ -209,7 +211,9 @@ export function Wsl() {
                 <span className="row-copy">
                   <strong>
                     {distro.name}
-                    {distro.isDefault && <span className="wsl-badge">default</span>}
+                    {distro.isDefault && (
+                      <span className="wsl-badge">default</span>
+                    )}
                   </strong>
                   <small>
                     {distro.state} · WSL {distro.version}
@@ -227,7 +231,10 @@ export function Wsl() {
     <div
       className="k8s-workspace"
       onKeyDown={(event) => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === "f"
+        ) {
           event.preventDefault();
           search.current?.focus();
         }
@@ -291,7 +298,9 @@ export function Wsl() {
                   ? "Select a distribution"
                   : "WSL distributions"}
               </h2>
-              <p>Registered distributions come from wsl.exe --list --verbose.</p>
+              <p>
+                Registered distributions come from wsl.exe --list --verbose.
+              </p>
             </div>
             <Overview snapshot={snapshot} />
           </div>
@@ -318,9 +327,9 @@ function Overview({ snapshot }: { snapshot: Snapshot | null }) {
         </section>
       )}
       <p className="capability-note">
-        Creating, importing, deleting and sharing files with distributions is
-        not available yet. OrbWin lists what WSL reports and never changes your
-        distributions. Use wsl --install or wsl --import in a terminal for now.
+        Select a WSL 2 distribution to connect an existing Linux project to
+        OrbWin. Creating, importing and deleting distributions use Windows WSL
+        tools. OrbWin leaves your shell defaults and other engines unchanged.
       </p>
     </>
   );
@@ -393,7 +402,9 @@ function Detail({ distro }: { distro: Distro }) {
                 className="button"
                 disabled={!canOpen || busy}
                 title={
-                  canOpen ? undefined : "Requires the Windows desktop application"
+                  canOpen
+                    ? undefined
+                    : "Requires the Windows desktop application"
                 }
                 onClick={() => {
                   setBusy(true);
@@ -412,8 +423,8 @@ function Detail({ distro }: { distro: Distro }) {
             </p>
             <CommandLine command={openCommand(distro.name)} />
             <small>
-              Opening a shell starts the distribution if it is stopped, as
-              wsl -d does. OrbWin does not stop, export or edit it.
+              Opening a shell starts the distribution if it is stopped, as wsl
+              -d does. OrbWin does not stop, export or edit it.
             </small>
           </section>
         ) : (
@@ -423,12 +434,141 @@ function Detail({ distro }: { distro: Distro }) {
               : "This distribution appears to belong to another container engine. OrbWin leaves it alone so engines can coexist."}
           </p>
         )}
+        {distro.role === "user" && distro.version === 2 && (
+          <ProjectConnection name={distro.name} />
+        )}
         <p className="capability-note">
-          Per-distribution integration (file sharing, creating or cloning
-          distributions, resource limits) is not available yet and is not
-          simulated.
+          Creating or cloning distributions and setting per-distribution
+          resource limits are outside this integration. Windows WSL owns those
+          capabilities; the shared WSL resource pool is not an OrbWin-only
+          limit.
         </p>
       </div>
     </>
+  );
+}
+
+type ProjectStatus = {
+  export: { source: string; sharedSource: string } | null;
+  connected: boolean;
+  dockerCommand: string;
+};
+function ProjectConnection({ name }: { name: string }) {
+  const [source, setSource] = useState("");
+  const [status, setStatus] = useState<ProjectStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  async function act(action: "inspect" | "connect" | "disconnect") {
+    setBusy(true);
+    setError("");
+    try {
+      const next = await invoke<ProjectStatus>("wsl_project", {
+        name,
+        action,
+        source,
+      });
+      if (mounted.current) {
+        setStatus(next);
+        if (next.export) setSource(next.export.source);
+      }
+    } catch (error) {
+      if (mounted.current)
+        setError(
+          `${String(error)} Refresh connection state before retrying; a requested mount change may have completed.`,
+        );
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
+  return (
+    <section className="wsl-section">
+      <h3>Connect a Linux project</h3>
+      <p>
+        Share one existing directory below /home with the owned engine. This
+        starts the selected distribution if needed and uses its root mount
+        permission. Project files are writable by containers that mount this
+        source. Shell defaults stay unchanged. Open a WSL terminal first and
+        keep it open while using the project.
+      </p>
+      <label className="form-field">
+        Project directory{" "}
+        <input
+          aria-label="Linux project directory"
+          placeholder="/home/you/project"
+          value={source}
+          disabled={busy || status?.connected}
+          onChange={(event) => setSource(event.target.value)}
+        />
+      </label>
+      <div className="action-row">
+        <button
+          className="button"
+          disabled={busy || !isTauri()}
+          onClick={() => void act("inspect")}
+        >
+          Refresh connection
+        </button>
+        <button
+          className="button"
+          disabled={busy || !source || !isTauri()}
+          onClick={() => void act("connect")}
+        >
+          {status?.connected ? "Verify connection" : "Connect project"}
+        </button>
+        <button
+          className="button"
+          disabled={busy || !status?.export || !isTauri()}
+          onClick={() => void act("disconnect")}
+        >
+          Disconnect project
+        </button>
+      </div>
+      <p role="status">
+        {busy
+          ? "Checking the selected distribution…"
+          : status
+            ? status.connected
+              ? "Project export connected."
+              : "Project export disconnected."
+            : "Refresh to check a previously selected project."}
+      </p>
+      {error && (
+        <p role="alert" className="notice">
+          {error}
+        </p>
+      )}
+      {status?.export && (
+        <>
+          <p>
+            Use this shared source for bind mounts, including Compose. A native
+            /home path belongs to this distribution and is not the engine's
+            path.
+          </p>
+          <CommandLine command={status.export.sharedSource} />
+        </>
+      )}
+      {status?.dockerCommand && (
+        <>
+          <p>
+            Docker command for this distribution (append info, run, compose or
+            buildx). This targets OrbWin explicitly.
+          </p>
+          <CommandLine command={status.dockerCommand} />
+        </>
+      )}
+      <small>
+        WSL may remove project exports when the distribution exits. Keep a shell
+        open while using this project, and reconnect if the export is gone.
+        Disconnect unmounts the export without deleting project files. Closing
+        OrbWin leaves the engine and project export running.
+      </small>
+    </section>
   );
 }

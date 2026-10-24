@@ -35,13 +35,19 @@ func writeFull(writer io.Writer, data []byte) error {
 }
 
 type message struct {
-	Kind      string `json:"kind"`
-	Container string `json:"container,omitempty"`
-	DaemonID  string `json:"daemonId,omitempty"`
-	Shell     string `json:"shell,omitempty"`
-	Cols      uint   `json:"cols,omitempty"`
-	Rows      uint   `json:"rows,omitempty"`
-	Data      []byte `json:"data,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	Pod           string `json:"pod,omitempty"`
+	PodUID        string `json:"podUid,omitempty"`
+	ContainerName string `json:"containerName,omitempty"`
+	Kubeconfig    string `json:"kubeconfig,omitempty"`
+	Kind          string `json:"kind"`
+	Container     string `json:"container,omitempty"`
+	DaemonID      string `json:"daemonId,omitempty"`
+	Shell         string `json:"shell,omitempty"`
+	Cols          uint   `json:"cols,omitempty"`
+	Rows          uint   `json:"rows,omitempty"`
+	Data          []byte `json:"data,omitempty"`
 }
 
 func decode(line []byte) (message, error) {
@@ -63,6 +69,12 @@ func dimensions(cols, rows uint) error {
 	return nil
 }
 func validateOpen(msg message) error {
+	if msg.Mode == "kubernetes" {
+		return validatePodOpen(msg)
+	}
+	if msg.Mode != "" {
+		return errors.New("unsupported terminal mode")
+	}
 	if msg.Kind != "open" || msg.DaemonID == "" || len(msg.Container) != 64 {
 		return errors.New("open requires the recorded engine and full container ID")
 	}
@@ -89,6 +101,9 @@ func run(input io.Reader, output io.Writer) (int, error) {
 	}
 	if err = validateOpen(msg); err != nil {
 		return 125, err
+	}
+	if msg.Mode == "kubernetes" {
+		return runKubernetes(msg, scanner, output)
 	}
 	// Deliberately do not use FromEnv: host/context/TLS variables cannot redirect us.
 	cli, err := client.New(client.WithHost(endpoint), client.WithAPIVersionNegotiation())

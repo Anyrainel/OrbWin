@@ -31,7 +31,8 @@ const previous = resume
   ? JSON.parse(readFileSync(resolve(home, "evidence.json")))
   : null;
 const upgrade = process.argv.includes("--upgrade");
-if (upgrade && !resume) throw new Error("Upgrade requires an explicitly selected recorded guest.");
+if (upgrade && !resume)
+  throw new Error("Upgrade requires an explicitly selected recorded guest.");
 if (
   previous &&
   (previous.home !== home ||
@@ -40,8 +41,15 @@ if (
   throw new Error(
     "Resume record is foreign or stale; preserve it for inspection.",
   );
-if (upgrade && (!previous.passed || !previous.daemonId || previous.manifest.sourceCommit !== manifest.sourceCommit))
-  throw new Error("Upgrade requires a successful owned guest proof at the same upstream pin. Preserve failed/foreign records for inspection.");
+if (
+  upgrade &&
+  (!previous.passed ||
+    !previous.daemonId ||
+    previous.manifest.sourceCommit !== manifest.sourceCommit)
+)
+  throw new Error(
+    "Upgrade requires a successful owned guest proof at the same upstream pin. Preserve failed/foreign records for inspection.",
+  );
 if (!manifest.distroEmbedded)
   throw new Error("Build the verified guest bundle first.");
 const decode = (bytes) =>
@@ -103,8 +111,14 @@ if (resume)
     resolve(home, "evidence.json"),
     resolve(home, `evidence-before-${runId}.json`),
   );
-if (upgrade && existsSync(resolve(root, "artifacts/qualification/runtime-identity.json")))
-  copyFileSync(resolve(root, "artifacts/qualification/runtime-identity.json"), resolve(home, `runtime-identity-before-upgrade-${runId}.json`));
+if (
+  upgrade &&
+  existsSync(resolve(root, "artifacts/qualification/runtime-identity.json"))
+)
+  copyFileSync(
+    resolve(root, "artifacts/qualification/runtime-identity.json"),
+    resolve(home, `runtime-identity-before-upgrade-${runId}.json`),
+  );
 const env = {
   ...process.env,
   USERPROFILE: home,
@@ -193,6 +207,10 @@ let failure;
 try {
   if (!ownsRegistration())
     throw new Error("Guest ownership differs from the selected proof home.");
+  // Starting an already-running service can retain the previous executable's
+  // mapped image after its on-disk binary was rebuilt. An explicit upgrade
+  // must load the selected build before publishing its new identity.
+  if (upgrade) rdd(["service", "stop", "--timeout=60s"], 70);
   if (!resume) rdd(["service", "create", "--controllers=*,-path-management"]);
   started = true;
   rdd(

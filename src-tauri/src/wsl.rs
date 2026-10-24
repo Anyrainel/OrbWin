@@ -9,13 +9,13 @@
 use crate::process;
 use std::path::PathBuf;
 
-fn wsl_binary() -> PathBuf {
+pub(crate) fn wsl_binary() -> PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
     PathBuf::from(root).join("System32/wsl.exe")
 }
 
 /// Names from `--list --quiet`: one per line, possibly with NUL/BOM/CR residue.
-fn registered(output: &str) -> Vec<String> {
+pub(crate) fn registered(output: &str) -> Vec<String> {
     output
         .replace(['\u{feff}', '\0', '\r'], "")
         .lines()
@@ -33,7 +33,7 @@ fn protected(name: &str) -> bool {
         || lower.starts_with("docker-desktop")
 }
 
-fn validate(name: &str, names: &[String]) -> Result<(), String> {
+pub(crate) fn validate(name: &str, names: &[String]) -> Result<(), String> {
     if name.is_empty()
         || name.len() > 128
         || name.starts_with('-')

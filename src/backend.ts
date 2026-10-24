@@ -45,6 +45,7 @@ export type Operation =
       action: "list" | "inspect" | "logs";
       reference: string;
     }
+  | { kind: "clusterLogs"; namespace: string; name: string; follow: boolean }
   | {
       kind: "clusterForward";
       resource: ClusterResource;

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod client_job;
 mod engine;
 mod installation;
 mod mounts;
@@ -9,6 +10,7 @@ mod runtime;
 #[path = "session.rs"]
 mod terminal;
 mod wsl;
+mod wsl_integration;
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -50,6 +52,18 @@ async fn terminal_open(
     output: tauri::ipc::Channel<terminal::Event>,
 ) -> Result<(), String> {
     terminal::open(&state, id, container, shell, cols, rows, output).await
+}
+#[tauri::command]
+async fn terminal_open_pod(
+    state: tauri::State<'_, terminal::Sessions>,
+    id: String,
+    pod: terminal::PodTarget,
+    shell: terminal::Shell,
+    cols: u16,
+    rows: u16,
+    output: tauri::ipc::Channel<terminal::Event>,
+) -> Result<(), String> {
+    terminal::open_pod(&state, id, pod, shell, cols, rows, output).await
 }
 #[tauri::command]
 async fn terminal_input(
@@ -187,6 +201,7 @@ fn main() {
             engine_run,
             engine_cancel,
             terminal_open,
+            terminal_open_pod,
             terminal_input,
             terminal_close,
             terminal_ack,
@@ -195,7 +210,8 @@ fn main() {
             export_text,
             export_support,
             host_diagnostics,
-            wsl::wsl_open_terminal
+            wsl::wsl_open_terminal,
+            wsl_integration::wsl_project
         ])
         .run(tauri::generate_context!())
         .expect("OrbWin desktop initialization failed");

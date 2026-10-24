@@ -20,6 +20,7 @@
     "qualify:workloads": "node scripts/qualify-workloads.mjs",
     "qualify:mounts": "node scripts/qualify-mounts.mjs",
     "qualify:history": "node scripts/qualify-history.mjs",
+    "qualify:pod-terminal": "node scripts/qualify-pod-terminal.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

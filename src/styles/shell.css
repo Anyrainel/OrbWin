@@ -631,6 +631,33 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+.port-forwards {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: min(560px, calc(100vw - 32px));
+  max-height: 40vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 4px 24px #0003;
+  font-size: 12px;
+}
+.port-forwards summary {
+  cursor: pointer;
+}
+.port-forwards > details > div {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.port-forwards a {
+  display: inline-block;
+  margin: 0 8px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spin,
   .status-dot.working {

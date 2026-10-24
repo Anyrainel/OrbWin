@@ -44,6 +44,11 @@ pub enum Request {
         action: BuildHistoryAction,
         reference: String,
     },
+    ClusterLogs {
+        namespace: String,
+        name: String,
+        follow: bool,
+    },
     ClusterForward {
         resource: ClusterResource,
         namespace: String,
@@ -267,6 +272,7 @@ impl Request {
         matches!(
             self,
             Self::Cluster { .. }
+                | Self::ClusterLogs { .. }
                 | Self::ClusterApply { .. }
                 | Self::ClusterDelete { .. }
                 | Self::ClusterWait { .. }
@@ -318,6 +324,32 @@ impl Request {
             Self::Setup => {
                 seconds = 1800;
                 vec![]
+            }
+            Self::ClusterLogs {
+                namespace,
+                name: object,
+                follow,
+            } => {
+                name(namespace)?;
+                name(object)?;
+                mutation = false;
+                seconds = if *follow { 3600 } else { 60 };
+                let mut args = vec![
+                    "kubectl".into(),
+                    "--namespace".into(),
+                    namespace.clone(),
+                    "--request-timeout=0".into(),
+                    "logs".into(),
+                    object.clone(),
+                    "--all-containers=true".into(),
+                    "--prefix=true".into(),
+                    "--tail=500".into(),
+                    "--timestamps=true".into(),
+                ];
+                if *follow {
+                    args.push("--follow=true".into());
+                }
+                args
             }
             Self::ClusterForward {
                 resource,
@@ -966,12 +998,16 @@ pub async fn run(
         .kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    let client_result = client(
+    let client_result = run_client(
         command,
         plan.input.as_deref(),
         &output,
         &mut cancelled,
         plan.seconds,
+        !matches!(
+            request,
+            Request::Engine { .. } | Request::ConfigureCluster { .. }
+        ),
     )
     .await?;
     let ClientResult {
@@ -1018,11 +1054,22 @@ pub(crate) struct ClientResult {
 // One bounded runner for normal operations and first-run CLI requests. It owns
 // only child clients. rdd/Moby retain lifecycle and persistence authority.
 pub(crate) async fn client(
+    command: Command,
+    input: Option<&[u8]>,
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+    seconds: u64,
+) -> Result<ClientResult, String> {
+    run_client(command, input, output, cancelled, seconds, false).await
+}
+
+async fn run_client(
     mut command: Command,
     input: Option<&[u8]>,
     output: &Channel<Output>,
     cancelled: &mut oneshot::Receiver<()>,
     seconds: u64,
+    _contain_tree: bool,
 ) -> Result<ClientResult, String> {
     command
         .stdin(if input.is_some() {
@@ -1038,6 +1085,21 @@ pub(crate) async fn client(
     let mut child = command
         .spawn()
         .map_err(|e| format!("Could not start engine client: {e}"))?;
+    #[cfg(windows)]
+    let _job = if _contain_tree {
+        match crate::client_job::ClientJob::attach(
+            child.raw_handle().ok_or("Missing client process handle")?,
+        ) {
+            Ok(job) => Some(job),
+            Err(error) => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(error);
+            }
+        }
+    } else {
+        None
+    };
     let stdin = child.stdin.take();
     let mut input_done = input.is_none();
     let write_input = async move {

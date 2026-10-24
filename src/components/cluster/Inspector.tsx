@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, Plug, RefreshCw } from "lucide-react";
 import * as backend from "../../backend";
+import { Terminal as InteractiveTerminal } from "../Terminal";
 import { ClusterRemoval, ClusterWait, useOperation } from "../Operations";
 import { copyText, kubectl, listObjects, useRead } from "./api";
 import {
@@ -88,7 +89,7 @@ export function ForwardButton({
             },
           ],
           description:
-            "Opens a localhost-only forward while this dialog stays open. Cancelling the command closes the forward without stopping the workload.",
+            "Opens a localhost-only forward in the Port forwards panel. It stays connected while navigating. Stop it from that panel without stopping the workload.",
         })
       }
     >
@@ -133,7 +134,10 @@ function Info({ kind, object }: { kind: ClusterKind; object: K8sObject }) {
     <Row label="Age">
       {ageOf(metadata.creationTimestamp)}
       {metadata.creationTimestamp && (
-        <small> · {new Date(metadata.creationTimestamp).toLocaleString()}</small>
+        <small>
+          {" "}
+          · {new Date(metadata.creationTimestamp).toLocaleString()}
+        </small>
       )}
     </Row>
   );
@@ -190,7 +194,9 @@ function Info({ kind, object }: { kind: ClusterKind; object: K8sObject }) {
                       <small>
                         {" "}
                         · {status.ready ? "ready" : "not ready"}
-                        {status.restartCount ? ` · ${status.restartCount} restarts` : ""}
+                        {status.restartCount
+                          ? ` · ${status.restartCount} restarts`
+                          : ""}
                       </small>
                     )}
                   </span>
@@ -277,12 +283,48 @@ function Failure({ message, retry }: { message: string; retry: () => void }) {
 
 function Logs({ object }: { object: K8sObject }) {
   const { name, namespace } = object.metadata;
-  const log = useRead(
-    (signal) =>
-      kubectl({ kind: "cluster", resource: "pods", action: "logs", namespace, name }, signal),
-    object.metadata.uid,
-    true,
-  );
+  const [follow, setFollow] = useState(true);
+  const [nonce, setNonce] = useState(0);
+  const [log, setLog] = useState({ text: "", status: "loading", error: "" });
+  const reader = useRef<AbortController | null>(null);
+  const pinned = useRef(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    reader.current = controller;
+    setLog({ text: "", status: "loading", error: "" });
+    pinned.current = true;
+    void backend
+      .run(
+        crypto.randomUUID(),
+        { kind: "clusterLogs", namespace, name, follow },
+        (chunk) => {
+          if (!controller.signal.aborted)
+            setLog((previous) => ({
+              ...previous,
+              text: (previous.text + chunk).slice(-131072),
+            }));
+        },
+        controller.signal,
+      )
+      .then((outcome) => {
+        if (!controller.signal.aborted)
+          setLog((previous) => ({
+            ...previous,
+            status: outcome.success ? "done" : "error",
+            error: outcome.success ? "" : outcome.message,
+          }));
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted)
+          setLog((previous) => ({
+            ...previous,
+            status: "error",
+            error: String(error),
+          }));
+      });
+    return () => controller.abort();
+  }, [object.metadata.uid, namespace, name, follow, nonce]);
+  const reload = () => setNonce((value) => value + 1);
   const [filter, setFilter] = useState("");
   const [wrap, setWrap] = useState(false);
   const [note, setNote] = useState("");
@@ -298,7 +340,7 @@ function Logs({ object }: { object: K8sObject }) {
   }, [log.text, filter]);
   useEffect(() => {
     const element = box.current;
-    if (element) element.scrollTop = element.scrollHeight;
+    if (element && pinned.current) element.scrollTop = element.scrollHeight;
   }, [shown]);
   return (
     <div className="k8s-pane">
@@ -319,13 +361,28 @@ function Logs({ object }: { object: K8sObject }) {
           />{" "}
           Wrap
         </label>
-        <button
-          className="button"
-          disabled={log.status === "loading"}
-          onClick={log.reload}
-        >
+        <button className="button" onClick={reload}>
           <RefreshCw size={13} /> Refresh
         </button>
+        {log.status === "loading" && (
+          <button
+            className="button"
+            onClick={() => {
+              reader.current?.abort();
+              setLog((previous) => ({ ...previous, status: "paused" }));
+            }}
+          >
+            Pause read
+          </button>
+        )}
+        <label>
+          <input
+            type="checkbox"
+            checked={follow}
+            onChange={(event) => setFollow(event.target.checked)}
+          />{" "}
+          Follow
+        </label>
         <button
           className="button"
           disabled={!log.text}
@@ -354,21 +411,25 @@ function Logs({ object }: { object: K8sObject }) {
         </span>
       </div>
       <small>
-        Last 500 lines of every container, with timestamps. Live follow is not
-        available; refresh to read newer lines.
+        Last 500 lines per container, with source and timestamps. The view
+        retains the latest 128 KiB. Follow ends after one hour or the native
+        output limit; refresh to reconnect. Scroll up to read without jumping to
+        new output.
       </small>
       {log.status === "loading" && (
         <>
-          <Loading what="logs" />
-          <button className="button" onClick={log.cancel}>
-            Cancel read
-          </button>
+          <p role="status">
+            {follow ? "Following pod output…" : "Reading logs…"}
+          </p>
         </>
       )}
-      {log.status === "error" && (
-        <Failure message={log.error} retry={log.reload} />
+      {log.status === "paused" && (
+        <p role="status">
+          Read paused. Retained output is available below; refresh to reconnect.
+        </p>
       )}
-      {log.status === "done" &&
+      {log.status === "error" && <Failure message={log.error} retry={reload} />}
+      {(log.text !== "" || log.status === "done") &&
         (log.text.trim() === "" ? (
           <p className="k8s-state">The pod has not written any log output.</p>
         ) : shown === "" ? (
@@ -378,6 +439,14 @@ function Logs({ object }: { object: K8sObject }) {
             ref={box}
             tabIndex={0}
             aria-label="Pod logs"
+            onScroll={(event) => {
+              const element = event.currentTarget;
+              pinned.current =
+                element.scrollHeight -
+                  element.scrollTop -
+                  element.clientHeight <
+                40;
+            }}
             className={`command-output k8s-log ${wrap ? "wrap" : ""}`}
           >
             {shown}
@@ -388,74 +457,41 @@ function Logs({ object }: { object: K8sObject }) {
 }
 
 function Terminal({ object }: { object: K8sObject }) {
-  const { name, namespace } = object.metadata;
-  const [command, setCommand] = useState("");
-  const [output, setOutput] = useState("");
-  const [result, setResult] = useState("");
-  const [pending, setPending] = useState(false);
-  const controller = useRef<AbortController | null>(null);
-  useEffect(() => () => controller.current?.abort(), []);
-  async function run() {
-    const parts = command.split(/\r?\n/).filter((line) => line !== "");
-    if (!parts.length) {
-      setResult("Enter an executable first.");
-      return;
-    }
-    const abort = new AbortController();
-    controller.current = abort;
-    setPending(true);
-    setOutput("");
-    setResult("");
-    try {
-      const outcome = await backend.run(
-        crypto.randomUUID(),
-        { kind: "clusterExec", namespace, name, command: parts },
-        (chunk) => setOutput((previous) => (previous + chunk).slice(-131072)),
-        abort.signal,
-      );
-      setResult(outcome.message);
-    } catch (error) {
-      setResult(String(error));
-    } finally {
-      setPending(false);
-    }
-  }
+  const containers = (object.spec?.containers ?? []) as { name: string }[];
+  const [selected, setSelected] = useState(containers[0]?.name ?? "");
+  const container = containers.some((item) => item.name === selected)
+    ? selected
+    : (containers[0]?.name ?? "");
+  if (!container)
+    return (
+      <p className="notice">
+        The selected pod has no regular container to open.
+      </p>
+    );
   return (
     <div className="k8s-pane">
-      <p className="notice">
-        An interactive shell in a pod is not available yet (it needs an
-        attach/TTY adapter). You can run one non-interactive command in the
-        pod's default container; output appears below when it finishes
-        streaming. Cancelling closes the client; a process may keep running
-        inside the pod.
-      </p>
-      <label className="form-field">
-        Executable, then one argument per line
-        <textarea
-          value={command}
-          disabled={pending}
-          placeholder={"ls\n-la\n/"}
-          onChange={(e) => setCommand(e.target.value)}
-        />
+      <label>
+        Container{" "}
+        <select
+          aria-label="Pod container"
+          value={container}
+          onChange={(event) => setSelected(event.target.value)}
+        >
+          {containers.map((item) => (
+            <option key={item.name}>{item.name}</option>
+          ))}
+        </select>
       </label>
-      <div className="action-row">
-        <button className="button" disabled={pending} onClick={() => void run()}>
-          Run in {name}
-        </button>
-        {pending && (
-          <button className="button" onClick={() => controller.current?.abort()}>
-            Cancel command
-          </button>
-        )}
-      </div>
-      <p role="status" aria-live="polite">
-        {pending ? "Command running…" : result}
-      </p>
-      {output && (
-        <pre className="command-output" aria-label="Command output">
-          {output}
-        </pre>
-      )}
+      <InteractiveTerminal
+        key={object.metadata.uid + ":" + container}
+        target={object.metadata.uid}
+        pod={{
+          namespace: object.metadata.namespace,
+          name: object.metadata.name,
+          uid: object.metadata.uid,
+          container,
+        }}
+      />
     </div>
   );
 }
@@ -528,9 +564,11 @@ function Events({ object }: { object: K8sObject }) {
 }
 function stamp(event: K8sObject): number {
   const e = event as Json;
-  return Date.parse(
-    e.lastTimestamp ?? e.eventTime ?? e.metadata.creationTimestamp ?? "",
-  ) || 0;
+  return (
+    Date.parse(
+      e.lastTimestamp ?? e.eventTime ?? e.metadata.creationTimestamp ?? "",
+    ) || 0
+  );
 }
 
 function Yaml({ object }: { object: K8sObject }) {
@@ -557,7 +595,11 @@ function Yaml({ object }: { object: K8sObject }) {
         Rendered from the object returned by the last cluster read; refresh the
         list to update it.
       </small>
-      <pre tabIndex={0} aria-label="Resource YAML" className="command-output k8s-yaml">
+      <pre
+        tabIndex={0}
+        aria-label="Resource YAML"
+        className="command-output k8s-yaml"
+      >
         {text}
       </pre>
     </div>

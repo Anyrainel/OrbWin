@@ -48,6 +48,10 @@ impl Target {
                     include_bytes!("../../backend-tools/session/go.mod").as_slice(),
                 ),
                 (
+                    "kube.go",
+                    include_bytes!("../../backend-tools/session/kube.go").as_slice(),
+                ),
+                (
                     "go.sum",
                     include_bytes!("../../backend-tools/session/go.sum").as_slice(),
                 ),

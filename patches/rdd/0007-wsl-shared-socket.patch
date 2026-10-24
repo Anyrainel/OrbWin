@@ -1,0 +1,37 @@
+diff --git a/rdd/pkg/controllers/app/app/lima-template.yaml b/rdd/pkg/controllers/app/app/lima-template.yaml
+index 8fcc21730..dfa94a7e5 100644
+--- a/rdd/pkg/controllers/app/app/lima-template.yaml
++++ b/rdd/pkg/controllers/app/app/lima-template.yaml
+@@ -37,6 +37,32 @@ portForwards:
+   - 0
+   hostSocket: "{{.Param.HOST_CONTAINERD_SOCKET}}"
+ provision:
++# Add a product-specific Unix listener to the existing dockerd. A bind mount of
++# /run/docker.sock is insufficient: WSL can unmount shared bind exports when a
++# client distribution exits. Docker retains endpoint/lifecycle ownership.
++- mode: system
++  script: |
++    #!/bin/bash
++    set -o errexit -o nounset -o pipefail
++    case "$PARAM_HOST_DOCKER_SOCKET" in
++      *docker-rancher-desktop-orbwin-proof) SHARE=/mnt/wsl/orbwin-proof ;;
++      *docker-rancher-desktop-orbwin) SHARE=/mnt/wsl/orbwin ;;
++      *) exit 0 ;;
++    esac
++    mkdir -p /etc/systemd/system/docker.service.d
++    rm -f /etc/systemd/system/docker.socket.d/orbwin-wsl.conf
++    if [[ -f /etc/systemd/system/orbwin-wsl-socket.service ]]; then
++        systemctl stop orbwin-wsl-socket.service
++        rm -f /etc/systemd/system/orbwin-wsl-socket.service
++    fi
++    cat > /etc/systemd/system/docker.service.d/orbwin-wsl.conf <<EOF
++    [Service]
++    ExecStartPre=/usr/bin/mkdir -p $SHARE
++    ExecStart=
++    ExecStart=/usr/local/bin/wsl-exec /usr/bin/dockerd --add-runtime oci=/usr/sbin/runc \$DOCKER_OPTS --host unix:///var/run/docker.sock --host unix://$SHARE/docker.sock
++    ExecStartPost=/usr/bin/chmod a+rw $SHARE/docker.sock
++    EOF
++    systemctl daemon-reload
+ # Write runtime parameters as a systemd EnvironmentFile. Using mode:data lets
+ # Lima's Go template engine handle quoting via printf "%q", which produces
+ # double-quoted strings compatible with systemd's EnvironmentFile parser.

@@ -64,7 +64,7 @@ export function ClusterAccess({
                 { key: "remote", label: "Remote port" },
               ],
               description:
-                "Opens a localhost-only forward while this client remains connected. Cancel command closes the forward without stopping the workload.",
+                "Opens a localhost-only forward in the Port forwards panel. It stays connected while navigating. Stop it from that panel without stopping the workload.",
             })
           }
         >
@@ -286,6 +286,23 @@ export function OperationProvider({
   onMutation: () => Promise<void>;
 }) {
   const [spec, setSpec] = useState<Spec | null>(null);
+  const forwards = useRef(new Map<string, AbortController>());
+  const [forwardViews, setForwardViews] = useState<
+    {
+      id: string;
+      label: string;
+      output: string;
+      active: boolean;
+      stopping: boolean;
+      message: string;
+    }[]
+  >([]);
+  useEffect(
+    () => () => {
+      for (const abort of forwards.current.values()) abort.abort();
+    },
+    [],
+  );
   const [values, setValues] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [output, setOutput] = useState("");
@@ -343,6 +360,58 @@ export function OperationProvider({
                 : raw.split(/\r?\n/)
               : raw.trim(),
         };
+      }
+      if (request.kind === "clusterForward") {
+        if (forwards.current.size >= 2)
+          throw new Error(
+            "Two forwards are already running. Stop one before opening another.",
+          );
+        const id = crypto.randomUUID();
+        const abort = new AbortController();
+        forwards.current.set(id, abort);
+        const label = `${request.namespace}/${request.name}:${request.remote}`;
+        setForwardViews((previous) => [
+          ...previous.filter((item) => item.active),
+          ...previous.filter((item) => !item.active).slice(-6),
+          {
+            id,
+            label,
+            output: "",
+            active: true,
+            stopping: false,
+            message: "Connecting…",
+          },
+        ]);
+        const update = (change: Partial<(typeof forwardViews)[number]>) =>
+          setForwardViews((previous) =>
+            previous.map((item) =>
+              item.id === id ? { ...item, ...change } : item,
+            ),
+          );
+        void backend
+          .run(
+            id,
+            request,
+            (chunk) =>
+              setForwardViews((previous) =>
+                previous.map((item) =>
+                  item.id === id
+                    ? { ...item, output: (item.output + chunk).slice(-16384) }
+                    : item,
+                ),
+              ),
+            abort.signal,
+          )
+          .then((outcome) => update({ message: outcome.message }))
+          .catch((error) => update({ message: String(error) }))
+          .finally(() => {
+            forwards.current.delete(id);
+            update({ active: false });
+          });
+        mutation = false;
+        dialog.current?.close();
+        setSpec(null);
+        return;
       }
       active.current = true;
       setPending(true);
@@ -415,6 +484,74 @@ export function OperationProvider({
   return (
     <Context.Provider value={open}>
       {children}
+      {forwardViews.length > 0 && (
+        <aside className="port-forwards" aria-label="Port forwards">
+          <details open>
+            <summary>
+              Port forwards ({forwardViews.filter((item) => item.active).length}{" "}
+              active)
+            </summary>
+            <p>
+              Localhost only. Forwards stay connected while navigating, for up
+              to one hour. Closing OrbWin disconnects these clients.
+            </p>
+            {forwardViews.map((item) => (
+              <div key={item.id}>
+                <strong>{item.label}</strong>{" "}
+                {item.active &&
+                  !item.stopping &&
+                  forwardUrls(item.output).map((port) => (
+                    <a
+                      key={port.local}
+                      href={`http://127.0.0.1:${port.local}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      127.0.0.1:{port.local} → {port.remote}
+                    </a>
+                  ))}
+                <span role="status">
+                  {" "}
+                  {item.stopping && item.active
+                    ? "Disconnecting…"
+                    : item.active
+                      ? forwardUrls(item.output).length
+                        ? "Connected"
+                        : "Connecting…"
+                      : item.message}
+                </span>{" "}
+                <button
+                  className="button"
+                  disabled={item.active && item.stopping}
+                  onClick={() => {
+                    if (item.active) {
+                      setForwardViews((previous) =>
+                        previous.map((entry) =>
+                          entry.id === item.id
+                            ? { ...entry, stopping: true }
+                            : entry,
+                        ),
+                      );
+                      forwards.current.get(item.id)?.abort();
+                    } else
+                      setForwardViews((previous) =>
+                        previous.filter((entry) => entry.id !== item.id),
+                      );
+                  }}
+                >
+                  {item.active ? "Stop forward" : "Dismiss"}
+                </button>
+                <details>
+                  <summary>Connection output</summary>
+                  <pre className="command-output">
+                    {item.output || item.message}
+                  </pre>
+                </details>
+              </div>
+            ))}
+          </details>
+        </aside>
+      )}
       {spec && (
         <dialog
           ref={dialog}
@@ -497,22 +634,6 @@ export function OperationProvider({
                 {output}
               </pre>
             )}
-            {spec.request.kind === "clusterForward" &&
-              pending &&
-              forwardUrls(output).map((forward) => (
-                <p key={`${forward.local}:${forward.remote}`}>
-                  Forward active:{" "}
-                  <a
-                    href={`http://127.0.0.1:${forward.local}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    http://127.0.0.1:{forward.local}
-                  </a>{" "}
-                  → pod/service port {forward.remote}. The forward closes when
-                  this dialog is cancelled.
-                </p>
-              ))}
             <p role="status" aria-live="polite">
               {pending ? "Operation in progress…" : result}
             </p>

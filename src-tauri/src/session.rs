@@ -35,6 +35,8 @@ impl Drop for Sessions {
     }
 }
 struct Session {
+    #[cfg(windows)]
+    _job: crate::client_job::ClientJob,
     writer: Mutex<Option<ChildStdin>>,
     child: Mutex<Child>,
     outstanding: Mutex<usize>,
@@ -68,6 +70,19 @@ impl Session {
 pub enum Shell {
     Sh,
     Bash,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PodTarget {
+    namespace: String,
+    name: String,
+    uid: String,
+    #[serde(default)]
+    container: String,
+}
+enum ExecTarget {
+    Container(String),
+    Pod(PodTarget),
 }
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -108,9 +123,66 @@ pub async fn open(
     rows: u16,
     output: Channel<Event>,
 ) -> Result<(), String> {
-    if !valid_id(&id) || container.len() != 64 || !container.bytes().all(|c| c.is_ascii_hexdigit())
-    {
-        return Err("Select a container with a full engine ID.".into());
+    open_request(
+        state,
+        id,
+        shell,
+        cols,
+        rows,
+        output,
+        ExecTarget::Container(container),
+    )
+    .await
+}
+pub async fn open_pod(
+    state: &Sessions,
+    id: String,
+    pod: PodTarget,
+    shell: Shell,
+    cols: u16,
+    rows: u16,
+    output: Channel<Event>,
+) -> Result<(), String> {
+    open_request(state, id, shell, cols, rows, output, ExecTarget::Pod(pod)).await
+}
+async fn open_request(
+    state: &Sessions,
+    id: String,
+    shell: Shell,
+    cols: u16,
+    rows: u16,
+    output: Channel<Event>,
+    request: ExecTarget,
+) -> Result<(), String> {
+    if !valid_id(&id) {
+        return Err("Invalid terminal session ID.".into());
+    }
+    match &request {
+        ExecTarget::Container(container)
+            if container.len() != 64 || !container.bytes().all(|c| c.is_ascii_hexdigit()) =>
+        {
+            return Err("Select a container with a full engine ID.".into())
+        }
+        ExecTarget::Pod(pod) => {
+            let name = |name: &str, max: usize| {
+                !name.is_empty()
+                    && name.len() <= max
+                    && name.as_bytes()[0].is_ascii_alphanumeric()
+                    && name
+                        .bytes()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || b"-.".contains(&c))
+            };
+            if !name(&pod.namespace, 63)
+                || !name(&pod.name, 253)
+                || pod.uid.is_empty()
+                || pod.uid.len() > 128
+                || pod.uid.chars().any(char::is_control)
+                || (!pod.container.is_empty() && !name(&pod.container, 63))
+            {
+                return Err("Select a current pod, namespace, UID and container.".into());
+            }
+        }
+        _ => {}
     }
     size(cols, rows)?;
     let inner = state.0.clone();
@@ -134,7 +206,27 @@ pub async fn open(
     let target = engine::target()?;
     engine::check(&target).await?;
     let binary = target.session().await?;
-    let initial = serde_json::json!({"kind":"open","container":container,"daemonId":target.daemon_id(),"shell":match shell { Shell::Sh => "sh", Shell::Bash => "bash" },"cols":cols,"rows":rows});
+    let mut initial = serde_json::json!({"kind":"open","daemonId":target.daemon_id(),"shell":match shell { Shell::Sh => "sh", Shell::Bash => "bash" },"cols":cols,"rows":rows});
+    match request {
+        ExecTarget::Container(container) => initial["container"] = serde_json::json!(container),
+        ExecTarget::Pod(pod) => {
+            target.rdd().await?;
+            let config = crate::runtime::cli_path(
+                &target
+                    .home()
+                    .join("AppData/Local/rancher-desktop-orbwin/k3s.yaml"),
+            )?;
+            if !config.is_file() {
+                return Err("The owned cluster has no kubeconfig yet. Enable Kubernetes and wait for readiness.".into());
+            }
+            initial["mode"] = serde_json::json!("kubernetes");
+            initial["namespace"] = serde_json::json!(pod.namespace);
+            initial["pod"] = serde_json::json!(pod.name);
+            initial["podUid"] = serde_json::json!(pod.uid);
+            initial["containerName"] = serde_json::json!(pod.container);
+            initial["kubeconfig"] = serde_json::json!(config);
+        }
+    }
     tokio::task::spawn_blocking(move || {
         let mut reservation = reservation;
         let mut slots = inner.slots.lock().map_err(|_| "Session registry is unavailable")?;
@@ -144,11 +236,19 @@ pub async fn open(
         #[cfg(windows)]
         { use std::os::windows::process::CommandExt; command.creation_flags(0x08000000); }
         let mut child = command.spawn().map_err(|e| e.to_string())?;
+        #[cfg(windows)]
+        let job = {
+            use std::os::windows::io::AsRawHandle;
+            match crate::client_job::ClientJob::attach(child.as_raw_handle()) {
+                Ok(job) => job,
+                Err(error) => { let _ = child.kill(); let _ = child.wait(); return Err(error); }
+            }
+        };
         let mut writer = child.stdin.take().ok_or("Missing terminal input")?;
         let mut reader = child.stdout.take().ok_or("Missing terminal output")?;
         let mut stderr = child.stderr.take().ok_or("Missing terminal diagnostics")?;
         if let Err(error) = serde_json::to_writer(&mut writer, &initial).map_err(|e| e.to_string()).and_then(|_| writer.write_all(b"\n").map_err(|e| e.to_string())) { let _ = child.kill(); let _ = child.wait(); return Err(error); }
-        let session = Arc::new(Session { writer: Mutex::new(Some(writer)), child: Mutex::new(child), outstanding: Mutex::new(0), credit: Condvar::new(), closed: AtomicBool::new(false), finished: AtomicBool::new(false) });
+        let session = Arc::new(Session { #[cfg(windows)] _job: job, writer: Mutex::new(Some(writer)), child: Mutex::new(child), outstanding: Mutex::new(0), credit: Condvar::new(), closed: AtomicBool::new(false), finished: AtomicBool::new(false) });
         slots.insert(id.clone(), Some(session.clone())); reservation.armed = false; drop(slots);
         let diagnostics = Arc::new(Mutex::new(Vec::<u8>::new())); let captured = diagnostics.clone();
         let ready_output = output.clone();

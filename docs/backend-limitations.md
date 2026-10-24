@@ -1,7 +1,62 @@
 # Backend limitations
 
-Updated 2026-10-22 Pacific. Entries distinguish source findings from observed
+Updated 2026-10-24 Pacific. Entries distinguish source findings from observed
 runtime proofs. Source-only findings do not establish runtime behavior.
+Initial findings below are retained for provenance. The dated implementation
+updates and `verification/phase-1-completion.md` supersede historical statements
+that a subsequently implemented flow is absent.
+
+## 2026-10-24 implementation updates
+
+- BL-003: pinned runtime clients are bundled; native first-run cancel/setup/resume
+  passed on a fresh sequential proof guest. Installed-product checks remain open.
+- BL-005: general Windows Docker CLI/Compose bind translation now passes C:/F:
+  directory/file, spaces/Unicode, read-only, host-visible writes, local bind
+  volumes and restart checks. UNC/device/relative paths fail explicitly.
+- BL-010: real interactive pod exec passed against the isolated workload cluster.
+  Followed logs and persistent forwards are implemented; native qualification is
+  still required before closing this entry.
+- BL-011: the WSL page now has explicit selected-project integration, scoped Linux
+  client guidance and disconnect. Native Ubuntu read/write/Compose/build/restart/
+  replaced-source/data-preservation proofs pass. Shared project paths require a
+  live user WSL session and reconnect after distribution exit. A direct owned
+  dockerd Unix listener survives that exit; a shared bind of its socket did not.
+  Transparent `/home` path mapping remains a documented later convenience.
+- BL-012: actual first-run and resource/disk/history reads now exist. Broader native
+  settings, apply/restart, conflict and installed qualification remain open.
+
+## BL-013 — Existing Docker Desktop cannot reach engine readiness
+
+- Flow: simultaneous-engine qualification on this host. Installed version 4.91.0,
+  Windows 26300.9711 and WSL 2.7.11.
+- Evidence: 2026-10-24 local startup logs first report inaccessible old AF_UNIX
+  IPC socket files, then the backend exits with a nil-pointer panic in
+  `services.(*Services).startDockerAPIProxy`. No Docker Desktop daemon responded
+  on its dedicated Linux-engine pipe. Rancher's separate daemon did respond.
+- Impact: required coexistence acceptance is still open; this is an observed
+  external startup failure, not proof of an OrbWin coexistence pass or defect.
+- Recovery attempted: retained only verified zero-length IPC directories under
+  timestamped sibling names and retried startup. No reset, disk deletion, secret
+  upload or global WSL shutdown occurred. Evidence stays in ignored artifacts.
+- Owner/target: Phase 1 qualification. Resolve the startup precondition or obtain
+  an appropriate supported test environment, then run maintained service workloads
+  in both OrbWin start orders. Do not silently waive the gate.
+
+## BL-014 — Published automatic port can redirect after an engine restart
+
+- Flow: Windows/other-engine published TCP service access, same pinned backend.
+- Reproducer: `ORBWIN_QUALIFY_OWNED=1 node scripts/qualify-coexistence.mjs --rancher`.
+  Real Redis workloads on OrbWin and Rancher initially answered distinct sentinel
+  values. Restarting only OrbWin preserved its daemon and data but reassigned its
+  automatic port to 32768, already used by Rancher. A Windows request read the
+  Rancher sentinel. See the `f46626a9` result in ignored coexistence artifacts.
+- Impact: Docker's running state does not establish host publication success;
+  exposed links can reach another engine. This invalidates Phase 1 acceptance.
+- Required adaptation: choose available Windows ports for automatic requests,
+  retain explicit bindings over restart, validate host publication, and return a
+  clear conflict rather than silently redirecting. Qualify explicit conflicts,
+  repeated/concurrent clients, both start orders and restart preservation.
+- Owner/target: OrbWin's narrow Windows Docker/network adapter, Phase 1.
 
 ## BL-001 — Shared Windows Docker endpoint
 
