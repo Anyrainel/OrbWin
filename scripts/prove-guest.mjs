@@ -30,14 +30,18 @@ const manifest = verifyBuild(root);
 const previous = resume
   ? JSON.parse(readFileSync(resolve(home, "evidence.json")))
   : null;
+const upgrade = process.argv.includes("--upgrade");
+if (upgrade && !resume) throw new Error("Upgrade requires an explicitly selected recorded guest.");
 if (
   previous &&
   (previous.home !== home ||
-    previous.manifest.binarySha256 !== manifest.binarySha256)
+    (previous.manifest.binarySha256 !== manifest.binarySha256 && !upgrade))
 )
   throw new Error(
     "Resume record is foreign or stale; preserve it for inspection.",
   );
+if (upgrade && (!previous.passed || !previous.daemonId || previous.manifest.sourceCommit !== manifest.sourceCommit))
+  throw new Error("Upgrade requires a successful owned guest proof at the same upstream pin. Preserve failed/foreign records for inspection.");
 if (!manifest.distroEmbedded)
   throw new Error("Build the verified guest bundle first.");
 const decode = (bytes) =>
@@ -99,6 +103,8 @@ if (resume)
     resolve(home, "evidence.json"),
     resolve(home, `evidence-before-${runId}.json`),
   );
+if (upgrade && existsSync(resolve(root, "artifacts/qualification/runtime-identity.json")))
+  copyFileSync(resolve(root, "artifacts/qualification/runtime-identity.json"), resolve(home, `runtime-identity-before-upgrade-${runId}.json`));
 const env = {
   ...process.env,
   USERPROFILE: home,
@@ -124,6 +130,7 @@ const evidence = {
   steps: [],
   passed: false,
   coexistenceQualified: false,
+  upgradeFrom: upgrade ? previous.manifest : undefined,
 };
 function run(binary, args, seconds = 30, input) {
   const start = performance.now();

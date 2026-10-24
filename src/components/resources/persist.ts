@@ -12,7 +12,21 @@ const key = (page: Page) => `orbwin.resources.${page}`;
 export function loadLayout(page: Page): Layout {
   try {
     const value = JSON.parse(localStorage.getItem(key(page)) ?? "{}");
-    return value && typeof value === "object" ? value : {};
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const result: Layout = {};
+    if (Array.isArray(value.collapsed))
+      result.collapsed = value.collapsed
+        .filter(
+          (item: unknown) => typeof item === "string" && item.length <= 256,
+        )
+        .slice(0, 512);
+    if (typeof value.width === "number" && Number.isFinite(value.width))
+      result.width = Math.max(240, Math.min(700, value.width));
+    if (value.sort === "status" || value.sort === "name")
+      result.sort = value.sort;
+    if (typeof value.selected === "string" && value.selected.length <= 256)
+      result.selected = value.selected;
+    return result;
   } catch {
     return {};
   }

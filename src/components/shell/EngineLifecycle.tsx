@@ -16,7 +16,7 @@ import { useToast } from "./Toasts";
 // rejects a second concurrent mutation, so this is not a second orchestrator.
 // Cancelling kills the CLI client, not the daemon: rdd may still converge on
 // the requested state, so every outcome is followed by a fresh status read.
-export type LifecycleAction = "start" | "stop" | "restart";
+export type LifecycleAction = "setup" | "start" | "stop" | "restart";
 export type LifecycleResult = {
   action: LifecycleAction;
   success: boolean;
@@ -30,6 +30,7 @@ type Lifecycle = {
   output: string;
   result: LifecycleResult | null;
   start: () => void;
+  setup: () => void;
   requestStop: () => void;
   requestRestart: () => void;
   cancel: () => void;
@@ -42,6 +43,7 @@ export function useEngineLifecycle() {
 }
 
 const labels: Record<LifecycleAction, string> = {
+  setup: "Set up",
   start: "Start",
   stop: "Stop",
   restart: "Restart",
@@ -84,7 +86,12 @@ export function EngineLifecycleProvider({
         : [
             {
               running: next === "start",
-              stage: next === "start" ? "Starting engine…" : "Stopping engine…",
+              stage:
+                next === "setup"
+                  ? "Setting up OrbWin…"
+                  : next === "start"
+                    ? "Starting engine…"
+                    : "Stopping engine…",
             },
           ];
     let outcome: LifecycleResult = {
@@ -99,7 +106,9 @@ export function EngineLifecycleProvider({
         setStage(step.stage);
         const reply = await backend.run(
           crypto.randomUUID(),
-          { kind: "engine", running: step.running },
+          next === "setup"
+            ? { kind: "setup" }
+            : { kind: "engine", running: step.running },
           (chunk) => setOutput((previous) => (previous + chunk).slice(-65536)),
           abort.signal,
         );
@@ -111,7 +120,7 @@ export function EngineLifecycleProvider({
         };
         if (!reply.success) break;
       }
-      if (abort.signal.aborted && outcome.success)
+      if (next === "restart" && abort.signal.aborted && outcome.success)
         outcome = {
           ...outcome,
           success: false,
@@ -135,11 +144,13 @@ export function EngineLifecycleProvider({
       }
       if (outcome.success)
         outcome.message =
-          next === "stop"
-            ? "Engine stopped. Persistent disks are retained."
-            : next === "start"
-              ? "Engine started and the owned endpoint was verified."
-              : "Engine restarted (stopped, then started) and the owned endpoint was verified.";
+          next === "setup"
+            ? "OrbWin setup completed and the owned engine identity was verified."
+            : next === "stop"
+              ? "Engine stopped. Persistent disks are retained."
+              : next === "start"
+                ? "Engine started and the owned endpoint was verified."
+                : "Engine restarted (stopped, then started) and the owned endpoint was verified.";
       setResult(outcome);
       notify(
         outcome.success ? "success" : outcome.cancelled ? "info" : "error",
@@ -161,6 +172,7 @@ export function EngineLifecycleProvider({
     output,
     result,
     start: () => void execute("start"),
+    setup: () => void execute("setup"),
     requestStop: () => {
       if (!active.current) setConfirm("stop");
     },

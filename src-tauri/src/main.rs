@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod engine;
+mod installation;
 mod mounts;
 mod operations;
 mod process;
+mod runtime;
 #[path = "session.rs"]
 mod terminal;
 mod wsl;
@@ -21,6 +23,10 @@ async fn backend_status() -> engine::Status {
 #[tauri::command]
 async fn engine_inventory() -> Result<engine::Inventory, String> {
     engine::inventory().await
+}
+#[tauri::command]
+async fn engine_disk_info() -> Result<engine::DiskInfo, String> {
+    engine::disk_info().await
 }
 
 #[tauri::command]
@@ -177,6 +183,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             backend_status,
             engine_inventory,
+            engine_disk_info,
             engine_run,
             engine_cancel,
             terminal_open,

@@ -8,6 +8,7 @@ import { useElapsed, useEngineLifecycle } from "../shell/EngineLifecycle";
 import type { ThemePreference } from "../shell/theme";
 import { applyState, condition, kubernetesState } from "./app-settings-model";
 import { StorageCleanup } from "./StorageCleanup";
+import { formatSize } from "./storage-model";
 import { currentSettings, type AppSettingsRead } from "./useAppSettings";
 
 export const settingsTabs = [
@@ -419,6 +420,14 @@ export function Settings({
             <dl className="properties">
               <Row term="Requested CPUs">{settings?.cpus ?? "Unknown"}</Row>
               <Row term="Requested memory">{settings?.memory ?? "Unknown"}</Row>
+              <Row term="CPUs visible to Docker">
+                {status?.resources?.cpus ?? "Unavailable"}
+              </Row>
+              <Row term="Memory visible to Docker">
+                {typeof status?.resources?.memoryBytes === "number"
+                  ? formatSize(status.resources.memoryBytes)
+                  : "Unavailable"}
+              </Row>
             </dl>
             <p className="notice">
               CPU and memory editing is unavailable until WSL resource scope is

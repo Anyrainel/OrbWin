@@ -1,0 +1,30 @@
+# Installation and first-run ownership
+
+Application binaries and tool manifests are bundled read-only resources. New
+runtime state defaults to `%LOCALAPPDATA%/OrbWin/home`, outside the application
+installation and source checkout. Uninstall retains this state. Reads never
+create/start a service. Setup is a single explicit, cancellable operation using
+the same operation registry as other mutations.
+
+Setup verifies bundled backend/client hashes and WSL availability, refuses a
+foreign existing `lima-orbwin` registration, and writes an ownership intent before
+calling the upstream service/App creation commands. rdd owns import, downloads,
+reconciliation and persistent disks. Cancellation terminates only its CLI client;
+the UI reports that backend work may continue and offers Resume. Setup never
+unregisters or deletes a partially provisioned guest as automatic rollback.
+
+An identity is published atomically only after current-start Lima readiness,
+registry BasePath ownership and an actual Linux Docker daemon response agree.
+Interrupted setup retains intent and logs; retries reuse the same owned home and
+upstream resources. The stored daemon ID must remain unchanged on later startup.
+The app never copies a writable engine disk or assumes Rancher data interchange.
+
+Docker, Compose, Buildx and Linux clients use the selected upstream's exact
+version/checksum pins. Client plugins are configured only in the private OrbWin
+Docker config, preserving other keys. Global PATH, Docker context, kubeconfig,
+WSL configuration and other engines are not changed.
+
+A named qualification-only instance may exercise clean provisioning using a
+separate registration/home/pipe. Because the product currently owns one network
+namespace, such a proof must reject a running product guest and cannot run in
+parallel with it. This is test infrastructure, not multi-instance product support.

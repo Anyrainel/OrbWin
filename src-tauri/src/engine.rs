@@ -32,9 +32,9 @@ impl Target {
     pub(crate) async fn session(&self) -> Result<PathBuf, String> {
         tokio::task::spawn_blocking(|| {
             use sha2::{Digest, Sha256};
-            let path = root().join("artifacts/backend/orbwin-session.exe");
+            let path = crate::runtime::backend_dir().join("orbwin-session.exe");
             let manifest: serde_json::Value = serde_json::from_slice(
-                &std::fs::read(root().join("artifacts/backend/session-manifest.json"))
+                &std::fs::read(crate::runtime::backend_dir().join("session-manifest.json"))
                     .map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
@@ -82,7 +82,7 @@ impl Target {
     }
     fn verified_rdd(&self) -> Result<PathBuf, String> {
         use sha2::{Digest, Sha256};
-        let path = root().join("artifacts/backend/rdd.exe");
+        let path = crate::runtime::backend_dir().join("rdd.exe");
         use std::io::Read;
         let mut file = std::fs::File::open(&path)
             .map_err(|e| format!("Cannot read owned backend binary: {e}"))?;
@@ -140,20 +140,16 @@ impl Target {
         Err("WSL lifecycle requires Windows.".into())
     }
 }
-fn root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
-}
 pub(crate) fn target() -> Result<Target, String> {
     let read = |path| {
         std::fs::read(path).map_err(|e| format!("Owned backend evidence is unavailable: {e}"))
     };
-    let identity: Identity = serde_json::from_slice(&read(
-        root().join("artifacts/qualification/runtime-identity.json"),
+    let identity: Identity = serde_json::from_slice(&read(crate::runtime::identity_path()?)?)
+        .map_err(|e| e.to_string())?;
+    let manifest: serde_json::Value = serde_json::from_slice(&read(
+        crate::runtime::backend_dir().join("build-manifest.json"),
     )?)
     .map_err(|e| e.to_string())?;
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&read(root().join("artifacts/backend/build-manifest.json"))?)
-            .map_err(|e| e.to_string())?;
     let lock: serde_json::Value = serde_json::from_str(include_str!("../../upstream.lock.json"))
         .map_err(|e| e.to_string())?;
     if !identity.identity_verified
@@ -166,19 +162,11 @@ pub(crate) fn target() -> Result<Target, String> {
         return Err("Owned backend identity is missing or differs from this build. Re-run the isolated proof.".into());
     }
     let home = identity.home.canonicalize().map_err(|e| e.to_string())?;
-    let artifacts = root()
-        .join("artifacts")
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
-    if !home.starts_with(artifacts) {
-        return Err("Development backend home is outside the owned artifact directory.".into());
-    }
-    let program_files =
-        std::env::var_os("ProgramFiles").unwrap_or_else(|| "C:\\Program Files".into());
+    crate::runtime::validate_home(&home)?;
     Ok(Target {
         config: home.join(".rdorbwin/docker"),
         identity,
-        docker: PathBuf::from(program_files).join("Docker/Docker/resources/bin/docker.exe"),
+        docker: crate::runtime::docker()?,
     })
 }
 
@@ -208,24 +196,65 @@ fn validate_info(info: &serde_json::Value, daemon_id: &str) -> Result<(), String
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Status {
     pub available: bool,
     pub endpoint: &'static str,
     pub message: String,
     pub version: Option<String>,
     pub diagnostic: Option<String>,
+    pub setup_available: bool,
+    pub resources: Option<serde_json::Value>,
 }
 pub async fn status() -> Status {
     let result = async {
         let target = target()?;
         let info = check(&target).await?;
-        Ok::<_, String>(info["ServerVersion"].as_str().map(str::to_string))
+        Ok::<_, String>((
+            info["ServerVersion"].as_str().map(str::to_string),
+            serde_json::json!({"cpus":info["NCPU"],"memoryBytes":info["MemTotal"]}),
+        ))
     }
     .await;
     match result {
-        Ok(version) => Status { available: true, endpoint: ENDPOINT, message: "Connected to the verified owned Linux engine. This development build has not yet passed simultaneous-engine qualification.".into(), version, diagnostic: None },
-        Err(detail) => Status { available: false, endpoint: ENDPOINT, message: if detail.contains("failed to connect") || detail.contains("error during connect") { "The owned OrbWin engine is offline. Refresh when it is running.".into() } else { "The owned development backend could not be verified. Open diagnostics for the next step.".into() }, version: None, diagnostic: Some(detail) },
+        Ok((version,resources)) => Status { available: true, endpoint: ENDPOINT, message: "Connected to the verified owned Linux engine. This development build has not yet passed simultaneous-engine qualification.".into(), version, diagnostic: None, setup_available:false, resources:Some(resources) },
+        Err(detail) => Status { available: false, endpoint: ENDPOINT, message: if detail.contains("failed to connect") || detail.contains("error during connect") { "The owned OrbWin engine is offline. Refresh when it is running.".into() } else { "The owned backend could not be verified. Open diagnostics for the next step.".into() }, version: None, diagnostic: Some(detail), setup_available:crate::installation::available(), resources:None },
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskInfo {
+    path: String,
+    file_length_bytes: u64,
+}
+pub async fn disk_info() -> Result<DiskInfo, String> {
+    let target = target()?;
+    tokio::task::spawn_blocking(move || {
+        target.verified_rdd()?;
+        let base = target
+            .home()
+            .join(".rdorbwin/lima/orbwin")
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
+        let path = base
+            .join("ext4.vhdx")
+            .canonicalize()
+            .map_err(|e| format!("The owned virtual disk could not be measured: {e}"))?;
+        if !path.starts_with(&base) {
+            return Err("The virtual disk path is outside the owned guest directory.".into());
+        }
+        let metadata = path.metadata().map_err(|e| e.to_string())?;
+        if !metadata.is_file() {
+            return Err("The owned virtual disk is not a regular file.".into());
+        }
+        Ok(DiskInfo {
+            path: path.display().to_string(),
+            file_length_bytes: metadata.len(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]

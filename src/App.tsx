@@ -11,9 +11,9 @@ import {
 import { ResourceList, Unavailable } from "./components/ResourceInventory";
 import { Cluster } from "./components/Cluster";
 import { Wsl } from "./components/Wsl";
+import { BuildHistory } from "./components/BuildHistory";
 import { isKubernetesContainer } from "./model/resources";
 import {
-  BuildControls,
   OperationProvider,
   ProjectControls,
   ResourceCreate,
@@ -542,9 +542,10 @@ function Shell({
                   <dd>{status?.version ?? "Unavailable"}</dd>
                 </dl>
                 <p className="notice">
-                  Simultaneous-engine coexistence remains unqualified. Native
-                  Windows bind paths require the explicit /mnt/ drive form
-                  (BL-005).
+                  Simultaneous-engine coexistence remains under qualification.
+                  Local Windows drive bind paths are translated by the owned
+                  backend; UNC/device paths require a separate supported sharing
+                  flow.
                 </p>
                 <h2>WSL host</h2>
                 <p>
@@ -569,7 +570,7 @@ function Shell({
                 ))}
               </>
             )}
-            {page === "builds" && <BuildControls disabled={!connected} />}
+            {page === "builds" && <BuildHistory connected={connected} />}
           </section>
         )}
       </main>

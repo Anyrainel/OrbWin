@@ -6,7 +6,9 @@ local adaptations are reproducible patches with original headers preserved.
 
 `rdd` owns guest and workload lifecycle. The UI observes and requests upstream
 operations; window closure must never stop the service. No UI-side supervisor,
-Docker protocol translation or engine storage access is introduced.
+engine storage access is introduced. The Windows Docker bridge now applies
+the narrow [Windows create-path adaptation](windows-docker-paths.md); other
+API payloads and streams pass through the standard Go HTTP proxy.
 
 ## Initial isolation contract
 
@@ -15,8 +17,9 @@ Docker protocol translation or engine storage access is introduced.
 - Windows Docker socket and advertised endpoint derive from the same instance
   function. Each instance gets `docker-rancher-desktop-<suffix>`; never listen on
   `docker_engine` or Docker Desktop's pipe. Unix paths retain upstream behavior.
-- The bridge constructor consumes that same function. No copying/proxying Docker
-  requests through an OrbWin service. Upstream owns stream semantics.
+- The bridge constructor consumes that same function. Docker requests do not
+  pass through the UI or a separate OrbWin service. Patch 0005 adapts the existing
+  bridge; upstream/Moby remain authoritative for workload state.
 - Launches set `DOCKER_CONFIG` and `KUBECONFIG` to OrbWin-owned files and disable
   the `path-management` controller. No global context, credential or PATH edits.
 - Endpoint availability is not identity proof. Isolated development workloads

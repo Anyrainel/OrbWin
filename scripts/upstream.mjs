@@ -48,12 +48,19 @@ const untracked = git(["ls-files", "--others", "--exclude-standard"])
   .split(/\r?\n/)
   .filter(Boolean);
 assertOwnedChanges([...changed, ...untracked], permitted);
-for (const patch of lock.patches) {
-  const path = resolve(root, patch);
-  try {
-    git(["apply", "--reverse", "--check", path], { stdio: "pipe" });
-    console.log(`Already applied: ${patch}`);
-  } catch {
+const sourceHash = (path) => existsSync(resolve(source, path))
+  ? createHash("sha256").update(readFileSync(resolve(source, path), "utf8").replace(/\r\n/g, "\n")).digest("hex")
+  : null;
+// Later patches can change the context of earlier ones. Reversing each patch
+// independently is not a valid test of an applied stack. Accept only the exact
+// final locked state or a clean pinned checkout; never guess through local drift.
+const complete = Object.entries(lock.patchedFiles).every(([path, hash]) => sourceHash(path) === hash);
+if (complete) {
+  console.log("Complete patch stack matches locked source hashes.");
+} else {
+  if (changed.length || untracked.length) throw new Error("Patched source drift or incomplete patch stack. Preserve changes; use a separate clean checkout to replay the lock.");
+  for (const patch of lock.patches) {
+    const path = resolve(root, patch);
     // --check must pass before any mutation; never reset developer changes.
     git(["apply", "--check", path]);
     git(["apply", path]);
@@ -62,9 +69,7 @@ for (const patch of lock.patches) {
 }
 git(["diff", "--check"]);
 for (const [path, expected] of Object.entries(lock.patchedFiles)) {
-  const actual = createHash("sha256")
-    .update(readFileSync(resolve(source, path), "utf8").replace(/\r\n/g, "\n"))
-    .digest("hex");
+  const actual = sourceHash(path);
   if (actual !== expected)
     throw new Error(
       `Patched source drift: ${path}. Preserve changes; reconcile the lock explicitly.`,

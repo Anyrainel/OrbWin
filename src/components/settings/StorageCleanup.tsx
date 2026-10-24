@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import * as backend from "../../backend";
+import { DiskUsage } from "./DiskUsage";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { useToast } from "../shell/Toasts";
 import {
@@ -172,6 +173,7 @@ export function StorageCleanup({
 
   return (
     <>
+      <DiskUsage disabled={disabled} revision={inventory} />
       <h2>Disk usage</h2>
       {inventory ? (
         <dl className="properties">
@@ -190,16 +192,10 @@ export function StorageCleanup({
           <dt>Volumes</dt>
           <dd>
             {inventory.volumes.length} volumes, {candidates.volumes.length}{" "}
-            unattached. Volume sizes are not read yet.
+            unattached. Measured aggregate usage is shown above.
           </dd>
           <dt>Networks</dt>
           <dd>{inventory.networks.length} networks</dd>
-          <dt>Virtual disk</dt>
-          <dd>
-            The size of the OrbWin guest disk on Windows is not measured yet.
-            Removing resources frees space inside the guest; the Windows virtual
-            disk file may not shrink.
-          </dd>
         </dl>
       ) : (
         <p className="notice">

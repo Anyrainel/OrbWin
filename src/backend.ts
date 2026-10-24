@@ -10,6 +10,8 @@ export type Inventory = {
 export type Resource = Record<string, unknown>;
 export type Diagnostic = { name: string; output: string; success: boolean };
 export type BackendStatus = {
+  setupAvailable?: boolean;
+  resources?: { cpus?: number; memoryBytes?: number };
   available: boolean;
   endpoint: string;
   message: string;
@@ -17,6 +19,16 @@ export type BackendStatus = {
   diagnostic?: string;
 };
 export const endpoint = dockerEndpoint;
+export async function diskInfo(): Promise<{
+  path: string;
+  fileLengthBytes: number;
+}> {
+  if (!isTauri())
+    throw new Error(
+      "Virtual disk measurements require the Windows desktop application.",
+    );
+  return invoke("engine_disk_info");
+}
 
 export type ResourceKind = "container" | "image" | "volume" | "network";
 export type ClusterResource =
@@ -26,6 +38,13 @@ export type ClusterResource =
   | "deployments"
   | "persistentVolumeClaims";
 export type Operation =
+  | { kind: "setup" }
+  | { kind: "diskUsage" }
+  | {
+      kind: "buildHistory";
+      action: "list" | "inspect" | "logs";
+      reference: string;
+    }
   | {
       kind: "clusterForward";
       resource: ClusterResource;
@@ -110,7 +129,7 @@ type Output =
 export async function run(
   id: string,
   request: Operation,
-  onOutput: (text: string) => void,
+  onOutput: (text: string, stream?: "stdout" | "stderr") => void,
   signal?: AbortSignal,
 ): Promise<Outcome> {
   if (!isTauri())
@@ -138,15 +157,16 @@ export async function run(
         decoders[event.stream].decode(new Uint8Array(event.bytes), {
           stream: true,
         }),
+        event.stream,
       );
   };
   try {
     return await invoke<Outcome>("engine_run", { id, request, output });
   } finally {
     signal?.removeEventListener("abort", cancel);
-    for (const decoder of Object.values(decoders)) {
+    for (const [stream, decoder] of Object.entries(decoders)) {
       const tail = decoder.decode();
-      if (tail) onOutput(tail);
+      if (tail) onOutput(tail, stream as "stdout" | "stderr");
     }
   }
 }

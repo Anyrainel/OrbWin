@@ -10,6 +10,8 @@ hashes detect unexpected drift. Preparation never resets developer work.
 | 0002 OrbWin WSL namespace | Shared vsock ports/signature, veth cleanup names and proxy address can collide | Paired source contracts, host tests and Linux cross-compilation pass; live guest test pending |
 | 0003 owned WSL distro | Lima derives global registration from VM name, not LIMA_HOME | App-controller tests pass; runtime registration test pending |
 | 0004 product environment guard | Dynamic help can autostart the default instance before user intent; global client paths must not leak through | Product identity validation before CLI construction, private client paths; tests/build verification required |
+| 0005 Windows Docker paths | Native CLI/Compose bind sources reach Linux Moby without drive translation | Existing bridge uses the standard HTTP reverse proxy with narrow create-body adaptation, owner/System pipe ACL and bounded create reads. Unit/HTTP/stream/upgrade/half-close/shutdown and race checks pass; clean five-patch replay verified. Runtime qualification in progress. |
+| 0006 sequential provisioning proof | Clean setup must be exercised without replacing the existing product guest/data | Reserves `orbwin-proof` guest only for the already-allowed proof instance. Normal identity remains `orbwin`. The same native setup path passes cancel/provision/resume with the product guest stopped; no simultaneous proof/product support is implied. |
 
 0002 currently assigns one product namespace, rather than supporting arbitrary
 parallel instances of OrbWin: discovery 16670, network data 16657, Docker 16660,

@@ -11,10 +11,16 @@ container execution and a Redis/PostgreSQL/Compose/Buildx baseline have passed.
 Typed resource operations, Buildx/Compose, interactive exec, Kubernetes workloads
 and Windows Node Testcontainers have also passed scoped runtime proofs.
 **Phase 1 is not complete.** Full native UI acceptance, simultaneous-engine
-qualification, Windows mounts, first-run/failure coverage and packaging remain open.
+qualification, user-WSL integration, first-run/failure coverage and packaging remain open.
 The [2026-10-24 readiness reassessment](docs/verification/phase-1-readiness-2026-10-24.md)
 records fresh passing workload checks, a fixed Run-form mount defect, and the
-remaining failed/open phase gates. Ordinary Windows CLI bind paths still fail.
+failed/open phase gates at that checkpoint. Implementation continued afterward.
+
+Implementation has continued beyond that assessment: see the
+[active Phase 1 completion record](docs/verification/phase-1-completion.md).
+CLI/Compose drive mounts now pass scoped runtime proofs; clean first-run setup,
+cancellation and resume also pass the adapter proof. Full phase acceptance and
+packaging remain in progress.
 
 ## Local development (Windows x64)
 
@@ -29,6 +35,7 @@ npm run upstream:prepare
 npm test
 npm run upstream:test
 npm run session:build
+npm run tools:stage-runtime
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri -- build --debug --no-bundle

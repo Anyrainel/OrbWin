@@ -11,12 +11,15 @@
     "upstream:prepare": "node scripts/upstream.mjs",
     "upstream:test": "node scripts/upstream.mjs test",
     "tools:bootstrap": "node scripts/bootstrap-tools.mjs",
+    "tools:stage-runtime": "node scripts/stage-runtime-tools.mjs",
     "backend:build": "node scripts/build-backend.mjs",
     "backend:bundle": "node scripts/build-backend.mjs --with-distro",
     "session:build": "node scripts/build-session.mjs",
     "backend:proof": "node scripts/prove-control-plane.mjs",
     "backend:guest-proof": "node scripts/prove-guest.mjs",
     "qualify:workloads": "node scripts/qualify-workloads.mjs",
+    "qualify:mounts": "node scripts/qualify-mounts.mjs",
+    "qualify:history": "node scripts/qualify-history.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

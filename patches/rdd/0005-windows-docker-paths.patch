@@ -1,0 +1,647 @@
+diff --git a/rdd/pkg/socketbridge/docker_paths.go b/rdd/pkg/socketbridge/docker_paths.go
+new file mode 100644
+index 000000000..108c7c3b2
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_paths.go
+@@ -0,0 +1,157 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin Windows Docker API adaptation. Moby remains authoritative.
++package socketbridge
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"strings"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/guestexec"
++)
++
++// driveSource never resolves relative paths against the bridge process's cwd.
++// POSIX paths and volume names pass through; ambiguous Windows forms fail.
++func driveSource(source string) (string, error) {
++	original := source
++	source = strings.TrimPrefix(source, `\\?\`)
++	if source != original && (len(source) < 2 || source[1] != ':') {
++		return "", fmt.Errorf("only local drive verbatim paths are supported")
++	}
++	if strings.HasPrefix(source, `\\`) || strings.HasPrefix(source, "//") {
++		return "", fmt.Errorf("Windows UNC/device bind sources are not supported: %q", original)
++	}
++	if len(source) < 2 || source[1] != ':' {
++		return source, nil
++	}
++	letter := source[0]
++	if !((letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z')) || len(source) < 3 || (source[2] != '/' && source[2] != '\\') {
++		return "", fmt.Errorf("bind source must be an absolute Windows drive path: %q", original)
++	}
++	if strings.Contains(source[2:], ":") || strings.ContainsAny(source, "\x00\r\n") {
++		return "", fmt.Errorf("invalid Windows bind source: %q", original)
++	}
++	return guestexec.TranslateHostPath(source)
++}
++
++func rewriteBind(bind string) (string, error) {
++	// The first colon after a drive prefix separates source from Linux target.
++	source := strings.TrimPrefix(bind, `\\?\`)
++	if source != bind && (len(source) < 2 || source[1] != ':') {
++		return "", fmt.Errorf("only local drive verbatim paths are supported")
++	}
++	if len(source) < 2 || source[1] != ':' {
++		if strings.HasPrefix(source, `\\`) || strings.HasPrefix(source, "//") {
++			return "", fmt.Errorf("Windows UNC bind sources are not supported")
++		}
++		return bind, nil
++	}
++	separator := strings.IndexByte(source[2:], ':')
++	if separator < 0 {
++		return "", fmt.Errorf("Windows bind must include an absolute Linux target")
++	}
++	separator += 2
++	mapped, err := driveSource(source[:separator])
++	if err != nil {
++		return "", err
++	}
++	return mapped + source[separator:], nil
++}
++
++type jsonFields = map[string]json.RawMessage
++
++// rewriteCreate retains unknown fields at every edited level, without float64
++// conversion. If no source changes, preserve the original wire representation.
++func rewriteCreate(body []byte, volume bool) ([]byte, error) {
++	var document jsonFields
++	if err := json.Unmarshal(body, &document); err != nil {
++		return nil, err
++	}
++	if document == nil {
++		return nil, fmt.Errorf("create body must be a JSON object")
++	}
++	changed := false
++	if volume {
++		if raw := document["DriverOpts"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++			var options jsonFields
++			if err := json.Unmarshal(raw, &options); err != nil {
++				return nil, err
++			}
++			var device, flags string
++			_ = json.Unmarshal(options["o"], &flags)
++			bind := false
++			for _, flag := range strings.Split(flags, ",") {
++				bind = bind || flag == "bind" || flag == "rbind"
++			}
++			var driver string
++			_ = json.Unmarshal(document["Driver"], &driver)
++			if bind && (driver == "" || driver == "local") && options["device"] != nil {
++				if err := json.Unmarshal(options["device"], &device); err != nil {
++					return nil, err
++				}
++				mapped, err := driveSource(device)
++				if err != nil {
++					return nil, err
++				}
++				if mapped != device {
++					options["device"], _ = json.Marshal(mapped)
++					document["DriverOpts"], _ = json.Marshal(options)
++					changed = true
++				}
++			}
++		}
++	} else if raw := document["HostConfig"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++		var host jsonFields
++		if err := json.Unmarshal(raw, &host); err != nil {
++			return nil, err
++		}
++		if raw := host["Binds"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++			var binds []string
++			if err := json.Unmarshal(raw, &binds); err != nil {
++				return nil, err
++			}
++			for i, bind := range binds {
++				mapped, err := rewriteBind(bind)
++				if err != nil {
++					return nil, err
++				}
++				if mapped != bind {
++					binds[i] = mapped
++					changed = true
++				}
++			}
++			host["Binds"], _ = json.Marshal(binds)
++		}
++		if raw := host["Mounts"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++			var mounts []jsonFields
++			if err := json.Unmarshal(raw, &mounts); err != nil {
++				return nil, err
++			}
++			for _, mount := range mounts {
++				var kind, source string
++				_ = json.Unmarshal(mount["Type"], &kind)
++				if kind != "bind" || mount["Source"] == nil {
++					continue
++				}
++				if err := json.Unmarshal(mount["Source"], &source); err != nil {
++					return nil, err
++				}
++				mapped, err := driveSource(source)
++				if err != nil {
++					return nil, err
++				}
++				if mapped != source {
++					mount["Source"], _ = json.Marshal(mapped)
++					changed = true
++				}
++			}
++			host["Mounts"], _ = json.Marshal(mounts)
++		}
++		document["HostConfig"], _ = json.Marshal(host)
++	}
++	if !changed {
++		return body, nil
++	}
++	return json.Marshal(document)
++}
+diff --git a/rdd/pkg/socketbridge/docker_windows.go b/rdd/pkg/socketbridge/docker_windows.go
+new file mode 100644
+index 000000000..e50e97143
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_windows.go
+@@ -0,0 +1,206 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation of the existing Windows Docker bridge, not another daemon.
++//go:build windows
++
++package socketbridge
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httputil"
++	"regexp"
++	"sync"
++	"time"
++
++	"github.com/Microsoft/go-winio"
++	"github.com/Microsoft/go-winio/pkg/guid"
++)
++
++var createRoute = regexp.MustCompile(`^/(?:v[0-9]+\.[0-9]+/)?(containers|volumes)/create$`)
++
++func dockerHandler(transport http.RoundTripper) http.Handler {
++	proxy := &httputil.ReverseProxy{
++		Rewrite: func(p *httputil.ProxyRequest) {
++			p.Out.URL.Scheme = "http"
++			p.Out.URL.Host = "orbwin-guest"
++			p.Out.Host = p.In.Host
++		},
++		Transport:     transport,
++		FlushInterval: -1,
++		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
++			dockerError(w, http.StatusBadGateway, "The OrbWin guest connection failed. Inspect engine status before retrying; a mutation may already have taken effect.")
++		},
++	}
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if match := createRoute.FindStringSubmatch(r.URL.Path); r.Method == http.MethodPost && match != nil {
++			// Only finite create JSON is buffered; builds, logs, events and upgrades
++			// use the standard streaming proxy directly.
++			_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
++			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<20))
++			_ = r.Body.Close()
++			_ = http.NewResponseController(w).SetReadDeadline(time.Time{})
++			if err != nil {
++				dockerError(w, http.StatusBadRequest, "Cannot read container/volume create JSON within the 4 MiB limit and read deadline.")
++				return
++			}
++			body, err = rewriteCreate(body, match[1] == "volumes")
++			if err != nil {
++				dockerError(w, http.StatusBadRequest, "Invalid create request: "+err.Error())
++				return
++			}
++			r.Body = io.NopCloser(bytes.NewReader(body))
++			r.ContentLength = int64(len(body))
++			r.TransferEncoding = nil
++		}
++		proxy.ServeHTTP(dockerResponse{w}, r)
++	})
++}
++
++func dockerError(w http.ResponseWriter, status int, message string) {
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(status)
++	_ = json.NewEncoder(w).Encode(map[string]string{"message": message})
++}
++
++// The bridge owns listener, HTTP server and all accepted connections, including
++// hijacked exec/BuildKit streams. Cancellation closes all of them. No UI state
++// participates. No environment HTTP proxy is consulted by the fixed dialer.
++func (b *HostBridge) serveDocker(ctx context.Context, listener net.Listener) error {
++	transport := &http.Transport{
++		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
++			vm, err := guid.FromString(b.vmGUID.String())
++			if err != nil {
++				return nil, err
++			}
++			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++			defer cancel()
++			return winio.Dial(ctx, &winio.HvsockAddr{VMID: vm, ServiceID: winio.VsockServiceID(b.vsockPort)})
++		},
++		DisableCompression:    true,
++		MaxIdleConns:          16,
++		MaxIdleConnsPerHost:   16,
++		IdleConnTimeout:       30 * time.Second,
++		ResponseHeaderTimeout: 0,
++	}
++	return serveDockerHTTP(ctx, listener, dockerHandler(transport), transport.CloseIdleConnections)
++}
++
++func serveDockerHTTP(ctx context.Context, listener net.Listener, handler http.Handler, closeIdle func()) error {
++	tracked := &dockerListener{Listener: listener, ctx: ctx, connections: map[*dockerConn]struct{}{}}
++	server := &http.Server{
++		Handler:           handler,
++		ReadHeaderTimeout: 15 * time.Second,
++		MaxHeaderBytes:    1 << 20,
++		BaseContext:       func(net.Listener) context.Context { return ctx },
++	}
++	var once sync.Once
++	shutdown := func() {
++		once.Do(func() {
++			_ = server.Close()
++			tracked.mutex.Lock()
++			tracked.stopped = true
++			connections := make([]*dockerConn, 0, len(tracked.connections))
++			for conn := range tracked.connections {
++				connections = append(connections, conn)
++			}
++			tracked.mutex.Unlock()
++			for _, conn := range connections {
++				_ = conn.Close()
++			}
++			closeIdle()
++		})
++	}
++	done := make(chan struct{})
++	go func() {
++		select {
++		case <-ctx.Done():
++		case <-done:
++			return
++		}
++		shutdown()
++	}()
++	err := server.Serve(tracked)
++	shutdown()
++	close(done)
++	if errors.Is(err, http.ErrServerClosed) || ctx.Err() != nil {
++		return nil
++	}
++	return err
++}
++
++type dockerListener struct {
++	net.Listener
++	ctx         context.Context
++	mutex       sync.Mutex
++	stopped     bool
++	connections map[*dockerConn]struct{}
++}
++
++func (l *dockerListener) Accept() (net.Conn, error) {
++	conn, err := l.Listener.Accept()
++	if err != nil {
++		return nil, err
++	}
++	l.mutex.Lock()
++	defer l.mutex.Unlock()
++	if l.stopped || l.ctx.Err() != nil {
++		_ = conn.Close()
++		return nil, net.ErrClosed
++	}
++	tracked := &dockerConn{Conn: conn, owner: l}
++	l.connections[tracked] = struct{}{}
++	return tracked, nil
++}
++
++type dockerConn struct {
++	net.Conn
++	owner *dockerListener
++	once  sync.Once
++}
++
++func (c *dockerConn) CloseWrite() error { return closeDockerWrite(c.Conn) }
++
++func closeDockerWrite(conn net.Conn) error {
++	if half, ok := conn.(interface{ CloseWrite() error }); ok {
++		return half.CloseWrite()
++	}
++	return http.ErrNotSupported
++}
++
++// net/http may read upgraded bytes together with the HTTP headers. The standard
++// ReverseProxy uses the hijacked conn directly, so retain the buffered reader in
++// that conn. Otherwise early TTY/BuildKit input could silently disappear.
++type dockerResponse struct{ http.ResponseWriter }
++
++func (w dockerResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
++func (w dockerResponse) Hijack() (net.Conn, *bufio.ReadWriter, error) {
++	conn, buffered, err := http.NewResponseController(w.ResponseWriter).Hijack()
++	if err != nil {
++		return nil, nil, err
++	}
++	// Drain only bytes already buffered, then bypass net/http's connReader.
++	// Reading EOF through connReader would cancel the request context and close
++	// the backend before its response to a client half-close can drain.
++	reader := io.MultiReader(io.LimitReader(buffered.Reader, int64(buffered.Reader.Buffered())), conn)
++	return &dockerBufferedConn{Conn: conn, reader: reader}, buffered, nil
++}
++
++type dockerBufferedConn struct {
++	net.Conn
++	reader io.Reader
++}
++
++func (c *dockerBufferedConn) Read(bytes []byte) (int, error) { return c.reader.Read(bytes) }
++func (c *dockerBufferedConn) CloseWrite() error              { return closeDockerWrite(c.Conn) }
++
++func (c *dockerConn) Close() error {
++	err := c.Conn.Close()
++	c.once.Do(func() { c.owner.mutex.Lock(); delete(c.owner.connections, c); c.owner.mutex.Unlock() })
++	return err
++}
+diff --git a/rdd/pkg/socketbridge/docker_windows_test.go b/rdd/pkg/socketbridge/docker_windows_test.go
+new file mode 100644
+index 000000000..93c83d0c5
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_windows_test.go
+@@ -0,0 +1,206 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin path/stream contract tests; no live guest or other engine required.
++//go:build windows
++
++package socketbridge
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestWindowsCreatePreservesUnknownFields(t *testing.T) {
++	body := []byte(`{"Image":"alpine","Future":{"counter":9007199254740993},"HostConfig":{"FutureMountFlag":true,"Binds":["F:\\project with spaces:/data:ro","cache:/cache"],"Mounts":[{"Type":"bind","Source":"C:/例/file.txt","Target":"/file","ReadOnly":true,"Future":{"number":9007199254740995}},{"Type":"volume","Source":"cache","Target":"/cached"}]}}`)
++	translated, err := rewriteCreate(body, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var value struct {
++		Future     json.RawMessage
++		HostConfig struct {
++			FutureMountFlag bool
++			Binds           []string
++			Mounts          []struct {
++				Source   string
++				ReadOnly bool
++				Future   json.RawMessage
++			}
++		}
++	}
++	if err := json.Unmarshal(translated, &value); err != nil {
++		t.Fatal(err)
++	}
++	if string(value.Future) != `{"counter":9007199254740993}` || !value.HostConfig.FutureMountFlag || value.HostConfig.Binds[0] != "/mnt/f/project with spaces:/data:ro" || value.HostConfig.Binds[1] != "cache:/cache" || value.HostConfig.Mounts[0].Source != "/mnt/c/例/file.txt" || !value.HostConfig.Mounts[0].ReadOnly || string(value.HostConfig.Mounts[0].Future) != `{"number":9007199254740995}` || value.HostConfig.Mounts[1].Source != "cache" {
++		t.Fatalf("lost or changed fields: %s", translated)
++	}
++	unchanged := []byte("{ \"HostConfig\": {\"Binds\":[\"/mnt/c/a:/data:ro\"]}, \"Unknown\":123 }")
++	actual, err := rewriteCreate(unchanged, false)
++	if err != nil || !bytes.Equal(actual, unchanged) {
++		t.Fatalf("unchanged JSON differs: %s %v", actual, err)
++	}
++}
++
++func TestWindowsBindFormsAndRejections(t *testing.T) {
++	for input, expected := range map[string]string{
++		`C:\work:/data:ro`:            "/mnt/c/work:/data:ro",
++		`\\?\F:\work:/data:rw,z`:      "/mnt/f/work:/data:rw,z",
++		`D:/work:/data`:               "/mnt/d/work:/data",
++		`/home/user/project:/data:ro`: `/home/user/project:/data:ro`,
++		`cache:/data`:                 `cache:/data`,
++	} {
++		actual, err := rewriteBind(input)
++		if err != nil || actual != expected {
++			t.Errorf("%q -> %q %v", input, actual, err)
++		}
++	}
++	for _, input := range []string{`C:relative:/data`, `\\server\share:/data`, `\\?\UNC\server\share:/data`, `\\.\pipe\a:/data`, `C:\path`} {
++		if _, err := rewriteBind(input); err == nil {
++			t.Errorf("accepted %q", input)
++		}
++	}
++	for _, body := range []string{`null`, `[]`, `{"HostConfig":42}`, `{"HostConfig":{"Binds":[3]}}`, `{"HostConfig":{"Mounts":[{"Type":"bind","Source":3}]}}`, `{`} {
++		if _, err := rewriteCreate([]byte(body), false); err == nil {
++			t.Errorf("accepted %s", body)
++		}
++	}
++	body, err := rewriteCreate([]byte(`{"Driver":"local","DriverOpts":{"type":"none","o":"bind,ro","device":"F:\\data"},"Future":9007199254740993}`), true)
++	if err != nil || !bytes.Contains(body, []byte(`"device":"/mnt/f/data"`)) || !bytes.Contains(body, []byte(`9007199254740993`)) {
++		t.Fatalf("volume: %s %v", body, err)
++	}
++}
++
++func testDockerTransport(t *testing.T, guest http.Handler) *http.Transport {
++	t.Helper()
++	upstream := httptest.NewServer(guest)
++	t.Cleanup(upstream.Close)
++	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
++		return (&net.Dialer{}).DialContext(ctx, "tcp", strings.TrimPrefix(upstream.URL, "http://"))
++	}}
++	t.Cleanup(transport.CloseIdleConnections)
++	return transport
++}
++
++func TestDockerHTTPRoutesAndBounds(t *testing.T) {
++	var received []byte
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		received, _ = io.ReadAll(r.Body)
++		if r.Header.Get("X-Future-Header") != "retained" || r.URL.RawQuery != "name=example" {
++			t.Errorf("request metadata changed: %v %s", r.Header, r.URL)
++		}
++		w.Header().Set("X-Future-Response", "retained")
++		w.WriteHeader(http.StatusCreated)
++		_, _ = w.Write(received)
++	}))
++	handler := dockerHandler(transport)
++	for _, route := range []string{"/v1.56/containers/create", "/containers/create"} {
++		r := httptest.NewRequest("POST", route+"?name=example", strings.NewReader(`{"HostConfig":{"Binds":["F:\\work:/data:ro"]},"Future":1}`))
++		r.Header.Set("X-Future-Header", "retained")
++		w := httptest.NewRecorder()
++		handler.ServeHTTP(w, r)
++		if w.Code != 201 || w.Header().Get("X-Future-Response") != "retained" || !bytes.Contains(received, []byte("/mnt/f/work:/data:ro")) {
++			t.Fatalf("route %s: %d %s", route, w.Code, w.Body.String())
++		}
++	}
++	for _, body := range []string{`{`, strings.Repeat(" ", (4<<20)+1)} {
++		received = nil
++		w := httptest.NewRecorder()
++		handler.ServeHTTP(w, httptest.NewRequest("POST", "/containers/create", strings.NewReader(body)))
++		if w.Code != 400 || received != nil {
++			t.Fatalf("invalid request reached daemon: %d", w.Code)
++		}
++	}
++	// Build/upload bodies are streams, including data larger than the create cap.
++	payload := bytes.Repeat([]byte{0, 1, 2, 0xff}, (5<<20)/4)
++	r := httptest.NewRequest("POST", "/build?name=example", bytes.NewReader(payload))
++	r.Header.Set("X-Future-Header", "retained")
++	w := httptest.NewRecorder()
++	handler.ServeHTTP(w, r)
++	if w.Code != 201 || !bytes.Equal(received, payload) {
++		t.Fatal("build stream changed")
++	}
++}
++
++func TestDockerUpgradeEarlyBytesHalfCloseAndShutdown(t *testing.T) {
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		_, _ = io.Copy(io.Discard, r.Body)
++		conn, rw, err := http.NewResponseController(w).Hijack()
++		if err != nil {
++			t.Error(err)
++			return
++		}
++		defer conn.Close()
++		_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
++		_ = rw.Flush()
++		// Echo after EOF proves client half-close does not discard response data.
++		data, err := io.ReadAll(rw.Reader)
++		if err != nil {
++			return
++		}
++		_, _ = conn.Write(append([]byte("after-eof:"), data...))
++	}))
++	listener, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	done := make(chan error, 1)
++	go func() {
++		done <- serveDockerHTTP(ctx, listener, dockerHandler(transport), transport.CloseIdleConnections)
++	}()
++	conn, err := net.Dial("tcp", listener.Addr().String())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer conn.Close()
++	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
++	_, _ = fmt.Fprint(conn, "POST /v1.56/exec/id/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n{}early-bytes")
++	reader := bufio.NewReader(conn)
++	response, err := http.ReadResponse(reader, nil)
++	if err != nil || response.StatusCode != 101 {
++		t.Fatalf("upgrade: %v %v", response, err)
++	}
++	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
++		t.Fatal(err)
++	}
++	data, err := io.ReadAll(reader)
++	if err != nil || string(data) != "after-eof:early-bytes" {
++		t.Fatalf("half-close data: %q %v", data, err)
++	}
++	// A second active hijack must be closed promptly when the bridge stops.
++	other, err := net.Dial("tcp", listener.Addr().String())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer other.Close()
++	_ = other.SetDeadline(time.Now().Add(5 * time.Second))
++	_, _ = fmt.Fprint(other, "POST /exec/id/start HTTP/1.1\r\nHost: docker\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: 2\r\n\r\n{}")
++	otherReader := bufio.NewReader(other)
++	if _, err := http.ReadResponse(otherReader, nil); err != nil {
++		t.Fatal(err)
++	}
++	cancel()
++	select {
++	case err := <-done:
++		if err != nil {
++			t.Fatal(err)
++		}
++	case <-time.After(3 * time.Second):
++		t.Fatal("bridge did not stop")
++	}
++	if _, err := otherReader.ReadByte(); err == nil {
++		t.Fatal("hijacked connection survived shutdown")
++	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
++		t.Fatal("shutdown left a blocked connection")
++	}
++}
+diff --git a/rdd/pkg/socketbridge/host_windows.go b/rdd/pkg/socketbridge/host_windows.go
+index 8f6c2e976..7c93fb2b3 100644
+--- a/rdd/pkg/socketbridge/host_windows.go
++++ b/rdd/pkg/socketbridge/host_windows.go
+@@ -15,6 +15,7 @@ import (
+ 	"github.com/Microsoft/go-winio"
+ 	"github.com/go-logr/logr"
+ 	"github.com/linuxkit/virtsock/pkg/hvsock"
++	"golang.org/x/sys/windows"
+ 
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
+ )
+@@ -34,6 +35,7 @@ const (
+ // HostBridge listens on a Windows named pipe and forwards each accepted
+ // connection to the guest via Hyper-V vsock.
+ type HostBridge struct {
++	docker    bool
+ 	pipeName  string
+ 	vmGUID    hvsock.GUID
+ 	vsockPort uint32
+@@ -43,7 +45,9 @@ type HostBridge struct {
+ // NewDockerHostBridge creates a HostBridge that forwards the Docker named pipe
+ // to the guest vsock agent.
+ func NewDockerHostBridge(vmGUID hvsock.GUID, log logr.Logger) *HostBridge {
+-	return NewHostBridge(instance.DockerSocket(), VsockForwardPort, vmGUID, log)
++	b := NewHostBridge(instance.DockerSocket(), VsockForwardPort, vmGUID, log)
++	b.docker = true
++	return b
+ }
+ 
+ // NewHostBridge creates a HostBridge that forwards pipeName to vsockPort in
+@@ -60,11 +64,27 @@ func NewHostBridge(pipeName string, vsockPort uint32, vmGUID hvsock.GUID, log lo
+ // Run listens for named-pipe connections and proxies them to the guest until
+ // ctx is cancelled.
+ func (b *HostBridge) Run(ctx context.Context) error {
+-	ln, err := winio.ListenPipe(b.pipeName, nil)
++	var config *winio.PipeConfig
++	if b.docker {
++		user, err := windows.GetCurrentProcessToken().GetTokenUser()
++		if err != nil {
++			return fmt.Errorf("socket-bridge: identify pipe owner: %w", err)
++		}
++		config = &winio.PipeConfig{
++			SecurityDescriptor: "D:P(A;;GA;;;SY)(A;;GA;;;" + user.User.Sid.String() + ")",
++			MessageMode:        true,
++			InputBufferSize:    65536,
++			OutputBufferSize:   65536,
++		}
++	}
++	ln, err := winio.ListenPipe(b.pipeName, config)
+ 	if err != nil {
+ 		return fmt.Errorf("socket-bridge: listen on %s: %w", b.pipeName, err)
+ 	}
+ 	b.log.Info("Listening", "pipe", b.pipeName, "vsockPort", b.vsockPort)
++	if b.docker {
++		return b.serveDocker(ctx, ln)
++	}
+ 
+ 	go func() {
+ 		<-ctx.Done()

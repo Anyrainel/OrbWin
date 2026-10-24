@@ -1,0 +1,90 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_controller.go b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+index 03fac27ae..16717651f 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_controller.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+@@ -48,7 +48,7 @@ type ControllerDiscovery interface {
+ }
+ 
+ const (
+-	appName                        = "app"
++	appName = "app"
+ 	// Lima's WSL driver registers "lima-" + VM name globally for this user;
+ 	// LIMA_HOME alone does not isolate the distro from stock Rancher's lima-rd.
+ 	limaVMName, inputConfigMapName = "orbwin", "rd"
+@@ -58,6 +58,17 @@ const (
+ 	requeueAfterDeletion = 2 * time.Second
+ )
+ 
++// The fixed proof instance is reserved for sequential clean-provisioning tests.
++// It must never run alongside the product guest (the network namespace is shared).
++// Do not evaluate instance.Suffix here: package initialization precedes the CLI
++// product environment guard, which establishes the default OrbWin identity.
++func limaVMNameForInstance() string {
++	if os.Getenv("RDD_INSTANCE") == "orbwin-proof" {
++		return "orbwin-proof"
++	}
++	return limaVMName
++}
++
+ // Messages for the Settled condition. Kept as constants so tests can
+ // assert on them without duplicating string literals.
+ const (
+@@ -248,7 +259,7 @@ func (r *AppReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Res
+ 
+ 		// Delete the LimaVM and wait for it to finish cleaning up.
+ 		limaVM := &limav1alpha1.LimaVM{}
+-		err := r.Get(ctx, client.ObjectKey{Name: limaVMName, Namespace: namespace}, limaVM)
++		err := r.Get(ctx, client.ObjectKey{Name: limaVMNameForInstance(), Namespace: namespace}, limaVM)
+ 		if err == nil {
+ 			if err := base.RemoveOwnedFinalizer(ctx, r.Client, limaVM, v1alpha1.AppKind); err != nil {
+ 				return ctrl.Result{}, fmt.Errorf("failed to remove owned finalizer from LimaVM: %w", err)
+@@ -325,7 +336,7 @@ func (r *AppReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Res
+ 
+ 	// Check whether the LimaVM already exists. If not, create the input ConfigMap and LimaVM.
+ 	limaVM := &limav1alpha1.LimaVM{}
+-	limaVMErr := r.Get(ctx, client.ObjectKey{Name: limaVMName, Namespace: namespace}, limaVM)
++	limaVMErr := r.Get(ctx, client.ObjectKey{Name: limaVMNameForInstance(), Namespace: namespace}, limaVM)
+ 	if limaVMErr != nil && !apierrors.IsNotFound(limaVMErr) {
+ 		return ctrl.Result{}, limaVMErr
+ 	}
+@@ -404,7 +415,7 @@ func (r *AppReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Res
+ 		}
+ 
+ 		limaVM = &limav1alpha1.LimaVM{
+-			Name:       limaVMName,
++			Name:       limaVMNameForInstance(),
+ 			Namespace:  namespace,
+ 			Finalizers: []string{base.OwnedFinalizerFor(v1alpha1.AppKind)},
+ 			Spec: limav1alpha1.LimaVMSpec{
+@@ -421,7 +432,7 @@ func (r *AppReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Res
+ 		if err := r.Create(ctx, limaVM); err != nil {
+ 			return ctrl.Result{}, fmt.Errorf("failed to create LimaVM: %w", err)
+ 		}
+-		log.Info("Created LimaVM", "name", limaVMName, "namespace", namespace)
++		log.Info("Created LimaVM", "name", limaVMNameForInstance(), "namespace", namespace)
+ 		return ctrl.Result{}, nil
+ 	}
+ 
+diff --git a/rdd/pkg/controllers/app/app/controllers/orbwin_proof_test.go b/rdd/pkg/controllers/app/app/controllers/orbwin_proof_test.go
+new file mode 100644
+index 000000000..fa4e5b79f
+--- /dev/null
++++ b/rdd/pkg/controllers/app/app/controllers/orbwin_proof_test.go
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: Apache-2.0
++package controllers
++
++import "testing"
++
++func TestOrbWinGuestNameBoundary(t *testing.T) {
++	for _, instance := range []string{"", "orbwin", "2", "foreign"} {
++		t.Setenv("RDD_INSTANCE", instance)
++		if limaVMNameForInstance() != "orbwin" {
++			t.Fatalf("unexpected product guest for %q", instance)
++		}
++	}
++	t.Setenv("RDD_INSTANCE", "orbwin-proof")
++	if limaVMNameForInstance() != "orbwin-proof" {
++		t.Fatal("proof guest would collide with retained product data")
++	}
++}

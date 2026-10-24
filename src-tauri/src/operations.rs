@@ -38,6 +38,12 @@ impl Drop for Lease<'_> {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Request {
+    Setup,
+    DiskUsage,
+    BuildHistory {
+        action: BuildHistoryAction,
+        reference: String,
+    },
     ClusterForward {
         resource: ClusterResource,
         namespace: String,
@@ -160,6 +166,13 @@ pub enum ComposeAction {
 }
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
+pub enum BuildHistoryAction {
+    List,
+    Inspect,
+    Logs,
+}
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub enum ClusterAction {
     List,
     Inspect,
@@ -266,6 +279,46 @@ impl Request {
         let mut seconds = 120;
         let mut input = None;
         let args: Vec<String> = match self {
+            Self::DiskUsage => {
+                mutation = false;
+                vec!["system".into(), "df".into(), "--format=json".into()]
+            }
+            Self::BuildHistory { action, reference } => {
+                mutation = false;
+                let mut args = vec![
+                    "buildx".into(),
+                    "--builder=default".into(),
+                    "history".into(),
+                ];
+                match action {
+                    BuildHistoryAction::List => {
+                        args.extend(["ls".into(), "--format=json".into(), "--no-trunc".into()])
+                    }
+                    BuildHistoryAction::Inspect | BuildHistoryAction::Logs => {
+                        // The pinned Buildx lists builder/node/id but its default
+                        // driver lookup accepts the leaf ID. No builder switching.
+                        let leaf = reference.rsplit('/').next().unwrap_or("");
+                        if leaf.is_empty()
+                            || leaf.len() > 128
+                            || !leaf
+                                .bytes()
+                                .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
+                        {
+                            return Err("Select a valid returned build reference.".into());
+                        }
+                        if matches!(action, BuildHistoryAction::Inspect) {
+                            args.extend(["inspect".into(), "--format=json".into(), leaf.into()]);
+                        } else {
+                            args.extend(["logs".into(), "--progress=plain".into(), leaf.into()]);
+                        }
+                    }
+                }
+                args
+            }
+            Self::Setup => {
+                seconds = 1800;
+                vec![]
+            }
             Self::ClusterForward {
                 resource,
                 namespace,
@@ -818,7 +871,16 @@ pub async fn run(
     output
         .send(Output::Ready)
         .map_err(|_| "The output viewer disconnected")?;
+    if matches!(request, Request::Setup) {
+        return crate::installation::setup(&output, &mut cancelled).await;
+    }
     let target = engine::target()?;
+    if matches!(request, Request::Build { .. } | Request::Compose { .. }) {
+        crate::runtime::configure_client(&target.config)?;
+    }
+    if matches!(request, Request::BuildHistory { .. }) {
+        crate::runtime::validate_client(&target.config)?;
+    }
     let management = matches!(
         request,
         Request::Engine { .. } | Request::ReadSettings | Request::ConfigureCluster { .. }
@@ -904,55 +966,24 @@ pub async fn run(
         .kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("Could not start engine client: {e}"))?;
-    if let Some(input) = &plan.input {
-        let mut stdin = child.stdin.take().ok_or("Missing client input")?;
-        stdin
-            .write_all(input)
-            .await
-            .map_err(|e| format!("Could not send operation input: {e}"))?;
-    }
-    let mut stdout = child.stdout.take().ok_or("Missing stdout")?;
-    let mut stderr = child.stderr.take().ok_or("Missing stderr")?;
-    let mut out = [0u8; 8192];
-    let mut err = [0u8; 8192];
-    let (mut out_open, mut err_open) = (true, true);
-    let mut remaining = 2 * 1024 * 1024;
-    let deadline = tokio::time::sleep(Duration::from_secs(plan.seconds));
-    tokio::pin!(deadline);
-    let mut interrupted = false;
-    let mut reason = String::new();
-    let mut status = None;
-    loop {
-        tokio::select! {
-            _ = &mut cancelled => { interrupted = true; reason = "Client command cancelled".into(); break; }
-            _ = &mut deadline => { interrupted = true; reason = "Client command reached its time limit".into(); break; }
-            result = child.wait(), if status.is_none() => {
-                match result { Ok(value) => status = Some(value), Err(e) => { interrupted = true; reason = format!("Could not wait for client: {e}"); break; } }
-            }
-            result = stdout.read(&mut out), if out_open => {
-                match result { Ok(0) => out_open = false, Ok(n) => { if let Err(e) = send(&output, "stdout", &out[..n], &mut remaining) { interrupted = true; reason = e; break; } }, Err(e) => { interrupted = true; reason = e.to_string(); break; } }
-            }
-            result = stderr.read(&mut err), if err_open => {
-                match result { Ok(0) => err_open = false, Ok(n) => { if let Err(e) = send(&output, "stderr", &err[..n], &mut remaining) { interrupted = true; reason = e; break; } }, Err(e) => { interrupted = true; reason = e.to_string(); break; } }
-            }
-        }
-        if status.is_some() && !out_open && !err_open {
-            break;
-        }
-    }
-    if interrupted {
-        let _ = child.kill().await;
-        let _ = child.wait().await;
-    }
+    let client_result = client(
+        command,
+        plan.input.as_deref(),
+        &output,
+        &mut cancelled,
+        plan.seconds,
+    )
+    .await?;
+    let ClientResult {
+        exit_code,
+        interrupted,
+        reason,
+    } = client_result;
     let identity = if stopping || matches!(request, Request::ReadSettings) {
         Ok(serde_json::Value::Null)
     } else {
         engine::check(&target).await
     };
-    let exit_code = status.and_then(|s| s.code());
     let success = identity.is_ok() && !interrupted && exit_code == Some(0);
     let message = if let Err(e) = identity {
         format!("Engine could not be verified after the operation: {e}. Refresh and inspect before retrying; the operation may have taken effect.")
@@ -978,6 +1009,93 @@ pub async fn run(
         message,
     })
 }
+pub(crate) struct ClientResult {
+    pub exit_code: Option<i32>,
+    pub interrupted: bool,
+    pub reason: String,
+}
+
+// One bounded runner for normal operations and first-run CLI requests. It owns
+// only child clients. rdd/Moby retain lifecycle and persistence authority.
+pub(crate) async fn client(
+    mut command: Command,
+    input: Option<&[u8]>,
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+    seconds: u64,
+) -> Result<ClientResult, String> {
+    command
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not start engine client: {e}"))?;
+    let stdin = child.stdin.take();
+    let mut input_done = input.is_none();
+    let write_input = async move {
+        if let Some(input) = input {
+            let mut stdin = stdin.ok_or("Missing client input")?;
+            stdin
+                .write_all(input)
+                .await
+                .map_err(|e| format!("Could not send operation input: {e}"))?;
+        }
+        Ok::<(), String>(())
+    };
+    tokio::pin!(write_input);
+    let mut stdout = child.stdout.take().ok_or("Missing stdout")?;
+    let mut stderr = child.stderr.take().ok_or("Missing stderr")?;
+    let mut out = [0u8; 8192];
+    let mut err = [0u8; 8192];
+    let (mut out_open, mut err_open) = (true, true);
+    let mut remaining = 2 * 1024 * 1024;
+    let deadline = tokio::time::sleep(Duration::from_secs(seconds));
+    tokio::pin!(deadline);
+    let mut interrupted = false;
+    let mut reason = String::new();
+    let mut status = None;
+    loop {
+        tokio::select! {
+            _ = &mut *cancelled => { interrupted = true; reason = "Client command cancelled".into(); break; }
+            _ = &mut deadline => { interrupted = true; reason = "Client command reached its time limit".into(); break; }
+            result = &mut write_input, if !input_done => {
+                input_done = true;
+                if let Err(error) = result { interrupted = true; reason = error; break; }
+            }
+            result = child.wait(), if status.is_none() => {
+                match result { Ok(value) => status = Some(value), Err(e) => { interrupted = true; reason = format!("Could not wait for client: {e}"); break; } }
+            }
+            result = stdout.read(&mut out), if out_open => {
+                match result { Ok(0) => out_open = false, Ok(n) => { if let Err(e) = send(output, "stdout", &out[..n], &mut remaining) { interrupted = true; reason = e; break; } }, Err(e) => { interrupted = true; reason = e.to_string(); break; } }
+            }
+            result = stderr.read(&mut err), if err_open => {
+                match result { Ok(0) => err_open = false, Ok(n) => { if let Err(e) = send(output, "stderr", &err[..n], &mut remaining) { interrupted = true; reason = e; break; } }, Err(e) => { interrupted = true; reason = e.to_string(); break; } }
+            }
+        }
+        if status.is_some() && !out_open && !err_open {
+            break;
+        }
+    }
+    if interrupted {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+
+    Ok(ClientResult {
+        exit_code: status.and_then(|s| s.code()),
+        interrupted,
+        reason,
+    })
+}
+
 fn send(
     channel: &Channel<Output>,
     stream: &'static str,
@@ -1011,6 +1129,32 @@ mod qualification;
 mod tests {
     use super::*;
     const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn client_deadline_covers_a_blocked_stdin_write() {
+        let root = std::env::var_os("SystemRoot").unwrap();
+        let mut command = Command::new(
+            std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        );
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 60",
+        ]);
+        let (_sender, mut cancelled) = oneshot::channel();
+        let output = Channel::new(|_| Ok(()));
+        let input = vec![b'x'; 2 * 1024 * 1024];
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            client(command, Some(&input), &output, &mut cancelled, 1),
+        )
+        .await
+        .expect("blocked stdin bypassed the deadline")
+        .unwrap();
+        assert!(result.interrupted);
+        assert!(result.reason.contains("time limit"));
+    }
     #[test]
     fn published_ports_are_local_by_default_and_validate_explicit_scope() {
         assert_eq!(publish("80").unwrap(), "127.0.0.1::80/tcp");

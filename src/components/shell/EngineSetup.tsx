@@ -74,10 +74,13 @@ export function EngineSetup({
   useEffect(() => {
     void readWsl();
   }, []);
-  const bundle = bundleState(status);
+  const setupAvailable = status?.setupAvailable === true;
+  const bundle = setupAvailable ? "ready" : bundleState(status);
   const engine = engineState(status);
   const starting =
-    lifecycle.action === "start" || lifecycle.action === "restart";
+    lifecycle.action === "setup" ||
+    lifecycle.action === "start" ||
+    lifecycle.action === "restart";
   const wslStep: StepState | "working" = wslBusy
     ? "working"
     : wslError
@@ -96,7 +99,7 @@ export function EngineSetup({
       ? "working"
       : engine === "running"
         ? "done"
-        : engine === "offline"
+        : engine === "offline" || setupAvailable
           ? "action"
           : engine === "foreign" || engine === "preview"
             ? "blocked"
@@ -149,9 +152,11 @@ export function EngineSetup({
               <small>{stateText[bundleStep]}</small>
               <p>
                 {bundle === "ready"
-                  ? "The owned rdd backend bundle and its recorded engine identity were verified."
+                  ? setupAvailable
+                    ? "The bundled backend is available. Setup verifies component checksums before creating your engine."
+                    : "The owned backend bundle and its recorded engine identity were verified."
                   : bundle === "missing"
-                    ? "No verified backend bundle is recorded for this development build (BL-003). Build it with `npm run backend:bundle`, then record the owned engine identity with `npm run backend:guest-proof`. An installer that does this for you is not available yet."
+                    ? "The backend bundle or runtime identity is unavailable. View diagnostics to identify the missing component before repairing your installation. Existing data is retained."
                     : status?.diagnostic && engine !== "preview"
                       ? "The backend could not be classified from the last status read. Open diagnostics for the full message."
                       : "Checked together with the engine connection."}
@@ -176,9 +181,11 @@ export function EngineSetup({
                       ? "Another daemon answers the OrbWin endpoint. OrbWin will not use or start an engine over it (BL-001). Stop the other process or inspect diagnostics."
                       : engine === "preview"
                         ? status?.message
-                        : engine === "error"
-                          ? `The engine check failed with an unrecognised error. Starting may not resolve it. ${status?.message ?? ""}`
-                          : "Available after the backend is verified."}
+                        : setupAvailable
+                          ? "Set up a private WSL engine. Guest components may be downloaded; the optional Kubernetes cluster starts disabled."
+                          : engine === "error"
+                            ? `The engine check failed with an unrecognised error. Starting may not resolve it. ${status?.message ?? ""}`
+                            : "Available after the backend is verified."}
               </p>
               {lifecycle.result &&
                 !lifecycle.action &&
@@ -195,15 +202,19 @@ export function EngineSetup({
                 ) : (
                   <button
                     className="button primary"
-                    disabled={!canStartEngine(status) || checking}
+                    disabled={
+                      (!setupAvailable && !canStartEngine(status)) ||
+                      checking ||
+                      wslStep !== "done"
+                    }
                     title={
-                      canStartEngine(status)
+                      setupAvailable || canStartEngine(status)
                         ? undefined
                         : "Start is available once the backend is verified and its engine is offline."
                     }
-                    onClick={lifecycle.start}
+                    onClick={setupAvailable ? lifecycle.setup : lifecycle.start}
                   >
-                    Start engine
+                    {setupAvailable ? "Set up / resume OrbWin" : "Start engine"}
                   </button>
                 )}
                 <button
@@ -233,9 +244,9 @@ export function EngineSetup({
           </li>
         </ol>
         <p className="setup-note">
-          Creating the OrbWin guest for the first time (download and
-          provisioning) is not yet automated; this development build starts the
-          guest recorded by the backend proof. See phase-1 coverage, onboarding.
+          Setup keeps engine data in your user profile, separate from the
+          application. Cancel stops the client; backend work may continue.
+          Resume reuses the owned guest and preserves its data.
         </p>
       </div>
     </section>

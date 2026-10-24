@@ -1,4 +1,41 @@
 /* Resource list/inspector refinements. Tokens follow docs/design-system.md. */
+.build-history-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(300px, 2fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+.build-history-list {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.build-history-list .resource-row {
+  width: 100%;
+  text-align: left;
+}
+.build-history-list small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 12px;
+}
+.usage-table th,
+.usage-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+@media (max-width: 1050px) {
+  .build-history-layout {
+    grid-template-columns: 1fr;
+  }
+}
 .resource-list .visually-hidden {
   position: absolute;
   width: 1px;
