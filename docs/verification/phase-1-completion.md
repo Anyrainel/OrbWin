@@ -372,3 +372,23 @@ The existing service pod recovered to 2/2 ready without deletion. Retained-PVC
 verification passed again; Windows/WSL/delegated publication proof
 `orbwin-publish-92b1b397` passed. Node 41 tests, frontend production build and
 Clippy pass. These are checkpoint results, not Phase 1 acceptance.
+
+### Native Kubernetes sessions — 2026-10-24
+
+On the twelve-patch binary, native pod TTY commands execute; `stty size` changes
+from 36x102 to 73x296 when the window maximizes. Ctrl+C interrupts `sleep 30`
+and returns the shell; `exit 7` reports code 7. The pod remains Running.
+Initial missing command submission was the Windows Chinese IME composition
+mode; switching input mode allowed the physical keyboard checks to complete.
+
+Native pod forward 61898 served the exact retained PVC sentinel in Chrome and
+through HTTP before and after navigating to Containers. Native service forward
+54316 served the same sentinel. Explicit Stop removed each Windows listener,
+reported client cancellation and retained the workload. The temporary service
+`orbwin-upgrade-45ba4085/native-forward-20261024` was then deleted through native
+confirmation and verified absent; the pod stayed Running. No other service was
+deleted. UI request construction now selects only name/namespace/UID instead
+of spreading full server metadata into the strict native command. An earlier
+unintended automation target exposed that rejection before dispatch; it caused
+no deletion. A regression test covers extra metadata and retained UID. Node 42
+tests and production build pass.

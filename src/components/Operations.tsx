@@ -14,6 +14,7 @@ import {
 } from "./resources/model";
 import type { ResourcePage } from "../model/navigation";
 import { forwardUrls } from "./cluster/model";
+import { clusterTarget, clusterDeletionTarget } from "./cluster/request-target";
 
 type Field = {
   key: string;
@@ -57,7 +58,7 @@ export function ClusterAccess({
               request: {
                 kind: "clusterForward",
                 resource,
-                ...metadata,
+                ...clusterTarget(metadata),
                 local: "",
                 remote: "",
               },
@@ -82,7 +83,11 @@ export function ClusterAccess({
           onClick={() =>
             open({
               title: `Run command in ${metadata.name}`,
-              request: { kind: "clusterExec", ...metadata, command: [] },
+              request: {
+                kind: "clusterExec",
+                ...clusterTarget(metadata),
+                command: [],
+              },
               fields: [
                 {
                   key: "command",
@@ -270,7 +275,11 @@ export function ClusterRemoval({
       onClick={() =>
         open({
           title: `Delete ${metadata.namespace}/${metadata.name}?`,
-          request: { kind: "clusterDelete", resource, ...metadata },
+          request: {
+            kind: "clusterDelete",
+            resource,
+            ...clusterDeletionTarget(metadata),
+          },
           destructive: true,
           description:
             resource === "persistentVolumeClaims"
