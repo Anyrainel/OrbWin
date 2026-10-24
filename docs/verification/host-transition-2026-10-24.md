@@ -15,7 +15,8 @@ rewritten to make a post-resume check pass.
 After an approved real sleep and wake, it requires new Windows System log
 Kernel-Power 42 and resume 107 / Power-Troubleshooter 1 events after the before
 snapshot. It then observes recovery for at most 180 seconds and compares the
-same identities/data/configurations. Actual container start time is recorded;
+same identities/data/configurations, including the selected Ubuntu client's
+explicit Unix endpoint reaching the recorded daemon. Actual container start time is recorded;
 automatic container restart is distinguished from unchanged process execution.
 The result is `artifacts/qualification/installed-host-transition.json`.
 
