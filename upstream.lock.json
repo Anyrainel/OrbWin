@@ -17,7 +17,8 @@
     "patches/rdd/0008-windows-port-publication.patch",
     "patches/rdd/0009-kubernetes-version-selection.patch",
     "patches/rdd/0010-single-provisioning-owner.patch",
-    "patches/rdd/0011-offline-guest-packages.patch"
+    "patches/rdd/0011-offline-guest-packages.patch",
+    "patches/rdd/0012-networkless-sandbox-publication.patch"
   ],
   "patchedFiles": {
     "rdd/pkg/instance/docker_isolation_windows_test.go": "dfabb6cc9f2bdcc52c5243f63df3bb9e3ba5b0370a48db712404710017523138",
@@ -39,8 +40,8 @@
     "rdd/pkg/socketbridge/docker_windows_test.go": "aad58c743c83ee4141ab812b098ee9302ad97d1fd69ea08d2688ac831d4447e1",
     "rdd/pkg/controllers/app/app/controllers/orbwin_proof_test.go": "b9a393da2c39daf4d8753bd17205da96dc6b0c00ec5dbf701bcea389a3cd7531",
     "rdd/pkg/controllers/app/app/lima-template.yaml": "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5",
-    "rdd/pkg/socketbridge/docker_ports_windows.go": "35ce6ceda35401dfd30e96d8e8ac53afc50f3610b7a3170b8183c060dc65c683",
-    "rdd/pkg/socketbridge/docker_ports_windows_test.go": "47d755754828232a32603068f7a5569b10c9d2e1e9aebf56ad01d69cb722ba02",
+    "rdd/pkg/socketbridge/docker_ports_windows.go": "5263f632168a6067d425b009a9fd8d179dfe069cd31ee2acdb33f746dc684d0f",
+    "rdd/pkg/socketbridge/docker_ports_windows_test.go": "80e26b68345cd81d2c8839e1f86582d15b42979d7e80832cb79d74df5d619368",
     "rdd/pkg/socketbridge/docker_reservations_windows.go": "03055dd2b738f446e7e71a04eaad60b043da96d52cb252920a967084fbb4676d",
     "rdd/pkg/socketbridge/wsl_auth_windows.go": "2b2c462de96538796cd2950958ef822e4a617bc2bc2098920ccafbd69debe899",
     "rdd/src/rdd-guest/wsl_client.go": "cdc52b3742d351d57d5fb635545c7040a38e41e704a4bd254dbeb52fb2ee4713",

@@ -1,0 +1,102 @@
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows.go b/rdd/pkg/socketbridge/docker_ports_windows.go
+index 4c2de4364..657f1950c 100644
+--- a/rdd/pkg/socketbridge/docker_ports_windows.go
++++ b/rdd/pkg/socketbridge/docker_ports_windows.go
+@@ -31,8 +31,11 @@ type dockerBinding struct {
+ 	HostPort string
+ }
+ type portContainer struct {
+-	ID              string
+-	HostConfig      struct{ PortBindings map[string][]dockerBinding }
++	ID         string
++	HostConfig struct {
++		PortBindings map[string][]dockerBinding
++		NetworkMode  string
++	}
+ 	State           *struct{ Running *bool }
+ 	NetworkSettings struct{ Ports map[string][]dockerBinding }
+ }
+@@ -109,6 +112,19 @@ func rewriteCreatePorts(ctx context.Context, transport http.RoundTripper, prefix
+ 	if err := json.Unmarshal(raw, &host); err != nil {
+ 		return nil, err
+ 	}
++	var networkMode string
++	if raw = host["NetworkMode"]; len(raw) > 0 {
++		if err := json.Unmarshal(raw, &networkMode); err != nil {
++			return nil, err
++		}
++	}
++	// Docker does not publish bindings on a network-less container. CRI starts
++	// its sandbox this way and attaches CNI only after Start returns. Preserve
++	// that contract: allocating or awaiting a Windows publication here deadlocks
++	// sandbox setup. This exception is based on inspected mode, never pod labels.
++	if networkMode == "none" {
++		return body, nil
++	}
+ 	bindings := map[string][]jsonFields{}
+ 	if raw = host["PortBindings"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+ 		if err := json.Unmarshal(raw, &bindings); err != nil {
+@@ -317,6 +333,10 @@ func withPortLifecycle(next http.Handler, transport http.RoundTripper, published
+ 		path = match[1] + "/containers/" + container.ID + "/json"
+ 		r.URL.Path = match[1] + "/containers/" + container.ID + "/" + match[3]
+ 		r.URL.RawPath = ""
++		if container.HostConfig.NetworkMode == "none" {
++			next.ServeHTTP(w, r)
++			return
++		}
+ 		if status == 200 {
+ 			release := reservations.beginStart(container.ID)
+ 			defer release()
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows_test.go b/rdd/pkg/socketbridge/docker_ports_windows_test.go
+index 9a887d4d2..d9265805f 100644
+--- a/rdd/pkg/socketbridge/docker_ports_windows_test.go
++++ b/rdd/pkg/socketbridge/docker_ports_windows_test.go
+@@ -156,6 +156,48 @@ func TestPublishAllUsesImageAndRequestExposedPorts(t *testing.T) {
+ 	}
+ }
+ 
++func TestNetworklessSandboxDoesNotWaitForPublicationBeforeCNIAttachment(t *testing.T) {
++	body := []byte(`{"HostConfig":{"NetworkMode":"none","PortBindings":{"80/tcp":[{"HostPort":""}]}},"Future":9007199254740993}`)
++	changed, err := rewriteCreatePorts(context.Background(), nil, "", body, func(string) (string, error) {
++		t.Fatal("network-less sandbox reserved a Windows port")
++		return "", nil
++	})
++	if err != nil || !bytes.Equal(changed, body) {
++		t.Fatalf("changed network-less request: %s %v", changed, err)
++	}
++	listener, err := net.Listen("tcp4", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	_, port, _ := net.SplitHostPort(listener.Addr().String())
++	for _, mode := range []string{"none", "bridge"} {
++		for _, outcome := range []int{204, 500} {
++			mutations := 0
++			transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if r.Method == "POST" {
++					mutations++
++					if r.URL.Path != "/containers/"+strings.Repeat("a", 64)+"/start" {
++						t.Error("mutable target")
++					}
++					w.WriteHeader(outcome)
++					return
++				}
++				fmt.Fprintf(w, `{"Id":%q,"HostConfig":{"NetworkMode":%q,"PortBindings":{"80/tcp":[{"HostPort":%q}]}},"State":{"Running":false}}`, strings.Repeat("a", 64), mode, port)
++			}))
++			response := httptest.NewRecorder()
++			dockerHandlerPorts(transport, func(string, string) bool { return false }).ServeHTTP(response, httptest.NewRequest("POST", "/containers/sandbox/start", nil))
++			if mode == "none" {
++				if response.Code != outcome || mutations != 1 {
++					t.Fatalf("sandbox blocked or backend error hidden: %d %d", response.Code, mutations)
++				}
++			} else if response.Code != 409 || mutations != 0 {
++				t.Fatal("bridge port conflict bypassed")
++			}
++		}
++	}
++}
++
+ func TestIncompleteInspectionCannotDispatchStart(t *testing.T) {
+ 	var mutations atomic.Int32
+ 	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -12,8 +12,10 @@ that a subsequently implemented flow is absent.
   dependency. The local listener opens but forwarding the first request fails.
   The UI retains the concrete error and removes the dead link. Signed openSUSE
   Leap 16.0 socat/libwrap RPMs passed signature and dependency checks and were
-  installed only in the owned guest for a dependency proof; reproducible bundled
-  provisioning and the complete native forwarding journey remain in progress.
+  installed only in the owned guest for a dependency proof. Patch 0011 now
+  bundles the pinned binary/source RPMs and licenses; automatic existing-guest
+  repair passed after removing the manual packages. Fresh provisioning and the
+  complete native forwarding journey remain in progress.
 
 - BL-003: pinned runtime clients are bundled; native first-run cancel/setup/resume
   passed on a fresh sequential proof guest. Installed-product checks remain open.
@@ -61,6 +63,10 @@ that a subsequently implemented flow is absent.
 - Dependency record: the base image lacks socat and libwrap. The official
   Leap 16.0 signed RPMs passed `rpm --checksig` and an offline dependency test.
   Manual installation in the owned guest is a proof step, not the product fix.
+- Subsequent evidence: bundled automatic repair passed `bbbabad2…`; installed
+  files verify cleanly and the retained PVC file survives. Native HTTP through
+  the manually repaired guest passed on 60722, including navigation and explicit
+  stop. Current-bundle and fresh-guest acceptance remain separate requirements.
 - Owner/target: OrbWin guest packaging/provisioning, Phase 1. No upstream issue
   has been filed. Track the narrow adaptation and source/license provenance.
 - Acceptance: fresh and existing guests obtain hash-pinned dependencies without

@@ -218,6 +218,10 @@ pub(crate) fn validate_backend_manifest(manifest: &serde_json::Value) -> Result<
             "patches/rdd/0011-offline-guest-packages.patch",
             include_bytes!("../../patches/rdd/0011-offline-guest-packages.patch"),
         ),
+        (
+            "patches/rdd/0012-networkless-sandbox-publication.patch",
+            include_bytes!("../../patches/rdd/0012-networkless-sandbox-publication.patch"),
+        ),
     ];
     let actual = manifest["patches"]
         .as_array()

@@ -353,3 +353,22 @@ precedence over shared command-output CSS. Native file dialogs are parented to
 their invoking window. Fresh guest and bundled native forward/terminal acceptance
 remain open. A separate service-pod failure now reproduces a publication check
 on a CRI sandbox with Docker network mode `none`; investigation continues.
+
+### Kubernetes sandbox publication correction — 2026-10-24
+
+Patch 0012 preserves Docker's network-less sandbox contract. A `none` network
+does not publish Docker bindings; CRI configures CNI after Start returns. The
+adapter previously awaited publication before that step, repeatedly preventing
+the service pod from becoming ready. Create preserves its request without port
+allocation, and start/restart dispatch uses the inspected immutable ID without
+the inapplicable publication check. Labels do not authorize this exception.
+Bridge publication and occupied-port refusal remain unchanged. Regression tests
+cover occupied Windows ports, retained backend failure and bridge refusal.
+
+Twelve patches replay cleanly (`patch-replay-7a22dcbd…`); socket-bridge race tests
+pass. Binary `0896047decdfa7c851870e80b5edc51439f243b8baa522379b4933c60e15c8f6`
+passed upgrade/service/mount proof `821f6932…`, retaining the original daemon.
+The existing service pod recovered to 2/2 ready without deletion. Retained-PVC
+verification passed again; Windows/WSL/delegated publication proof
+`orbwin-publish-92b1b397` passed. Node 41 tests, frontend production build and
+Clippy pass. These are checkpoint results, not Phase 1 acceptance.
