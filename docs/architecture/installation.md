@@ -28,3 +28,17 @@ A named qualification-only instance may exercise clean provisioning using a
 separate registration/home/pipe. Because the product currently owns one network
 namespace, such a proof must reject a running product guest and cannot run in
 parallel with it. This is test infrastructure, not multi-instance product support.
+
+## Bundled backend replacement
+
+An installed upgrade must be an explicit setup/resume action with a workload
+interruption confirmation. It verifies the new immutable resources before any
+lifecycle request, validates the existing intent and identity against the exact
+owned home/endpoint/registration, and retains the recorded daemon ID. If the
+bundle differs, stop the owned management service before starting the new binary;
+never let an old service answer readiness for a new manifest. Cancellation at any
+step retains intent, the old identity, disks and logs; resume repeats validation.
+Publish the new identity only after current-start readiness and the same actual
+daemon ID. An unknown or mismatched record must refuse before service changes.
+The existing exclusive setup lock and operation mutation lease serialize clients;
+rdd remains the only reconciler. No automatic downgrade or disk rollback occurs.

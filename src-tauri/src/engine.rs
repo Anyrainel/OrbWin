@@ -236,6 +236,7 @@ pub struct Status {
     pub version: Option<String>,
     pub diagnostic: Option<String>,
     pub setup_available: bool,
+    pub upgrade_available: bool,
     pub resources: Option<serde_json::Value>,
 }
 pub async fn status() -> Status {
@@ -256,6 +257,7 @@ pub async fn status() -> Status {
             version,
             diagnostic: None,
             setup_available: false,
+            upgrade_available: false,
             resources: Some(resources),
         },
         Err(detail) => Status {
@@ -272,6 +274,7 @@ pub async fn status() -> Status {
             version: None,
             diagnostic: Some(detail),
             setup_available: crate::installation::available(),
+            upgrade_available: crate::installation::upgrade_available(),
             resources: None,
         },
     }

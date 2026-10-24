@@ -11,6 +11,7 @@ export type Resource = Record<string, unknown>;
 export type Diagnostic = { name: string; output: string; success: boolean };
 export type BackendStatus = {
   setupAvailable?: boolean;
+  upgradeAvailable?: boolean;
   resources?: { cpus?: number; memoryBytes?: number };
   available: boolean;
   endpoint: string;

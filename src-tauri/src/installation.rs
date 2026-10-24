@@ -56,12 +56,71 @@ pub(crate) fn registration(_: &Path, _: &str) -> Result<bool, String> {
 }
 
 pub(crate) fn available() -> bool {
+    preparation_mode().is_some()
+}
+
+pub(crate) fn upgrade_available() -> bool {
+    preparation_mode() == Some(true)
+}
+
+fn preparation_mode() -> Option<bool> {
     let Ok(directory) = runtime::state_dir() else {
-        return false;
+        return None;
     };
-    !runtime::identity_path().is_ok_and(|p| p.exists())
-        && runtime::backend_dir().join("rdd.exe").is_file()
-        && registration(&directory.join("home"), "lima-orbwin").is_ok()
+    // A development proof is not permission to prepare an installed home over
+    // its registration. Installed setup uses only its own state directory.
+    let identity = runtime::identity_path().ok()?;
+    if identity.exists() && identity != directory.join("runtime.json") {
+        return None;
+    }
+    if !runtime::backend_dir().join("rdd.exe").is_file()
+        || registration(&directory.join("home"), "lima-orbwin").is_err()
+    {
+        return None;
+    }
+    if !identity.exists() {
+        return Some(false);
+    }
+    let old: serde_json::Value = serde_json::from_slice(&std::fs::read(identity).ok()?).ok()?;
+    let home = runtime::cli_path(&directory.join("home")).ok()?;
+    validate_prior_identity(&old, &home, engine::ENDPOINT).ok()?;
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(runtime::backend_dir().join("build-manifest.json")).ok()?,
+    )
+    .ok()?;
+    runtime::validate_backend_manifest(&manifest).ok()?;
+    if old["sourceCommit"] != manifest["sourceCommit"] {
+        return None;
+    }
+    (old["binarySha256"] != manifest["binarySha256"]).then_some(true)
+}
+
+fn validate_prior_identity(
+    identity: &serde_json::Value,
+    home: &Path,
+    endpoint: &str,
+) -> Result<(), String> {
+    let digest = |key: &str, length| {
+        identity[key]
+            .as_str()
+            .is_some_and(|s| s.len() == length && s.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    let recorded_home = identity["home"]
+        .as_str()
+        .map(PathBuf::from)
+        .and_then(|p| p.canonicalize().ok());
+    if identity["identityVerified"] != true
+        || identity["endpoint"] != endpoint
+        || !identity["daemonId"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+        || !digest("sourceCommit", 40)
+        || !digest("binarySha256", 64)
+        || recorded_home != Some(home.canonicalize().map_err(|e| e.to_string())?)
+    {
+        return Err("The existing engine identity does not match this owned home and endpoint. No service change was sent.".into());
+    }
+    Ok(())
 }
 
 fn stage(output: &Channel<Output>, message: &str) -> Result<(), String> {
@@ -141,6 +200,7 @@ struct SetupLocation {
     vm: &'static str,
     endpoint: &'static str,
 }
+
 pub(crate) async fn setup(
     output: &Channel<Output>,
     cancelled: &mut oneshot::Receiver<()>,
@@ -193,7 +253,22 @@ async fn setup_at(
         .map_err(|e| {
             format!("Another setup may be active, or the setup lock is inaccessible: {e}")
         })?;
-    registration(&home, &distro)?;
+    let registered = registration(&home, &distro)?;
+    let identity = directory.join("runtime.json");
+    let prior: Option<serde_json::Value> = if identity.exists() {
+        let old = serde_json::from_slice(&std::fs::read(&identity).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        validate_prior_identity(&old, &home, location.endpoint)?;
+        if old["sourceCommit"] != manifest["sourceCommit"] {
+            return Err("This upstream-version transition has not been qualified. No service change was sent; retain the existing engine and use a compatible OrbWin build.".into());
+        }
+        if !registered {
+            return Err("The recorded engine registration is missing. Existing data was retained; inspect diagnostics before setup.".into());
+        }
+        Some(old)
+    } else {
+        None
+    };
     let intent = directory.join("setup-intent.json");
     if intent.exists() {
         let prior: serde_json::Value =
@@ -204,12 +279,22 @@ async fn setup_at(
             .map(PathBuf::from)
             .map(|p| runtime::cli_path(&p))
             .transpose()?;
-        if prior_home.as_ref() != Some(&home) || prior["instance"] != location.instance {
+        if prior_home.as_ref() != Some(&home)
+            || prior["instance"] != location.instance
+            || prior["schema"] != 1
+            || prior["product"] != "OrbWin"
+        {
             return Err(
                 "Setup intent does not match the owned home. No backend request was sent.".into(),
             );
         }
     } else {
+        if prior.is_some() {
+            return Err(
+                "The existing engine has no matching setup intent. No service change was sent."
+                    .into(),
+            );
+        }
         if home.exists()
             && std::fs::read_dir(&home)
                 .map_err(|e| e.to_string())?
@@ -225,6 +310,42 @@ async fn setup_at(
     }
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     runtime::configure_client(&short.join("docker"))?;
+    if prior
+        .as_ref()
+        .is_some_and(|old| old["binarySha256"] != manifest["binarySha256"])
+    {
+        // A listening endpoint must still identify the recorded engine before
+        // replacement. Only a genuinely absent pipe permits offline resume;
+        // busy/denied/malformed/foreign endpoints fail closed.
+        let pipe = format!(r"\\.\pipe\docker-rancher-desktop-{}", location.instance);
+        match std::fs::OpenOptions::new().read(true).write(true).open(pipe) {
+            Ok(connection) => {
+                drop(connection);
+                let actual = process::read_command(&docker, &[
+                    "--config", short.join("docker").to_str().ok_or("Invalid client path")?,
+                    "--host", location.endpoint, "info", "--format", "{{.ID}} {{.OSType}}"
+                ]).await?;
+                let old = prior.as_ref().ok_or("Missing previous engine identity")?;
+                if actual.trim() != format!("{} linux", old["daemonId"].as_str().ok_or("Missing daemon ID")?) {
+                    return Err("The live endpoint differs from the recorded Linux engine. No service change was sent.".into());
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+            Err(e) => return Err(format!("Cannot verify the existing endpoint before backend replacement: {e}. No service change was sent.")),
+        }
+        registration(&home, &distro)?;
+        stage(output, "Applying the bundled backend: stopping only the owned management service. Workloads are interrupted; disks and identity are retained…")?;
+        rdd(
+            &binary,
+            location,
+            &["service", "stop", "--timeout=60s"],
+            None,
+            output,
+            cancelled,
+            75,
+        )
+        .await?;
+    }
     if !service_dir.join("args.json").exists() {
         stage(output, "Creating the private rdd service configuration…")?;
         rdd(
@@ -372,11 +493,18 @@ async fn setup_at(
             "The owned endpoint did not return a Linux engine; no identity was published.".into(),
         );
     }
-    let identity = directory.join("runtime.json");
-    if identity.exists() {
-        let old: serde_json::Value =
+    let current: Option<serde_json::Value> = if identity.exists() {
+        Some(
             serde_json::from_slice(&std::fs::read(&identity).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    if current != prior {
+        return Err("The stored engine identity changed during setup. No identity was replaced; inspect current status before resuming.".into());
+    }
+    if let Some(old) = prior {
         if old["daemonId"] != id {
             return Err("The existing daemon ID changed; no identity was replaced.".into());
         }
@@ -394,4 +522,41 @@ async fn setup_at(
         exit_code: Some(0),
         message: "OrbWin is ready. Closing the app leaves the backend running.".into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_replacement_requires_the_recorded_home_endpoint_and_identity() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home =
+            std::env::temp_dir().join(format!("orbwin-upgrade-{}-{stamp}", std::process::id()));
+        std::fs::create_dir(&home).unwrap();
+        let valid = serde_json::json!({"home":home,"endpoint":engine::ENDPOINT,"identityVerified":true,"daemonId":"original-engine","sourceCommit":"a".repeat(40),"binarySha256":"b".repeat(64)});
+        validate_prior_identity(&valid, &home, engine::ENDPOINT).unwrap();
+        for (key, value) in [
+            ("home", serde_json::json!(home.join("foreign"))),
+            (
+                "endpoint",
+                serde_json::json!("npipe:////./pipe/dockerDesktopLinuxEngine"),
+            ),
+            ("identityVerified", serde_json::json!(false)),
+            ("daemonId", serde_json::json!("")),
+            ("sourceCommit", serde_json::json!("unverified")),
+            ("binarySha256", serde_json::json!("not-a-digest")),
+        ] {
+            let mut invalid = valid.clone();
+            invalid[key] = value;
+            assert!(
+                validate_prior_identity(&invalid, &home, engine::ENDPOINT).is_err(),
+                "{key}"
+            );
+        }
+        std::fs::remove_dir(&home).unwrap();
+    }
 }

@@ -75,6 +75,7 @@ export function EngineSetup({
     void readWsl();
   }, []);
   const setupAvailable = status?.setupAvailable === true;
+  const upgradeAvailable = status?.upgradeAvailable === true;
   const bundle = setupAvailable ? "ready" : bundleState(status);
   const engine = engineState(status);
   const starting =
@@ -113,9 +114,11 @@ export function EngineSetup({
           <Box size={30} aria-hidden="true" />
           <div>
             <h1 id="setup-title">
-              {engine === "offline"
-                ? "OrbWin engine is stopped"
-                : "Set up OrbWin"}
+              {upgradeAvailable
+                ? "Update OrbWin engine"
+                : engine === "offline"
+                  ? "OrbWin engine is stopped"
+                  : "Set up OrbWin"}
             </h1>
             <p>
               OrbWin runs Docker and an optional Kubernetes cluster in its own
@@ -152,9 +155,11 @@ export function EngineSetup({
               <small>{stateText[bundleStep]}</small>
               <p>
                 {bundle === "ready"
-                  ? setupAvailable
-                    ? "The bundled backend is available. Setup verifies component checksums before creating your engine."
-                    : "The owned backend bundle and its recorded engine identity were verified."
+                  ? upgradeAvailable
+                    ? "A bundled backend update is ready. Apply it to reuse the existing engine and retained data."
+                    : setupAvailable
+                      ? "The bundled backend is available. Setup verifies component checksums before creating your engine."
+                      : "The owned backend bundle and its recorded engine identity were verified."
                   : bundle === "missing"
                     ? "The backend bundle or runtime identity is unavailable. View diagnostics to identify the missing component before repairing your installation. Existing data is retained."
                     : status?.diagnostic && engine !== "preview"
@@ -181,11 +186,13 @@ export function EngineSetup({
                       ? "Another daemon answers the OrbWin endpoint. OrbWin will not use or start an engine over it (BL-001). Stop the other process or inspect diagnostics."
                       : engine === "preview"
                         ? status?.message
-                        : setupAvailable
-                          ? "Set up a private WSL engine. Guest components may be downloaded; the optional Kubernetes cluster starts disabled."
-                          : engine === "error"
-                            ? `The engine check failed with an unrecognised error. Starting may not resolve it. ${status?.message ?? ""}`
-                            : "Available after the backend is verified."}
+                        : upgradeAvailable
+                          ? "Applying the update restarts the owned backend and interrupts its Docker and Kubernetes workloads. Existing data is retained."
+                          : setupAvailable
+                            ? "Set up a private WSL engine. Guest components may be downloaded; the optional Kubernetes cluster starts disabled."
+                            : engine === "error"
+                              ? `The engine check failed with an unrecognised error. Starting may not resolve it. ${status?.message ?? ""}`
+                              : "Available after the backend is verified."}
               </p>
               {lifecycle.result &&
                 !lifecycle.action &&
@@ -214,7 +221,11 @@ export function EngineSetup({
                     }
                     onClick={setupAvailable ? lifecycle.setup : lifecycle.start}
                   >
-                    {setupAvailable ? "Set up / resume OrbWin" : "Start engine"}
+                    {upgradeAvailable
+                      ? "Update engine"
+                      : setupAvailable
+                        ? "Set up / resume OrbWin"
+                        : "Start engine"}
                   </button>
                 )}
                 <button

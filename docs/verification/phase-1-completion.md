@@ -392,3 +392,38 @@ of spreading full server metadata into the strict native command. An earlier
 unintended automation target exposed that rejection before dispatch; it caused
 no deletion. A regression test covers extra metadata and retained UID. Node 42
 tests and production build pass.
+
+### Setup replacement and fresh guest — 2026-10-24
+
+Installed setup now validates the previous home/endpoint/identity/intent before
+service changes. A changed bundle stops the owned management service before
+starting its replacement; a live foreign or uninspectable endpoint refuses.
+The previous identity remains until current-start readiness and the original
+daemon agree; a concurrently changed record refuses replacement. The initial
+supported transition is within the pinned upstream version. The UI offers an
+explicit update with interruption confirmation rather than asking installed
+users to run a development proof. Unknown upstream transitions remain blocked.
+
+The older proof guest passed replacement and repeated resume, retaining daemon
+`58d0d4b6…`. Its full 2,069,053,440-byte WSL export was inspected and hashed
+(`b696f18db61f81f8e1edf2920453a4aca1a4edf547147c46f860cc9e95a96704`)
+before decommissioning only that task-created fixture. Its control plane and
+export remain in `artifacts/setup-proof-preserved-f4a26f81…`.
+Fresh first-run cancel/setup/resume then passed in 96.66 seconds, creating a
+distinct new proof daemon `9c565236…`; this is fresh provisioning, not migration.
+
+Fresh dependency/HTTP/restart proof `fresh-guest-283e6fbe…` passed on `0896047d…`:
+both bundled RPMs verify, pod/service forwards serve the unique marker, and
+service forwarding works after restart with unchanged package verification.
+The exact namespace was removed and the proof service stopped. Earlier failures
+remain: a previous fixture's zero-byte shared socket placeholder was preserved
+as `docker.sock.preserved-20261024` after checking type, size, owner and mount
+status; the relay correctly refused to overwrite it. The harness now requires
+current-start Lima readiness, a live API readyz and actual container exec before
+trusting persisted Pod Ready conditions. No guest reset was used as recovery.
+
+The current twelve-patch binary also passed refreshed three-engine coexistence
+`orbwin-coexist-bc3992f3` and consecutive Testcontainers suites `5e0c6ddd…` and
+`7176ed68…`, each including concurrency, intentional failure, cancellation and
+Ryuk cleanup. Other daemon identities, sentinel data and global client configs
+were preserved. Installed/native setup and remaining phase-wide gates stay open.

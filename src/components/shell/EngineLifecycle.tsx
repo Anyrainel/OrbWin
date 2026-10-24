@@ -62,7 +62,9 @@ export function EngineLifecycleProvider({
   const [startedAt, setStartedAt] = useState(0);
   const [output, setOutput] = useState("");
   const [result, setResult] = useState<LifecycleResult | null>(null);
-  const [confirm, setConfirm] = useState<"stop" | "restart" | null>(null);
+  const [confirm, setConfirm] = useState<"setup" | "stop" | "restart" | null>(
+    null,
+  );
   const active = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const settled = useRef(onSettled);
@@ -172,7 +174,9 @@ export function EngineLifecycleProvider({
     output,
     result,
     start: () => void execute("start"),
-    setup: () => void execute("setup"),
+    setup: () => {
+      if (!active.current) setConfirm("setup");
+    },
     requestStop: () => {
       if (!active.current) setConfirm("stop");
     },
@@ -187,11 +191,19 @@ export function EngineLifecycleProvider({
       {confirm && (
         <ConfirmDialog
           title={
-            confirm === "stop"
-              ? "Stop OrbWin engine?"
-              : "Restart OrbWin engine?"
+            confirm === "setup"
+              ? "Prepare OrbWin engine?"
+              : confirm === "stop"
+                ? "Stop OrbWin engine?"
+                : "Restart OrbWin engine?"
           }
-          confirmLabel={confirm === "stop" ? "Stop engine" : "Restart engine"}
+          confirmLabel={
+            confirm === "setup"
+              ? "Continue"
+              : confirm === "stop"
+                ? "Stop engine"
+                : "Restart engine"
+          }
           destructive
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
@@ -201,9 +213,11 @@ export function EngineLifecycleProvider({
           }}
         >
           <p>
-            {confirm === "stop"
-              ? "Stops the OrbWin guest and interrupts its containers and Kubernetes workloads."
-              : "Stops the OrbWin guest, then starts it again. Running containers and Kubernetes workloads are interrupted; containers restart only according to their restart policy."}{" "}
+            {confirm === "setup"
+              ? "Creates or resumes the private engine. If a bundled backend update is needed, it stops the owned backend before applying it, interrupting Docker and Kubernetes workloads. Setup verifies the same engine identity before accepting existing data. Guest components may be downloaded. Cancelling stops the client; accepted backend work may continue."
+              : confirm === "stop"
+                ? "Stops the OrbWin guest and interrupts its containers and Kubernetes workloads."
+                : "Stops the OrbWin guest, then starts it again. Running containers and Kubernetes workloads are interrupted; containers restart only according to their restart policy."}{" "}
             Persistent disks are retained. Docker Desktop, Rancher Desktop and
             your own WSL distributions are not stopped.
           </p>
