@@ -602,5 +602,22 @@ all passed. Ryuk remained enabled, no task containers/helpers remained, and
 global client configurations were unchanged. Raw expected-cancellation warnings
 are retained; cancellation is not reported as a successful application exit.
 
-Phase 1 remains in progress until whole-host sleep/resume and final scope/gate
-reconciliation are complete.
+### Acceptance — 2026-10-24, after user-confirmed sleep/wake
+
+The final source-matched installer `b13cb6f0…` passed actual replacement/hash
+verification and startup with retained Docker and Kubernetes workloads. The user
+subsequently confirmed Windows had slept. At 4:20 PM Pacific all independent
+postconditions passed, including the same Docker container start time, exact
+Docker/cluster markers, PVC UID/PV, Ready node, Ubuntu source identity and Unix
+client endpoint, both foreign daemon IDs and global config hashes.
+
+Kernel-Power 566 records a SleepButton request at 4:13:53 PM. The normal
+suspend/resume event pair was absent, so the strict automated event test remains
+a retained failure. Phase acceptance uses the manual user-confirmed transition
+and verified product postconditions; it does not claim an instrumented S3 state,
+sleep duration, wake latency or absence of transient outages.
+
+Exact, ownership-checked cleanup passed for the task namespace/PVC and Docker
+HTTP container/network/volume. Unknown volumes, cached images and historical
+archives were retained. Phase 1 is accepted within the documented local matrix;
+the final assessment and coverage record carry adaptations and residual limits.

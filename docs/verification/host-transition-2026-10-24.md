@@ -1,8 +1,30 @@
 # Host transition qualification
 
-Physical Windows sleep/resume is pending. Do not infer it from guest termination,
-process loss, a time gap or simulated pause. It is the remaining roadmap host
-transition gate, separate from the passing scoped faults below.
+## Final observation — 2026-10-24, 4:20 PM Pacific
+
+The user explicitly confirmed that Windows had slept since the recorded before
+snapshot. Independent postchecks passed: identical daemon and Docker container
+start time, exact HTTP marker, unchanged PVC UID/PV and cluster marker, Ready
+node, Ubuntu source identity and Unix Docker endpoint, both foreign daemon IDs,
+and both global configuration hashes. See
+`artifacts/qualification/installed-host-transition-postcheck.json`.
+
+Windows Kernel-Power 566 records `SleepButton` at 4:13:53 PM Pacific. This
+corroborates a sleep request, not the completed power state. No new Kernel-Power
+42/107 or Power-Troubleshooter 1 pair was found; the strict automated check failed
+and its result is retained unchanged. Read-only power-request diagnostics require
+elevation and were unavailable; no power setting or permission was changed.
+
+Acceptance uses a **manual, user-confirmed sleep/wake test with verified product
+postconditions**. It does not claim an instrumented S3 transition, sleep duration,
+automatic wake, wake latency or absence of transient outages. The lack of the
+event pair remains a measurement limitation, not a rewritten automated pass.
+
+## Prepared protocol and evidence boundaries
+
+Sleep must not be inferred from guest termination, process loss, a time gap or
+simulated pause. The manual user observation above supplies transition evidence;
+the independent postcheck supplies preservation/reachability evidence.
 
 The prepared read-only before/after harness is
 `artifacts/installed-host-transition.mjs`, launched through ordinary Explorer to

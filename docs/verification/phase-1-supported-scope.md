@@ -1,6 +1,9 @@
 # Phase 1 qualification scope
 
-Recorded 2026-10-24. Final phase acceptance remains pending host sleep/resume.
+Recorded 2026-10-24. Phase 1 is accepted within this local qualification scope.
+Sleep/wake qualification uses the user's confirmed transition and passing
+postconditions; the usual Windows suspend/resume event pair was absent, so exact
+sleep depth and wake latency remain unverified.
 This is one observed local support matrix, not a public compatibility guarantee.
 
 | Component | Qualified configuration |

@@ -1,9 +1,10 @@
 # Phase 1 final assessment
 
-2026-10-24 Pacific. **Decision pending actual host sleep/resume.** Implementation
-and installed-product qualification have continued beyond the earlier readiness
-checkpoint. Do not start Phase 2 or label Phase 1 accepted until the remaining
-host-transition result and final cleanup/accounting are recorded.
+2026-10-24 Pacific. **Accepted for the stated local Phase 1 scope.** Implementation,
+installed-product qualification, manual sleep/wake preservation and exact fixture
+cleanup are recorded. This is not a public release or a broader compatibility
+claim. The sleep result uses the user's confirmed transition and independent
+postchecks; exact power state and wake latency were not instrumented.
 
 Source checkpoint: `ee0eb7b`. Backend remains the twelve-patch `0896047d…`
 build; the [supported matrix](phase-1-supported-scope.md) specifies the exact
@@ -23,7 +24,7 @@ read-only before-transition snapshot, not a claim based only on compilation.
 | Native developer UI | Actual resource actions, batch partial failure, private registry pull/build/forget, logs/search/wrap/export, stats, files, Docker/pod TTY, persistent pod/service forwards, WSL project/terminal, storage and diagnostics reviewed in native windows |
 | Closure and cancellation | UI closure retains workloads; bounded clients/kill-on-close jobs, explicit uncertain accepted mutations, session/forward cancellation and data retention exercised |
 | Fault recovery/data | Installed management/hostagent/guest loss and contained OOM/ENOSPC; confirmed reconnect and ordinary restart after guest tap removal; exact Docker and cluster markers retained |
-| Host sleep/resume | Prepared actual before/after test; pending user-coordinated physical transition and Windows event evidence |
+| Host sleep/resume | User-confirmed sleep/wake; independent postchecks retain every recorded identity/marker/configuration and the Docker container start time. Kernel-Power 566 records a SleepButton request; the usual 42/107/1 event pair is absent. Manual test accepted; strict automated event check remains failed and retained. |
 | Measurements and quality | Three measured starts/build/filesystem samples and idle budgets; 42 Node / 37 ordinary Rust tests, Clippy, formatting, frontend/package builds; helper race tests; focused ownership/cancellation/limits review |
 
 Residual boundaries are explicit: direct localhost networking on one Windows x64
@@ -41,8 +42,11 @@ properties and the original `desktop-linux` context match task entry. Raw JSON
 formatting changed during earlier external-engine startup; byte equality is
 claimed only within the individual qualification windows, not over the whole task.
 
-After actual sleep/wake: verify Windows suspend/resume events, the same data and
-endpoints, then remove only labeled task fixtures, retain unknown volumes and
-preserved historical archives, record the final decision, commit/push to the
-private GitHub repository and create the requested local Phase 2 chat with a
-concrete handoff. No push or Phase 2 creation is claimed at this checkpoint.
+At 4:20 PM Pacific, read-only postchecks passed after the user's sleep confirmation.
+The missing event pair is retained as a measurement limitation, not converted to
+an automated pass. See [host transition evidence](host-transition-2026-10-24.md).
+Exact cleanup then deleted only the recorded namespace with a UID precondition,
+its PVC, and the labeled Docker HTTP container/network/volume. Two unrecognized
+anonymous volumes, cached images, historical archives and the selected Ubuntu
+proof source/export were retained. The installed engine/optional cluster stay
+available for Phase 2. Cleanup evidence is `installed-final-cleanup.json`.

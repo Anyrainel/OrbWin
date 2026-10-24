@@ -3,8 +3,9 @@
 ## Current qualification — 2026-10-24
 
 The table below supersedes the historical implementation inventory later in this
-file. Phase 1 remains in progress pending physical host sleep/resume and final
-acceptance accounting. Exact evidence and failures are in the
+file. Phase 1 is accepted within the stated local matrix, including manually
+confirmed sleep/wake with passing preservation checks. Exact sleep depth and
+wake latency remain unverified. Evidence and failures are in the
 [completion record](verification/phase-1-completion.md).
 
 | Family | Implemented and observed | Supported adaptation / qualification boundary |
@@ -19,7 +20,7 @@ acceptance accounting. Exact evidence and failures are in the
 | Kubernetes | Optional enable/disable/version controls, workloads/claims/apply/UID-safe deletion, followed logs, native pod TTY and persistent pod/service localhost forwarding; version upgrade retains PVC/PV/sentinel | Pin-specific guest dependencies are bundled. Workload cluster and backend management API are separate. Forward cancellation retains the pod. |
 | WSL integration | Selected non-root Ubuntu connect/inspect/disconnect; real bind identity, Linux clients/Compose/Buildx/credentials, source replacement, idle/restart preservation and native terminal launch | A selected export needs a live user-distro session; reconnect guidance is explicit. Transparent arbitrary `/home` mapping remains later convenience. |
 | Settings | Native theme/title bar, navigation/keyboard and minimum-size review; explicit lifecycle/cluster/version controls and client guidance | Requested resources are distinguished from shared WSL allocation (BL-006); unsupported proxy transactions are explained (BL-016). Tray/autostart and public auto-update remain later UI conveniences. |
-| Recovery and diagnostics | Installed management/hostagent/owned-guest faults, fresh errors/retry and exact preserved markers; native bounded diagnostic export; contained cgroup OOM/tmpfs ENOSPC | Reconnect can restart the guest and interrupt workloads. No reset or global WSL shutdown as routine recovery. Physical sleep/resume remains open. |
+| Recovery and diagnostics | Installed management/hostagent/owned-guest faults, fresh errors/retry and exact preserved markers; native bounded diagnostic export; contained cgroup OOM/tmpfs ENOSPC; manually confirmed sleep/wake retained all recorded data/endpoints | Reconnect can restart the guest and interrupt workloads. No reset or global WSL shutdown as routine recovery. Sleep depth and wake latency were not instrumented; the strict event-pair check remains a retained failure. |
 | Compatibility and packaging | Twelve replayable patches; installed three-engine workloads/conflicts/restart; repeated/concurrent Testcontainers/Ryuk; C/F/Ubuntu paths; actual NSIS install/refusal/update/uninstall/reinstall and file/data retention | One explicit Windows x64 host matrix, unsigned local installer. Additional OS/client versions and public signing/distribution need qualification. See [packaging](architecture/packaging.md) and [baseline](verification/baseline-2026-10-24.md). |
 | Migration | Actual standalone source/API audit completed | No source-version-specific migration transaction found. No automatic interchange assumed; custom migration remains Phase 2 (BL-016). |
 

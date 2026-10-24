@@ -10,10 +10,13 @@ Rancher `rdd` build run locally. Management startup, an owned WSL guest, Linux
 container execution and a Redis/PostgreSQL/Compose/Buildx baseline have passed.
 Typed resource operations, Buildx/Compose, interactive exec, Kubernetes workloads
 and Windows Node Testcontainers have also passed scoped runtime proofs.
-**Phase 1 qualification is in progress.** Installed first-run, native developer
+**Phase 1 is accepted within its stated local qualification scope.** Installed first-run, native developer
 flows, simultaneous-engine operation, selected Ubuntu integration, packaging,
-fault recovery and measured budgets now have recorded evidence. Physical host
-sleep/resume and final acceptance accounting remain open.
+fault recovery and measured budgets have recorded evidence. The manually
+confirmed sleep/wake check preserved Docker/Kubernetes data and all recorded
+endpoints; exact sleep depth and wake latency were not instrumented. See the
+[final assessment](docs/verification/phase-1-final-assessment.md) for evidence
+and remaining external limits.
 The [2026-10-24 readiness reassessment](docs/verification/phase-1-readiness-2026-10-24.md)
 records fresh passing workload checks, a fixed Run-form mount defect, and the
 failed/open phase gates at that checkpoint. Implementation continued afterward.
