@@ -52,10 +52,7 @@ export function engineState(status: BackendStatus | null): EngineState {
 // the owned endpoint must never be "fixed" by starting another engine (BL-001).
 export function canStartEngine(status: BackendStatus | null) {
   const engine = engineState(status);
-  return (
-    bundleState(status) !== "missing" &&
-    (engine === "offline" || engine === "error")
-  );
+  return bundleState(status) === "ready" && engine === "offline";
 }
 
 export function wslState(

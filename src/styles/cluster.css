@@ -185,15 +185,15 @@
   flex: 1;
   min-width: 140px;
 }
-.k8s-log,
-.k8s-yaml {
+.command-output.k8s-log,
+.command-output.k8s-yaml {
   max-height: none;
   height: max(260px, calc(100vh - 300px));
   white-space: pre;
   overflow-wrap: normal;
   margin: 0;
 }
-.k8s-log.wrap {
+.command-output.k8s-log.wrap {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

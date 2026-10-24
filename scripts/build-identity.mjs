@@ -9,6 +9,13 @@ export function verifyBuild(root) {
     readFileSync(resolve(root, "artifacts/backend/build-manifest.json")),
   );
   if (
+    build.guestPackagesLockSha256 !==
+    sha256(readFileSync(resolve(root, "guest-packages.lock.json")))
+  )
+    throw new Error(
+      "Backend guest package lock differs; rebuild before testing.",
+    );
+  if (
     build.sourceCommit !== lock.commit ||
     build.patches.length !== lock.patches.length
   )

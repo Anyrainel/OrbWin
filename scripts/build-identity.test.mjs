@@ -15,6 +15,10 @@ test("runtime proof rejects a changed binary or patch even at the same source co
   mkdirSync(join(root, "artifacts/backend"), { recursive: true });
   writeFileSync(join(root, "change.patch"), "expected patch");
   writeFileSync(
+    join(root, "guest-packages.lock.json"),
+    "expected package pins",
+  );
+  writeFileSync(
     join(root, "upstream.lock.json"),
     JSON.stringify({ commit: "pin", patches: ["change.patch"] }),
   );
@@ -23,6 +27,7 @@ test("runtime proof rejects a changed binary or patch even at the same source co
     join(root, "artifacts/backend/build-manifest.json"),
     JSON.stringify({
       sourceCommit: "pin",
+      guestPackagesLockSha256: sha256("expected package pins"),
       binarySha256: sha256("expected binary"),
       patches: [{ path: "change.patch", sha256: sha256("expected patch") }],
     }),
@@ -33,4 +38,7 @@ test("runtime proof rejects a changed binary or patch even at the same source co
   writeFileSync(join(root, "artifacts/backend/rdd.exe"), "expected binary");
   writeFileSync(join(root, "change.patch"), "different patch");
   assert.throws(() => verifyBuild(root), /differs from patch/);
+  writeFileSync(join(root, "change.patch"), "expected patch");
+  writeFileSync(join(root, "guest-packages.lock.json"), "changed package pins");
+  assert.throws(() => verifyBuild(root), /guest package lock differs/);
 });

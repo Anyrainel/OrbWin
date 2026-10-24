@@ -158,6 +158,7 @@ pub(crate) fn target() -> Result<Target, String> {
         crate::runtime::backend_dir().join("build-manifest.json"),
     )?)
     .map_err(|e| e.to_string())?;
+    crate::runtime::validate_backend_manifest(&manifest)?;
     let lock: serde_json::Value = serde_json::from_str(include_str!("../../upstream.lock.json"))
         .map_err(|e| e.to_string())?;
     if !identity.identity_verified

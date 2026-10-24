@@ -145,16 +145,33 @@ pub(crate) fn docker() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
-    use sha2::{Digest, Sha256};
     let manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(backend_dir().join("build-manifest.json"))
             .map_err(|e| format!("Bundled backend manifest is unavailable: {e}"))?,
     )
     .map_err(|e| e.to_string())?;
+    validate_backend_manifest(&manifest)?;
+    let path = backend_dir().join("rdd.exe");
+    if hash_file(&path, 512 << 20)? != manifest["binarySha256"] {
+        return Err("Bundled backend binary differs from its manifest.".into());
+    }
+    Ok((path, manifest))
+}
+
+pub(crate) fn validate_backend_manifest(manifest: &serde_json::Value) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
     let lock: serde_json::Value = serde_json::from_str(include_str!("../../upstream.lock.json"))
         .map_err(|e| e.to_string())?;
     if manifest["sourceCommit"] != lock["commit"] || manifest["distroEmbedded"] != true {
         return Err("Bundled backend source or guest image differs from this application.".into());
+    }
+    if manifest["guestPackagesLockSha256"]
+        != format!(
+            "{:x}",
+            Sha256::digest(include_bytes!("../../guest-packages.lock.json"))
+        )
+    {
+        return Err("Bundled guest package pins differ from this application.".into());
     }
     let patches: &[(&str, &[u8])] = &[
         (
@@ -197,6 +214,10 @@ pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
             "patches/rdd/0010-single-provisioning-owner.patch",
             include_bytes!("../../patches/rdd/0010-single-provisioning-owner.patch"),
         ),
+        (
+            "patches/rdd/0011-offline-guest-packages.patch",
+            include_bytes!("../../patches/rdd/0011-offline-guest-packages.patch"),
+        ),
     ];
     let actual = manifest["patches"]
         .as_array()
@@ -210,11 +231,7 @@ pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
     {
         return Err("Bundled backend patches differ from this application.".into());
     }
-    let path = backend_dir().join("rdd.exe");
-    if hash_file(&path, 512 << 20)? != manifest["binarySha256"] {
-        return Err("Bundled backend binary differs from its manifest.".into());
-    }
-    Ok((path, manifest))
+    Ok(())
 }
 
 fn verified_plugins() -> Result<PathBuf, String> {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as backend from "../../backend";
+import { retryBusyRead } from "../../model/read-retry";
 import type { ClusterKind, K8sObject } from "./model";
 import { parseList } from "./model";
 
@@ -9,18 +10,21 @@ export const CANCELLED = "Read cancelled. Cluster workloads were not stopped.";
 // discards the result and asks the native layer to cancel; it never changes
 // workloads.
 export async function kubectl(
-  request: backend.Operation,
+  request: Extract<backend.Operation, { kind: "cluster" }>,
   signal: AbortSignal,
 ): Promise<string> {
   let output = "";
-  const outcome = await backend.run(
-    crypto.randomUUID(),
-    request,
-    (chunk) => {
-      output += chunk;
-    },
-    signal,
-  );
+  const outcome = await retryBusyRead(() => {
+    output = "";
+    return backend.run(
+      crypto.randomUUID(),
+      request,
+      (chunk) => {
+        output += chunk;
+      },
+      signal,
+    );
+  }, signal);
   if (signal.aborted) throw new Error(CANCELLED);
   if (!outcome.success)
     throw new Error(`${outcome.message}${output ? `\n${output}` : ""}`);
@@ -67,7 +71,8 @@ export function useRead(
     loader
       .current(abort.signal)
       .then((text) => {
-        if (!abort.signal.aborted) setState({ status: "done", text, error: "" });
+        if (!abort.signal.aborted)
+          setState({ status: "done", text, error: "" });
       })
       .catch((error) => {
         if (!abort.signal.aborted)

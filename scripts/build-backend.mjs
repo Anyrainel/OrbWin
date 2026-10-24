@@ -15,6 +15,10 @@ import { kubernetesBuildVersion } from "./kubernetes-build-version.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const lockSource = readFileSync(resolve(root, "upstream.lock.json"));
 const lock = JSON.parse(lockSource);
+const guestPackagesLockSource = readFileSync(
+  resolve(root, "guest-packages.lock.json"),
+);
+const guestPackagesLock = JSON.parse(guestPackagesLockSource);
 execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
   stdio: "inherit",
 });
@@ -98,6 +102,60 @@ if (withDistro) {
       resolve(root, ".tools/guest-cache"),
     ],
     { GOOS: "windows", GOARCH: "amd64", CGO_ENABLED: "0" },
+  );
+  const packages = resolve(root, "artifacts/guest-packages");
+  run(
+    [
+      "run",
+      "./cmd/download-guest-deps",
+      "--manifest",
+      resolve(root, "guest-packages.lock.json"),
+      "--os",
+      "windows",
+      "--arch",
+      "amd64",
+      "--dest",
+      packages,
+      "--cache",
+      resolve(root, ".tools/guest-package-cache"),
+    ],
+    { GOOS: "windows", GOARCH: "amd64", CGO_ENABLED: "0" },
+  );
+  const licenses = resolve(output, "licenses/guest-packages");
+  mkdirSync(licenses, { recursive: true });
+  for (const entry of Object.values(guestPackagesLock)) {
+    const asset = entry.assets[0];
+    const payload = readFileSync(resolve(packages, asset.filename));
+    if (
+      `sha256:${createHash("sha256").update(payload).digest("hex")}` !==
+      asset.checksum
+    )
+      throw new Error(`Guest package checksum differs: ${asset.filename}`);
+    const destination = asset.filename.endsWith("-source.rpm")
+      ? resolve(licenses, asset.filename)
+      : resolve(source, "pkg/embedded", asset.filename);
+    writeFileSync(destination, payload);
+  }
+  for (const [rpm, member, filename] of [
+    ["socat.rpm", "./usr/share/licenses/socat/COPYING", "socat-COPYING"],
+    [
+      "socat.rpm",
+      "./usr/share/licenses/socat/COPYING.OpenSSL",
+      "socat-COPYING.OpenSSL",
+    ],
+    [
+      "libwrap.rpm",
+      "./usr/share/doc/packages/libwrap0/DISCLAIMER",
+      "libwrap-DISCLAIMER",
+    ],
+  ])
+    writeFileSync(
+      resolve(licenses, filename),
+      execFileSync("tar.exe", ["-xOf", resolve(packages, rpm), member]),
+    );
+  writeFileSync(
+    resolve(licenses, "guest-packages.lock.json"),
+    guestPackagesLockSource,
   );
   const nerdctl = resolve(source, "overlay/build/nerdctl");
   mkdirSync(nerdctl, { recursive: true });
@@ -202,6 +260,14 @@ if (!readFileSync(resolve(root, "upstream.lock.json")).equals(lockSource))
   throw new Error(
     "Upstream lock changed during build. No new manifest was published; rebuild from a stable source tree.",
   );
+if (
+  !readFileSync(resolve(root, "guest-packages.lock.json")).equals(
+    guestPackagesLockSource,
+  )
+)
+  throw new Error(
+    "Guest package lock changed during build. Rebuild before publishing a manifest.",
+  );
 execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
   stdio: "inherit",
 });
@@ -212,6 +278,9 @@ writeFileSync(
       sourceCommit: lock.commit,
       go: lock.go.version,
       kubernetesComponents,
+      guestPackagesLockSha256: createHash("sha256")
+        .update(guestPackagesLockSource)
+        .digest("hex"),
       distroEmbedded: withDistro,
       purpose: withDistro
         ? "Guest-capable development artifact; runtime coexistence remains unqualified."

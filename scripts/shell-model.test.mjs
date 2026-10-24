@@ -116,6 +116,13 @@ test("Engine status classification never upgrades unknown failures", () => {
   assert.equal(bundleState(missing), "missing");
   assert.equal(canStartEngine(missing), false);
   assert.equal(engineState(status("something new")), "error");
+  assert.equal(canStartEngine(status("something new")), false);
+  assert.equal(
+    canStartEngine(
+      status("Bundled guest package pins differ from this application."),
+    ),
+    false,
+  );
   assert.equal(bundleState(status("something new")), "unknown");
   assert.equal(engineState(status(undefined)), "preview");
   assert.equal(canStartEngine(status(undefined)), false);

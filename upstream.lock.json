@@ -16,7 +16,8 @@
     "patches/rdd/0007-wsl-shared-socket.patch",
     "patches/rdd/0008-windows-port-publication.patch",
     "patches/rdd/0009-kubernetes-version-selection.patch",
-    "patches/rdd/0010-single-provisioning-owner.patch"
+    "patches/rdd/0010-single-provisioning-owner.patch",
+    "patches/rdd/0011-offline-guest-packages.patch"
   ],
   "patchedFiles": {
     "rdd/pkg/instance/docker_isolation_windows_test.go": "dfabb6cc9f2bdcc52c5243f63df3bb9e3ba5b0370a48db712404710017523138",
@@ -29,7 +30,7 @@
     "rdd/src/networking/pkg/vsock/constants.go": "909fc0ffbe0b778c289f5c1178fc58906c5d15c84476847d76a94b26a1a45662",
     "rdd/src/networking/cmd/network/setup_linux.go": "4f344108aa8ec8995c36e5c41c6710930aad9657af315217e854e09d55ae2dbd",
     "rdd/src/networking/cmd/proxy/wsl_integration_linux.go": "7438a35047f45342492590e5f7d70ddbd7cbd2bf2c92fb87fe235ddfb2cb291e",
-    "rdd/pkg/controllers/app/app/controllers/app_controller.go": "c81bdf573fb021825b0d79b42c8b8acd7d00c7ced4d5d868df2458a8b0904503",
+    "rdd/pkg/controllers/app/app/controllers/app_controller.go": "a40bf24fba7a711ad8dd0ab7cae840f9a28d8ecc351e2903caf0635e12c73617",
     "rdd/cmd/rdd/main.go": "afe32da3c5d472fbce23698e05f975cb11d2c925401f930887cda3b4866f2bac",
     "rdd/cmd/rdd/orbwin_environment.go": "a15e4bf4af8d2f856c9a2461a4f1057ae0a7157cb3012fa0a5c81d53640aa04e",
     "rdd/cmd/rdd/orbwin_environment_test.go": "04eae506281929beacf3d49fc26bb07d85d56b8eeadc3222a93085e4c44bc0be",
@@ -37,22 +38,24 @@
     "rdd/pkg/socketbridge/docker_windows.go": "cfc5ec4a979ed9859d6cf37b1cef41e56be9818a5272c59686a5f63fd5ef857b",
     "rdd/pkg/socketbridge/docker_windows_test.go": "aad58c743c83ee4141ab812b098ee9302ad97d1fd69ea08d2688ac831d4447e1",
     "rdd/pkg/controllers/app/app/controllers/orbwin_proof_test.go": "b9a393da2c39daf4d8753bd17205da96dc6b0c00ec5dbf701bcea389a3cd7531",
-    "rdd/pkg/controllers/app/app/lima-template.yaml": "db5b8a3f29cb0f30bb1a3fef45b6f0ab60d2370320c7bdef2b8d682b9caea4e8",
+    "rdd/pkg/controllers/app/app/lima-template.yaml": "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5",
     "rdd/pkg/socketbridge/docker_ports_windows.go": "35ce6ceda35401dfd30e96d8e8ac53afc50f3610b7a3170b8183c060dc65c683",
     "rdd/pkg/socketbridge/docker_ports_windows_test.go": "47d755754828232a32603068f7a5569b10c9d2e1e9aebf56ad01d69cb722ba02",
     "rdd/pkg/socketbridge/docker_reservations_windows.go": "03055dd2b738f446e7e71a04eaad60b043da96d52cb252920a967084fbb4676d",
     "rdd/pkg/socketbridge/wsl_auth_windows.go": "2b2c462de96538796cd2950958ef822e4a617bc2bc2098920ccafbd69debe899",
     "rdd/src/rdd-guest/wsl_client.go": "cdc52b3742d351d57d5fb635545c7040a38e41e704a4bd254dbeb52fb2ee4713",
     "rdd/src/rdd-guest/wsl_client_test.go": "d4b0f3568ed23d13ac097423031f7cc705110b63cc3bf100ba3ae34ae86a6d19",
-    "rdd/pkg/controllers/app/app/controllers/guest_bridge.go": "4a87c70fe145af3df92e21c80ad187996d22b81889f36b908f5482b5cb82486b",
-    "rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go": "1e2033772bcdd6ef5883ce6c1ef663ca5f4bfff297b5f0442e11108ee3370504",
+    "rdd/pkg/controllers/app/app/controllers/guest_bridge.go": "bfbe3ce3bd1d4494c6468ebd59f5f7ca61893d1c9d6311d90ff42fff08d60770",
+    "rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go": "ca8e9b309dcc4f09709816a312b0137d5cbe342bb073f1fd7c8bbe4f188ca41a",
     "rdd/pkg/embedded/rdd_guest.go": "4cc4328ec70e754abac454747ab47294dd5995d0964a9e59dd2018c8fcaab345",
     "rdd/pkg/embedded/rdd_guest_windows_distro.go": "5c8d194cba253de2c935fe816183cd1e4fc7687b97d76f16db619c859e2bd5f3",
-    "rdd/pkg/embedded/.gitignore": "2b2409bc53ec5bd324994305ab9dae3f74754777ce6b7459b689d0b12019dfaa",
+    "rdd/pkg/embedded/.gitignore": "01ab2459f129795a5c61d862e6709d4af35556cef64546eafa4bb64ef794551d",
     "rdd/pkg/hostswitch/publication_windows.go": "4a35320762b6237cb0e28a114b196f2b3251a7481dc25692e5ced4ef527618cd",
     "rdd/pkg/hostswitch/publication_windows_test.go": "af2f5312412d5c491f2469033bf99910df42d5cc2bd34b72fb86339b38b7e5d0",
     "rdd/pkg/controllers/app/app/controllers/app_webhook.go": "6687f19303585b73a1ec8c914d3d997f2cdbc506752794335903f01b64344f7e",
     "rdd/pkg/controllers/app/app/controllers/kubernetes_version_test.go": "7c31f215132fc2dda7a1fe84083578458bdaabd9774ec226bec2bf027ed943ee",
-    "rdd/pkg/controllers/app/app/controllers/provision_context_test.go": "243789774c532388eae55f43c6a22c50a6f4e63d2eb825944b391200a5f4c2db"
+    "rdd/pkg/controllers/app/app/controllers/provision_context_test.go": "243789774c532388eae55f43c6a22c50a6f4e63d2eb825944b391200a5f4c2db",
+    "rdd/pkg/embedded/guest_packages.go": "588c73b6e72cd6e720edeb9211f0582e02299e1e328b927a4c0f393e3c53a28d",
+    "rdd/pkg/embedded/guest_packages_windows_distro.go": "557c689e9af483dfe15761058a3fb09636fde181e62b9ed7739807df7115199d"
   }
 }

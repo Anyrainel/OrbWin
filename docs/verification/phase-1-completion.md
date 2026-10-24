@@ -333,3 +333,23 @@ cleanup now cancels its current client on navigation and releases progress even
 if its following refresh fails. Read-only detail/catalog reads have bounded
 contention retries with cancellation; identity/transport failures are not retried.
 Frontend build, 41 Node tests and Clippy pass for this checkpoint.
+
+### Offline guest dependency checkpoint — 2026-10-24
+
+Patch 0011 embeds signature-checked, hash-pinned Leap 16.0 socat/libwrap RPMs;
+the bundle also retains their source RPMs and license texts. Build and runtime
+identity bind the separate package lock. Existing-guest proof `bbbabad2…` passed
+after removing the two manually installed proof packages, demonstrating automatic
+offline repair. Binary `bdad9ca5a7b7554664760b3a5002bfcc3163c771496694a8a1688a2c9c1a91ce`
+retains the original daemon and the upgrade fixture's PVC/PV/sentinel. Eleven
+patches replay cleanly (`patch-replay-f10c65e0…`); controller/socket/host-switch
+race tests and 26 ordinary Rust tests pass.
+
+Native forwarding after manual dependency repair served the unique retained
+file on Windows port 60722, survived navigation and stopped without stopping the
+pod. Native followed logs pause, filter and export work; the exported three-line
+file is `artifacts/qualification/native-pod-log-20261024.txt`. Wrapping now takes
+precedence over shared command-output CSS. Native file dialogs are parented to
+their invoking window. Fresh guest and bundled native forward/terminal acceptance
+remain open. A separate service-pod failure now reproduces a publication check
+on a CRI sandbox with Docker network mode `none`; investigation continues.

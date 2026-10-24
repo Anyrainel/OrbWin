@@ -1,0 +1,184 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_controller.go b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+index 2dd87aa37..557221e46 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_controller.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+@@ -163,6 +163,10 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 	if err != nil {
+ 		return "", fmt.Errorf("stage owned guest bridge: %w", err)
+ 	}
++	guestPackages, err := stageGuestPackages()
++	if err != nil {
++		return "", fmt.Errorf("stage owned guest packages: %w", err)
++	}
+ 	// the spec drives them directly. Lima falls back to its own default when a
+ 	// key is absent, which covers the unset case (cpus 0, memory nil).
+ 	kubernetesRelease := ""
+@@ -190,6 +194,10 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 		"param:",
+ 		fmt.Sprintf("  ORBWIN_GUEST_BRIDGE: %q", guestBridge),
+ 		fmt.Sprintf("  ORBWIN_GUEST_BRIDGE_SHA256: %q", guestBridgeHash),
++		fmt.Sprintf("  ORBWIN_SOCAT_RPM: %q", guestPackages["socat.rpm"].Path),
++		fmt.Sprintf("  ORBWIN_SOCAT_RPM_SHA256: %q", guestPackages["socat.rpm"].SHA256),
++		fmt.Sprintf("  ORBWIN_LIBWRAP_RPM: %q", guestPackages["libwrap.rpm"].Path),
++		fmt.Sprintf("  ORBWIN_LIBWRAP_RPM_SHA256: %q", guestPackages["libwrap.rpm"].SHA256),
+ 		fmt.Sprintf("  CONTAINER_ENGINE: %s", spec.ContainerEngine.Name),
+ 		fmt.Sprintf("  HOST_DOCKER_SOCKET: %q", instance.DockerSocket()),
+ 		fmt.Sprintf("  HOST_CONTAINERD_SOCKET: %q", instance.ContainerdSocket()),
+diff --git a/rdd/pkg/controllers/app/app/controllers/guest_bridge.go b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+index 6f1edbe1d..d8cf09c6b 100644
+--- a/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
++++ b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+@@ -75,6 +75,34 @@ func stageGuestBridge() (string, string, error) {
+ }
+ 
+ func stageGuestBridgeAt(dir string, payload []byte) (string, string, error) {
++	return stageGuestAssetAt(dir, "rdd-guest", payload)
++}
++
++type stagedGuestPackage struct{ Path, SHA256 string }
++
++func stageGuestPackages() (map[string]stagedGuestPackage, error) {
++	result := map[string]stagedGuestPackage{}
++	if goruntime.GOOS != "windows" || (instance.Suffix() != "orbwin" && instance.Suffix() != "orbwin-proof") || len(embedded.GuestPackages) == 0 {
++		return result, nil
++	}
++	for _, name := range []string{"socat.rpm", "libwrap.rpm"} {
++		payload := embedded.GuestPackages[name]
++		if len(payload) == 0 {
++			return nil, fmt.Errorf("bundled guest package is missing: %s", name)
++		}
++		path, digest, err := stageGuestAssetAt(filepath.Join(instance.ShortDir(), "guest-code"), name, payload)
++		if err != nil {
++			return nil, err
++		}
++		result[name] = stagedGuestPackage{Path: path, SHA256: digest}
++	}
++	return result, nil
++}
++
++func stageGuestAssetAt(dir, name string, payload []byte) (string, string, error) {
++	if name != "rdd-guest" && name != "socat.rpm" && name != "libwrap.rpm" {
++		return "", "", fmt.Errorf("unsupported guest code asset")
++	}
+ 	guestBridgeStageMu.Lock()
+ 	defer guestBridgeStageMu.Unlock()
+ 	digest := fmt.Sprintf("%x", sha256.Sum256(payload))
+@@ -85,7 +113,7 @@ func stageGuestBridgeAt(dir string, payload []byte) (string, string, error) {
+ 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+ 		return "", "", fmt.Errorf("guest code directory is not a regular directory")
+ 	}
+-	path := filepath.Join(dir, "rdd-guest-"+digest)
++	path := filepath.Join(dir, name+"-"+digest)
+ 	if info, err := os.Lstat(path); err == nil {
+ 		if !info.Mode().IsRegular() {
+ 			return "", "", fmt.Errorf("guest code path is not a regular file")
+diff --git a/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go b/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go
+index d3532e28d..a0f595ef1 100644
+--- a/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go
++++ b/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go
+@@ -10,6 +10,34 @@ import (
+ 	"sigs.k8s.io/yaml"
+ )
+ 
++func TestGuestPackageStagingSeparatesAssetsAndRejectsUnknownPaths(t *testing.T) {
++	dir := t.TempDir()
++	first, _, err := stageGuestAssetAt(dir, "socat.rpm", []byte("signed fixture"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	second, _, err := stageGuestAssetAt(dir, "libwrap.rpm", []byte("signed fixture"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if first == second {
++		t.Fatal("different assets share a staged pathname")
++	}
++	again, _, err := stageGuestAssetAt(dir, "socat.rpm", []byte("signed fixture"))
++	if err != nil || first != again {
++		t.Fatal("repeat staging is not idempotent")
++	}
++	if _, _, err := stageGuestAssetAt(dir, "../outside", []byte("bad")); err == nil {
++		t.Fatal("unknown asset pathname accepted")
++	}
++	if err := os.WriteFile(filepath.Join(dir, filepath.Base(first)), []byte("modified"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err := stageGuestAssetAt(dir, "socat.rpm", []byte("signed fixture")); err == nil {
++		t.Fatal("modified staged package accepted")
++	}
++}
++
+ func TestGuestBridgeStaging(t *testing.T) {
+ 	dir := t.TempDir()
+ 	payload := []byte("verified guest code")
+diff --git a/rdd/pkg/controllers/app/app/lima-template.yaml b/rdd/pkg/controllers/app/app/lima-template.yaml
+index 8f51ccb32..8f7691f60 100644
+--- a/rdd/pkg/controllers/app/app/lima-template.yaml
++++ b/rdd/pkg/controllers/app/app/lima-template.yaml
+@@ -165,6 +165,26 @@ provision:
+     esac
+ 
+     if [[ $PARAM_KUBERNETES_ENABLED == "true" ]]; then
++        case "$PARAM_HOST_DOCKER_SOCKET" in
++          *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++            # cri-dockerd invokes socat for Kubernetes port forwarding. Verify
++            # the bundled distribution packages; never depend on guest DNS.
++            test -n "$PARAM_ORBWIN_SOCAT_RPM"
++            test -n "$PARAM_ORBWIN_LIBWRAP_RPM"
++            test "$(sha256sum "$PARAM_ORBWIN_SOCAT_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_SOCAT_RPM_SHA256"
++            test "$(sha256sum "$PARAM_ORBWIN_LIBWRAP_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_LIBWRAP_RPM_SHA256"
++            rpm --checksig "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_LIBWRAP_RPM")" = libwrap0
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_SOCAT_RPM")" = socat
++            orbwin_expected_packages=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM")
++            orbwin_installed_packages=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' libwrap0 socat 2>/dev/null || true)
++            if [[ "$orbwin_installed_packages" != "$orbwin_expected_packages" ]]; then
++                rpm -Uvh "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            fi
++            rpm -V libwrap0 socat
++            socat -V >/dev/null
++            ;;
++        esac
+         export INSTALL_K3S_VERSION="$PARAM_KUBERNETES_RELEASE"
+         INSTALLED_VERSION=""
+         # awk must read to EOF; `{print; exit}` closes the pipe while k3s
+diff --git a/rdd/pkg/embedded/.gitignore b/rdd/pkg/embedded/.gitignore
+index f938bacd0..e6d0c4007 100644
+--- a/rdd/pkg/embedded/.gitignore
++++ b/rdd/pkg/embedded/.gitignore
+@@ -1 +1,3 @@
+ /rdd-guest.amd64
++/socat.rpm
++/libwrap.rpm
+diff --git a/rdd/pkg/embedded/guest_packages.go b/rdd/pkg/embedded/guest_packages.go
+new file mode 100644
+index 000000000..20ba9478f
+--- /dev/null
++++ b/rdd/pkg/embedded/guest_packages.go
+@@ -0,0 +1,5 @@
++package embedded
++
++// GuestPackages is empty in management-only builds. Windows guest-capable
++// builds carry the offline, hash-pinned distribution packages used by setup.
++var GuestPackages map[string][]byte
+diff --git a/rdd/pkg/embedded/guest_packages_windows_distro.go b/rdd/pkg/embedded/guest_packages_windows_distro.go
+new file mode 100644
+index 000000000..92ba706e3
+--- /dev/null
++++ b/rdd/pkg/embedded/guest_packages_windows_distro.go
+@@ -0,0 +1,15 @@
++//go:build windows && with_distro
++
++package embedded
++
++import _ "embed"
++
++//go:embed socat.rpm
++var socatRPM []byte
++
++//go:embed libwrap.rpm
++var libwrapRPM []byte
++
++func init() {
++	GuestPackages = map[string][]byte{"socat.rpm": socatRPM, "libwrap.rpm": libwrapRPM}
++}

@@ -96,8 +96,11 @@ async fn terminal_resize(
     terminal::resize(&state, &id, cols, rows).await
 }
 #[tauri::command]
-async fn choose_path(directory: bool) -> Result<Option<String>, String> {
-    let dialog = rfd::AsyncFileDialog::new();
+async fn choose_path(
+    window: tauri::WebviewWindow,
+    directory: bool,
+) -> Result<Option<String>, String> {
+    let dialog = rfd::AsyncFileDialog::new().set_parent(&window);
     let selected = if directory {
         dialog.pick_folder().await
     } else {
@@ -113,11 +116,12 @@ async fn choose_path(directory: bool) -> Result<Option<String>, String> {
         .transpose()
 }
 #[tauri::command]
-async fn export_text(contents: String) -> Result<bool, String> {
+async fn export_text(window: tauri::WebviewWindow, contents: String) -> Result<bool, String> {
     if contents.len() > 2 * 1024 * 1024 {
         return Err("Export exceeds the 2 MiB limit.".into());
     }
     let file = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
         .set_file_name("orbwin-output.log")
         .save_file()
         .await;
@@ -147,9 +151,10 @@ struct Diagnostic {
 }
 
 #[tauri::command]
-async fn export_support() -> Result<bool, String> {
+async fn export_support(window: tauri::WebviewWindow) -> Result<bool, String> {
     let snapshot = serde_json::json!({ "schema":1, "product":"OrbWin", "version":env!("CARGO_PKG_VERSION"), "backendSource":serde_json::from_str::<serde_json::Value>(include_str!("../../upstream.lock.json")).map_err(|e| e.to_string())?["commit"], "connection":engine::status().await, "host":host_diagnostics().await });
     let file = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
         .set_file_name("orbwin-diagnostics.json")
         .save_file()
         .await;

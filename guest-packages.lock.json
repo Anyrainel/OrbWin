@@ -1,0 +1,48 @@
+{
+  "libwrap": {
+    "version": "7.6-160000.2.2",
+    "assets": [
+      {
+        "platform": "linux",
+        "arch": "amd64",
+        "filename": "libwrap.rpm",
+        "url": "https://cdn.opensuse.org/distribution/leap/16.0/repo/oss/x86_64/libwrap0-7.6-160000.2.2.x86_64.rpm",
+        "checksum": "sha256:6b6c21afb4aeb158bdd568375b114709d324e5155bfc6cbcb2844dc274e1d0ad"
+      }
+    ]
+  },
+  "libwrap-source": {
+    "version": "7.6-160000.2.2",
+    "assets": [
+      {
+        "platform": "linux",
+        "filename": "libwrap-source.rpm",
+        "url": "https://cdn.opensuse.org/source/distribution/leap/16.0/repo/oss/src/tcpd-7.6-160000.2.2.src.rpm",
+        "checksum": "sha256:be683954871195f421667e9056e695c1b10c542b1bb71c79d97b914c5588bd45"
+      }
+    ]
+  },
+  "socat": {
+    "version": "1.8.0.2-160000.2.3",
+    "assets": [
+      {
+        "platform": "linux",
+        "arch": "amd64",
+        "filename": "socat.rpm",
+        "url": "https://cdn.opensuse.org/distribution/leap/16.0/repo/oss/x86_64/socat-1.8.0.2-160000.2.3.x86_64.rpm",
+        "checksum": "sha256:75726b109f1b4592075e5b4823e1e237ab84bd23095500b1809967ecf370b360"
+      }
+    ]
+  },
+  "socat-source": {
+    "version": "1.8.0.2-160000.2.3",
+    "assets": [
+      {
+        "platform": "linux",
+        "filename": "socat-source.rpm",
+        "url": "https://cdn.opensuse.org/source/distribution/leap/16.0/repo/oss/src/socat-1.8.0.2-160000.2.3.src.rpm",
+        "checksum": "sha256:2a79f0426b56897e238235b2ca225533acea095100430b527aec0bed8c7d980a"
+      }
+    ]
+  }
+}

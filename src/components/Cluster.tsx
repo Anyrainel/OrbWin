@@ -13,11 +13,7 @@ import {
   X,
 } from "lucide-react";
 import * as backend from "../backend";
-import {
-  ClusterControls,
-  ClusterManifest,
-  ClusterRemoval,
-} from "./Operations";
+import { ClusterControls, ClusterManifest, ClusterRemoval } from "./Operations";
 import { CANCELLED, listObjects } from "./cluster/api";
 import { ForwardButton, Inspector, type Tab } from "./cluster/Inspector";
 import {
@@ -81,6 +77,7 @@ export function Cluster({
   const active = useRef<AbortController | null>(null);
   const queued = useRef(false);
   const mounted = useRef(false);
+  const readGeneration = useRef(0);
 
   async function read(silent = false) {
     if (active.current) {
@@ -88,6 +85,7 @@ export function Cluster({
       return;
     }
     const abort = new AbortController();
+    const generation = readGeneration.current;
     active.current = abort;
     if (!silent) setLoading(true);
     try {
@@ -96,14 +94,14 @@ export function Cluster({
       setObjects(items);
       setFailure(null);
     } catch (error) {
-      if (abort.signal.aborted && !mounted.current) return;
+      if (generation !== readGeneration.current || !mounted.current) return;
       const message = error instanceof Error ? error.message : String(error);
       if (abort.signal.aborted)
         setFailure({ type: "cancelled", message: CANCELLED });
       else setFailure({ type: classifyReadError(message), message });
     } finally {
       if (active.current === abort) active.current = null;
-      if (mounted.current) {
+      if (mounted.current && generation === readGeneration.current) {
         setLoading(false);
         // Reconcile mutations that finished while an older read was in flight.
         if (queued.current) {
@@ -129,8 +127,13 @@ export function Cluster({
     }, 15000);
     return () => {
       mounted.current = false;
+      // A remount may begin another read before the cancelled client settles.
+      // Its stale rejection must not become a user-cancelled state in that view.
+      readGeneration.current++;
       queued.current = false;
-      active.current?.abort();
+      const previous = active.current;
+      active.current = null;
+      previous?.abort();
       window.clearInterval(timer);
       window.removeEventListener("orbwin:cluster-changed", changed);
     };
@@ -279,7 +282,8 @@ export function Cluster({
                     let next = at;
                     if (event.key === "ArrowDown")
                       next = Math.min(at + 1, visible.length - 1);
-                    else if (event.key === "ArrowUp") next = Math.max(at - 1, 0);
+                    else if (event.key === "ArrowUp")
+                      next = Math.max(at - 1, 0);
                     else if (event.key === "Home") next = 0;
                     else if (event.key === "End") next = visible.length - 1;
                     else return;
@@ -331,7 +335,10 @@ export function Cluster({
     <div
       className="k8s-workspace"
       onKeyDown={(event) => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        if (
+          (event.ctrlKey || event.metaKey) &&
+          event.key.toLowerCase() === "f"
+        ) {
           event.preventDefault();
           search.current?.focus();
           search.current?.select();
