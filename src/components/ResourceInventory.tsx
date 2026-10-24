@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
+import { LocalPortLink } from "./LocalPortLink";
 import {
   Box,
   ChevronDown,
@@ -36,7 +37,8 @@ import {
   isRunning,
   keyOf as identity,
   name,
-  ports,
+  publishedPorts,
+  publicationWarning,
   target as resourceTarget,
   text,
   volumeUsers,
@@ -285,21 +287,19 @@ export function ResourceList({
     const available = actionsFor(page, [row]).filter(
       (action) => quickIcons[action.id] && !action.unavailable,
     );
-    const link = ports(row.Ports).find((port) => port.url);
+    const link = publishedPorts(row).find((port) => port.url);
     return (
       <span className="quick-actions">
         {page === "containers" && link?.url && isRunning(row) && (
-          <a
+          <LocalPortLink
             className="quick-action"
             tabIndex={-1}
-            href={link.url}
-            target="_blank"
-            rel="noreferrer noopener"
+            port={link.hostPort}
             aria-label={`Open localhost:${link.hostPort} for ${name(row)}`}
             title={`Open localhost:${link.hostPort}`}
           >
             <ExternalLink size={14} />
-          </a>
+          </LocalPortLink>
         )}
         {available.map((action) => {
           const QuickIcon = quickIcons[action.id];
@@ -384,6 +384,11 @@ export function ResourceList({
           <span className="row-copy">
             <strong>{name(row)}</strong>
             <small>{text(row.Image ?? row.Tag ?? row.Driver)}</small>
+            {page === "containers" && publicationWarning(row) && (
+              <small className="notice" title={publicationWarning(row)}>
+                Host port unavailable
+              </small>
+            )}
           </span>
           <span className="row-meta">
             {marker(row)}

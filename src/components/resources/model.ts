@@ -99,6 +99,49 @@ export function ports(value: unknown): Port[] {
   return result;
 }
 
+// Native snapshots join Moby's bindings with the owned forwarder's actual
+// listeners. A Docker running state alone cannot authorize an Open link.
+export function publishedPorts(row: Row): Port[] {
+  const verified = Array.isArray(row.OrbWinHostPorts)
+    ? row.OrbWinHostPorts
+    : [];
+  return ports(row.Ports).map((port) => ({
+    ...port,
+    url: verified.some(
+      (entry) =>
+        entry &&
+        typeof entry === "object" &&
+        entry.port === port.hostPort &&
+        entry.protocol === port.protocol &&
+        entry.published === true,
+    )
+      ? port.url
+      : undefined,
+  }));
+}
+export function publicationWarning(row: Row): string {
+  if (!isRunning(row)) return "";
+  const bindings = ports(row.Ports);
+  const verified = Array.isArray(row.OrbWinHostPorts)
+    ? row.OrbWinHostPorts
+    : [];
+  const missing = bindings.filter(
+    (port) =>
+      !verified.some(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          entry.port === port.hostPort &&
+          entry.protocol === port.protocol &&
+          entry.published === true,
+      ),
+  );
+  if (!missing.length) return "";
+  return typeof row.OrbWinPortError === "string"
+    ? `Host publication is unverified: ${row.OrbWinPortError}`
+    : `Windows publication is unavailable for ${missing.map((port) => `${port.hostPort}/${port.protocol}`).join(", ")}. The container may be running. Refresh, inspect a conflicting service or choose another port; OrbWin will not stop another engine.`;
+}
+
 export type SortMode = "status" | "name";
 export function compareRows(page: Page, mode: SortMode) {
   return (a: Row, b: Row) => {

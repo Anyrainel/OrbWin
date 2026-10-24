@@ -52,6 +52,10 @@ impl Target {
                     include_bytes!("../../backend-tools/session/kube.go").as_slice(),
                 ),
                 (
+                    "publication.go",
+                    include_bytes!("../../backend-tools/session/publication.go").as_slice(),
+                ),
+                (
                     "go.sum",
                     include_bytes!("../../backend-tools/session/go.sum").as_slice(),
                 ),
@@ -192,6 +196,29 @@ pub(crate) async fn check(target: &Target) -> Result<serde_json::Value, String> 
     Ok(info)
 }
 
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Publication {
+    container_id: String,
+    port: u16,
+    protocol: String,
+    published: bool,
+}
+pub(crate) async fn publications(target: &Target) -> Result<Vec<Publication>, String> {
+    let helper = target.session().await?;
+    let raw = process::read_command(&helper, &["port-status", target.daemon_id()]).await?;
+    serde_json::from_str(&raw).map_err(|e| format!("Invalid publication snapshot: {e}"))
+}
+pub(crate) async fn publication_failure(target: &Target) -> Result<Option<String>, String> {
+    let entries = publications(target).await?;
+    let missing: Vec<_> = entries
+        .iter()
+        .filter(|entry| !entry.published)
+        .map(|entry| format!("{}/{}", entry.port, entry.protocol))
+        .collect();
+    Ok((!missing.is_empty()).then(|| format!("Windows publication is unavailable for {}. Containers may be running. Inspect the conflicting service or choose another port; no other engine was stopped.", missing.join(", "))))
+}
+
 fn validate_info(info: &serde_json::Value, daemon_id: &str) -> Result<(), String> {
     if info["ID"] != daemon_id || info["OSType"] != "linux" {
         return Err("The endpoint does not match the verified owned Linux engine. No inventory was accepted.".into());
@@ -221,8 +248,31 @@ pub async fn status() -> Status {
     }
     .await;
     match result {
-        Ok((version,resources)) => Status { available: true, endpoint: ENDPOINT, message: "Connected to the verified owned Linux engine. This development build has not yet passed simultaneous-engine qualification.".into(), version, diagnostic: None, setup_available:false, resources:Some(resources) },
-        Err(detail) => Status { available: false, endpoint: ENDPOINT, message: if detail.contains("failed to connect") || detail.contains("error during connect") { "The owned OrbWin engine is offline. Refresh when it is running.".into() } else { "The owned backend could not be verified. Open diagnostics for the next step.".into() }, version: None, diagnostic: Some(detail), setup_available:crate::installation::available(), resources:None },
+        Ok((version, resources)) => Status {
+            available: true,
+            endpoint: ENDPOINT,
+            message: "Connected to OrbWin's verified Linux engine.".into(),
+            version,
+            diagnostic: None,
+            setup_available: false,
+            resources: Some(resources),
+        },
+        Err(detail) => Status {
+            available: false,
+            endpoint: ENDPOINT,
+            message: if detail.contains("failed to connect")
+                || detail.contains("error during connect")
+            {
+                "The owned OrbWin engine is offline. Refresh when it is running.".into()
+            } else {
+                "The owned backend could not be verified. Open diagnostics for the next step."
+                    .into()
+            },
+            version: None,
+            diagnostic: Some(detail),
+            setup_available: crate::installation::available(),
+            resources: None,
+        },
     }
 }
 
@@ -299,12 +349,28 @@ pub async fn inventory() -> Result<Inventory, String> {
             &["network", "ls", "--no-trunc", "--format", "{{json .}}"]
         )
     )?;
-    let snapshot = Inventory {
+    let mut snapshot = Inventory {
         containers: parse_rows(&containers)?,
         images: parse_rows(&images)?,
         volumes: parse_rows(&volumes)?,
         networks: parse_rows(&networks)?,
     };
+    let publication = publications(&target).await;
+    for container in &mut snapshot.containers {
+        let id = container["ID"].as_str().unwrap_or("").to_string();
+        match &publication {
+            Ok(entries) => {
+                container["OrbWinHostPorts"] = serde_json::json!(entries
+                    .iter()
+                    .filter(|entry| entry.container_id == id)
+                    .collect::<Vec<_>>())
+            }
+            Err(error) => {
+                container["OrbWinHostPorts"] = serde_json::json!([]);
+                container["OrbWinPortError"] = serde_json::json!(error);
+            }
+        }
+    }
     check(&target).await?;
     Ok(snapshot)
 }

@@ -213,6 +213,17 @@ func run(input io.Reader, output io.Writer) (int, error) {
 	}
 }
 func main() {
+	if len(os.Args) > 1 {
+		if len(os.Args) != 3 || os.Args[1] != "port-status" {
+			fmt.Fprintln(os.Stderr, "Unsupported OrbWin client arguments")
+			os.Exit(125)
+		}
+		if err := publicationSnapshot(os.Stdout, os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "OrbWin publication:", err)
+			os.Exit(125)
+		}
+		return
+	}
 	code, err := run(os.Stdin, os.Stdout)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "OrbWin terminal:", err)

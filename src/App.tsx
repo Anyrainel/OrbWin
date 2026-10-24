@@ -155,7 +155,10 @@ function Shell({
   const [page, setPage] = useState<Page>("containers");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [palette, setPalette] = useState(false);
-  const [theme, setTheme] = useTheme();
+  const [theme, setTheme, titleBarError] = useTheme();
+  useEffect(() => {
+    if (titleBarError) notify("error", titleBarError);
+  }, [titleBarError, notify]);
   const [query, setQuery] = useState("");
   const [includeKubernetes, setIncludeKubernetes] = useState(false);
   const [diagnostics, setDiagnostics] = useState<backend.Diagnostic[]>([]);
@@ -542,7 +545,7 @@ function Shell({
                   <dd>{status?.version ?? "Unavailable"}</dd>
                 </dl>
                 <p className="notice">
-                  Simultaneous-engine coexistence remains under qualification.
+                  OrbWin uses its own endpoint and leaves other engines untouched.
                   Local Windows drive bind paths are translated by the owned
                   backend; UNC/device paths require a separate supported sharing
                   flow.

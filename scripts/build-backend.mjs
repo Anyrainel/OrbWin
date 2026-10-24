@@ -12,7 +12,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 const root = fileURLToPath(new URL("../", import.meta.url));
-const lock = JSON.parse(readFileSync(resolve(root, "upstream.lock.json")));
+const lockSource = readFileSync(resolve(root, "upstream.lock.json"));
+const lock = JSON.parse(lockSource);
 execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
   stdio: "inherit",
 });
@@ -71,6 +72,13 @@ for (const [module, target, name] of [
     { GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
   );
 }
+// Existing WSL disks are not reimported during an upgrade. Carry the matching
+// guest bridge separately so owned provisioning can update executable code
+// without replacing the user's root/data disk.
+writeFileSync(
+  resolve(source, "pkg/embedded/rdd-guest.amd64"),
+  readFileSync(resolve(guestOutput, "rdd-guest")),
+);
 const packageName =
   "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/version";
 if (withDistro) {
@@ -170,6 +178,13 @@ run(
 );
 const hash = (path) =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
+if (!readFileSync(resolve(root, "upstream.lock.json")).equals(lockSource))
+  throw new Error(
+    "Upstream lock changed during build. No new manifest was published; rebuild from a stable source tree.",
+  );
+execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
+  stdio: "inherit",
+});
 writeFileSync(
   resolve(output, "build-manifest.json"),
   JSON.stringify(

@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import * as backend from "../backend";
+import { LocalPortLink } from "./LocalPortLink";
 import type { ResourcePage } from "../model/navigation";
 import { forwardUrls } from "./cluster/model";
 
@@ -501,14 +502,9 @@ export function OperationProvider({
                 {item.active &&
                   !item.stopping &&
                   forwardUrls(item.output).map((port) => (
-                    <a
-                      key={port.local}
-                      href={`http://127.0.0.1:${port.local}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
+                    <LocalPortLink key={port.local} port={port.local}>
                       127.0.0.1:{port.local} → {port.remote}
-                    </a>
+                    </LocalPortLink>
                   ))}
                 <span role="status">
                   {" "}
@@ -680,7 +676,7 @@ export function runContainerSpec(image = ""): Spec {
     defaults: image ? { image } : undefined,
     request: { kind: "run", image: "", name: "", command: [] },
     description:
-      "Starts a detached container on the OrbWin engine. Published ports bind localhost unless you explicitly enter another IPv4 address. Named volumes persist after container removal.",
+      "Starts a detached container on the OrbWin engine. Published TCP and UDP services are accessible from Windows at 127.0.0.1. LAN and IPv6 publication are not supported yet. Named volumes persist after container removal.",
     fields: [
       { key: "image", label: "Image reference" },
       { key: "name", label: "Container name" },

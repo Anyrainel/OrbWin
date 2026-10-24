@@ -27,10 +27,27 @@ if (resume && !/^gp-[0-9a-f]{8}$/.test(resume))
 const home = resolve(root, `artifacts/${resume ?? `gp-${runId.slice(0, 8)}`}`);
 const executable = resolve(root, "artifacts/backend/rdd.exe");
 const manifest = verifyBuild(root);
-const previous = resume
+const previousAttempt = resume
   ? JSON.parse(readFileSync(resolve(home, "evidence.json")))
   : null;
+const recoveryRecord = process.argv
+  .find((value) => value.startsWith("--recover-from="))
+  ?.slice(15);
+if (
+  recoveryRecord &&
+  (!resume || !/^evidence-before-[0-9a-f-]{36}\.json$/.test(recoveryRecord))
+)
+  throw new Error(
+    "Recovery requires an archived proof filename in the selected owned home.",
+  );
+const previous = recoveryRecord
+  ? JSON.parse(readFileSync(resolve(home, recoveryRecord)))
+  : previousAttempt;
 const upgrade = process.argv.includes("--upgrade");
+if (recoveryRecord && !upgrade)
+  throw new Error(
+    "Recovery must explicitly upgrade from the archived successful proof.",
+  );
 if (upgrade && !resume)
   throw new Error("Upgrade requires an explicitly selected recorded guest.");
 if (
@@ -145,6 +162,8 @@ const evidence = {
   passed: false,
   coexistenceQualified: false,
   upgradeFrom: upgrade ? previous.manifest : undefined,
+  recoveryRecord,
+  previousAttemptRunId: recoveryRecord ? previousAttempt.runId : undefined,
 };
 function run(binary, args, seconds = 30, input) {
   const start = performance.now();
@@ -270,6 +289,36 @@ try {
     throw new Error(
       "Owned daemon identity changed across restart; refusing workloads.",
     );
+  // Windows pipe readiness cannot prove the delegated guest/WSL client path.
+  // Exercise both public Unix sockets through the actual authenticated relay.
+  const linuxDocker = resolve(root, "artifacts/runtime-tools/linux/docker")
+    .replace(/\\/g, "/")
+    .replace(/^([A-Za-z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`);
+  for (const socket of [
+    "/var/run/docker.sock",
+    "/mnt/wsl/orbwin/docker.sock",
+  ]) {
+    const guestId = run(
+      "wsl.exe",
+      [
+        "-d",
+        "lima-orbwin",
+        "-u",
+        "root",
+        "--exec",
+        "/usr/local/bin/wsl-exec",
+        linuxDocker,
+        "--host",
+        `unix://${socket}`,
+        "info",
+        "--format",
+        "{{.ID}}",
+      ],
+      20,
+    ).trim();
+    if (guestId !== info.ID)
+      throw new Error(`Owned guest client identity differs on ${socket}`);
+  }
   const qualification = resolve(root, "artifacts/qualification");
   mkdirSync(qualification, { recursive: true });
   writeFileSync(

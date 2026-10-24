@@ -16,7 +16,7 @@ const GROUPS: { role: DistroRole; title: string; note: string }[] = [
   {
     role: "engine",
     title: "OrbWin engine",
-    note: "Managed by OrbWin. Read-only here.",
+    note: "Reserved engine names. Ownership is checked before use.",
   },
   {
     role: "user",
@@ -30,7 +30,7 @@ const GROUPS: { role: DistroRole; title: string; note: string }[] = [
   },
 ];
 const ROLE_TEXT: Record<DistroRole, string> = {
-  engine: "OrbWin engine — read-only",
+  engine: "Reserved OrbWin engine name — read-only",
   user: "Your distribution",
   "other-engine": "Other engine — untouched",
 };
@@ -288,7 +288,7 @@ export function Wsl() {
       </div>
       <aside className="k8s-inspector" aria-label="Distribution details">
         {detail ? (
-          <Detail key={detail.name} distro={detail} />
+          <Detail key={detail.name} distro={detail} onRefresh={read} />
         ) : (
           <div className="detail-content">
             <div className="inspector-empty">
@@ -355,7 +355,13 @@ function CommandLine({ command }: { command: string }) {
   );
 }
 
-function Detail({ distro }: { distro: Distro }) {
+function Detail({
+  distro,
+  onRefresh,
+}: {
+  distro: Distro;
+  onRefresh: () => Promise<void>;
+}) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const canOpen = distro.role === "user" && isTauri();
@@ -387,7 +393,7 @@ function Detail({ distro }: { distro: Distro }) {
             <dt>Managed by</dt>
             <dd>
               {distro.role === "engine"
-                ? "OrbWin (engine guest)"
+                ? "Reserved for OrbWin; verified before lifecycle changes"
                 : distro.role === "other-engine"
                   ? "Another container engine (by name)"
                   : "You"}
@@ -410,7 +416,10 @@ function Detail({ distro }: { distro: Distro }) {
                   setBusy(true);
                   setMessage("");
                   invoke("wsl_open_terminal", { name: distro.name })
-                    .then(() => setMessage("Opened a terminal window."))
+                    .then(() => {
+                      setMessage("Requested a WSL terminal window.");
+                      void onRefresh();
+                    })
                     .catch((e) => setMessage(String(e)))
                     .finally(() => setBusy(false));
                 }}
@@ -430,12 +439,12 @@ function Detail({ distro }: { distro: Distro }) {
         ) : (
           <p className="capability-note">
             {distro.role === "engine"
-              ? "This is OrbWin's engine guest. Start and stop it from Settings. Opening a shell here is disabled so the engine's state is not altered by accident."
+              ? "This name is reserved for an OrbWin engine guest. Ownership is verified before engine operations. Opening a shell here is disabled so a protected distribution is not altered by accident."
               : "This distribution appears to belong to another container engine. OrbWin leaves it alone so engines can coexist."}
           </p>
         )}
         {distro.role === "user" && distro.version === 2 && (
-          <ProjectConnection name={distro.name} />
+          <ProjectConnection name={distro.name} onRefresh={onRefresh} />
         )}
         <p className="capability-note">
           Creating or cloning distributions and setting per-distribution
@@ -453,9 +462,16 @@ type ProjectStatus = {
   connected: boolean;
   dockerCommand: string;
 };
-function ProjectConnection({ name }: { name: string }) {
+function ProjectConnection({
+  name,
+  onRefresh,
+}: {
+  name: string;
+  onRefresh: () => Promise<void>;
+}) {
   const [source, setSource] = useState("");
   const [status, setStatus] = useState<ProjectStatus | null>(null);
+  const [stage, setStage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mounted = useRef(true);
@@ -467,6 +483,13 @@ function ProjectConnection({ name }: { name: string }) {
   }, []);
   async function act(action: "inspect" | "connect" | "disconnect") {
     setBusy(true);
+    setStage(
+      action === "connect"
+        ? "Connecting project…"
+        : action === "disconnect"
+          ? "Disconnecting project…"
+          : "Checking connection…",
+    );
     setError("");
     try {
       const next = await invoke<ProjectStatus>("wsl_project", {
@@ -477,6 +500,7 @@ function ProjectConnection({ name }: { name: string }) {
       if (mounted.current) {
         setStatus(next);
         if (next.export) setSource(next.export.source);
+        void onRefresh();
       }
     } catch (error) {
       if (mounted.current)
@@ -532,7 +556,7 @@ function ProjectConnection({ name }: { name: string }) {
       </div>
       <p role="status">
         {busy
-          ? "Checking the selected distribution…"
+          ? stage
           : status
             ? status.connected
               ? "Project export connected."

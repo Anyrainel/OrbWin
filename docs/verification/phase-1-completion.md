@@ -135,3 +135,127 @@ maintained workloads and both start orders/port conflicts; outstanding build,
 storage/settings and cluster flows; core failure/data preservation and native
 interaction/accessibility review; measured budgets; then packaging and installed
 product checks. No gate is marked passed solely because code compiles.
+
+## Windows publication correction — subsequent runtime evidence
+
+Patch 0008 now sends Windows pipe, shared WSL Unix, and explicitly delegated
+guest Docker-socket clients through the same adapter. Automatic ports are
+selected on Windows and persisted explicitly in Moby; bounded FD reservations
+avoid concurrent duplicate allocations. Start/restart verifies actual owned
+gvisor publication. Native links fail closed when publication is unverified.
+The private-network client entry requires per-home mutual TLS; anonymous and
+foreign-certificate rejection have unit coverage. No Windows public TCP Docker
+endpoint or OS trust-store change is introduced.
+
+Existing WSL disks retain original overlay executables. The live upgrade caught
+this: new provisioning with the old guest bridge could not work. The bundle now
+embeds the matching guest bridge separately, stages it by content hash, verifies
+the staged copy, and atomically replaces only that executable in owned guest
+provisioning. Unknown/corrupt staged code is preserved and rejected. Concurrent
+Windows staging passed a race test after serializing same-process publishers.
+The inherited Docker socket activation also competed with the public relay;
+the owned guest now masks that socket unit. No engine disk is reimported.
+
+- Current guest-capable binary:
+  `8758635eb07e9aa98a6a24df061987d28de1708434a38755edd3bf9b2e5220f7`.
+- Owned upgrade, service/build/mount suite, and both public Unix socket identities
+  passed; original daemon `1a2a3eb3-2f04-4fd6-a2d7-2f5e3fe13cb3` retained.
+  Failed upgrade attempts remain archived. Explicit `--recover-from` selects a
+  successful archived identity anchor without replacing a failed proof record.
+- `artifacts/coexistence/orbwin-coexist-9dd64ae2/result.json`: simultaneous
+  Rancher 1.24 and OrbWin Redis TCP/data/inventory isolation passed. Restarting
+  only OrbWin retained its Windows port, both IDs, Rancher's workload start time,
+  sentinel data, and global configuration hashes. This supersedes the failed
+  Rancher pair result above, not the pending Docker Desktop/order matrix.
+- `artifacts/qualification/orbwin-publish-42b3e117/result.json`: occupied Windows
+  port rejected before container start, foreign listener preserved; six concurrent
+  Windows/WSL clients plus one delegated-socket client received distinct working
+  ports. Publish-all and each container restart retained ports and Redis responses.
+- Native `owned_wsl_project` passed on patch 8: non-root Ubuntu read/write,
+  Compose, Buildx, Docker-service restart, repeated connection, source replacement
+  refusal, scoped disconnect, source-data preservation and idle-distro endpoint.
+- A framework run overlapped the WSL test's explicit Docker restart and failed
+  TCP readiness. It is retained as an invalid overlapping qualification run at
+  `artifacts/qualification/testcontainers-464821b2-8de8-4144-a456-b0f61c3ae50e`;
+  a sequential rerun is required. It must not be silently counted as a pass.
+
+Native port links now call Windows' browser opener through a numeric loopback
+port-only command. No arbitrary renderer-provided URL, scheme, command or path is
+accepted. Frontend build and Rust Clippy passed; live opening remains to verify.
+
+Further repeated framework checks reproduced a genuine restart publication gap
+without the earlier overlapping lifecycle test. Failed runs `7d82b215`,
+`db8ca250` and `3c3d7836` remain in ignored qualification artifacts. Redis retained
+its port and answered `redis-cli ping` inside the guest, while Windows timed out
+or refused the connection. Removing Lima's duplicate SSH forwarder was useful
+but insufficient: the adapter could still acknowledge an old gvisor listener
+before queued stop/start events removed/recreated it. Patch 8 now observes
+successful expose/unexpose generations at the existing host-switch API boundary
+and requires a newer actual publication before acknowledging restart. The
+observation map is ephemeral, contains no container lifecycle authority, and is
+updated only after successful forwarder operations. Race tests cover failed
+exposure, concurrent observation and stale-generation refusal.
+
+The latest guest-capable binary is
+`29073605fa6ba7fa2352ee892e01e6ec29742c0865caff942db4b847cfaee5f9`.
+Its owned upgrade/service/build/mount/Unix relay identity proof passed. A clean
+eight-patch replay also passed. Testcontainers run `36906c23` passed normal
+concurrent Redis/PostgreSQL/restart/log/exec cases, assertion failure and process
+cancellation with Ryuk cleanup. More sequential repetitions are running.
+
+Docker Desktop's startup precondition is now resolved for this test session.
+The remaining zero-length stale IPC directory was retained as
+`%LOCALAPPDATA%/Docker/run-before-order-retry-20261024` while its failed test-started
+processes were stopped. No disk, secret store, registry credentials or workload
+data were reset. With Rancher restored to its initial stopped state, Docker
+Desktop started with daemon `a307ff0e-581d-49d3-8aee-a0636dda9137`. The maintained
+Redis coexistence pair passed (`orbwin-coexist-fb674c82`), including OrbWin restart,
+port/data/identity preservation and external workload start-time preservation.
+Rancher subsequently started alongside it and both explicit endpoints responded.
+The three-engine maintained-workload proof is still pending on the newest binary.
+
+Native appearance QA exercised command-palette filtering/keyboard activation,
+light content plus matching Windows title bar, and restoration to the original
+system appearance. No permission error was observed. The terminal module now
+loads lazily for both container and pod views; the production build has separate
+401 KiB application and 335 KiB terminal chunks, with no Vite size warning.
+
+On binary `29073605…`, four consecutive framework suites passed: `36906c23`,
+`8fc21900`, `8c054ed5`, `4e718bad`. Each suite includes concurrent normal cases,
+Redis restart/data/log/exec checks, deliberate assertion failure and client
+cancellation, with Ryuk cleanup and no remaining scoped resources. The current
+publication suite (`orbwin-publish-7c91bb85`) also passed Windows/WSL/delegated
+clients, publish-all, explicit busy-port rejection and per-container restart.
+
+The three-engine maintained proof passed first at `orbwin-coexist-a3b0cf38`,
+then with added explicit other-engine port collisions at
+`orbwin-coexist-ad3ae9dc`. It preserved each engine's identity, sentinel data,
+external container start times and global configuration hashes across an owned
+OrbWin stop/start. Port collisions failed before starting the OrbWin fixture,
+and the external services kept answering their own sentinels. All scoped
+containers/volumes were removed by exact name. The harness published
+`artifacts/qualification/engine-identity.json` only after the successful `--all`
+run and final build recheck. The general gated workload proof then passed as
+`orbwin-qualification-2e343b64`. This closes the tested host's core coexistence
+cases, not full Phase 1 or a broader OS/version compatibility claim.
+
+Native WSL QA found the original GUI-launched WSL process immediately exited,
+despite an optimistic success notice. The installed Windows Terminal launcher
+now supplies the interactive PTY; the fallback reports immediate exit honestly.
+Native observation confirmed an Ubuntu terminal with the `vanyr@BigPC` prompt.
+The UI connected `/home/vanyr/orbwin-native-proof-20261024`; a scoped Alpine
+container read the host marker and wrote a return file. Native Disconnect removed
+the shared mount and both source files remained present. The fixture remains for
+the follow-up status-refresh check. Distribution status now refreshes after
+launch/project actions, and busy text distinguishes connecting/disconnecting.
+Name-based engine grouping now says it is reserved/protected rather than falsely
+claiming verified ownership from the name alone.
+
+Current native-adapter regression runs also passed `owned_resource_operations`
+(volume/network creation and in-use removal refusal, exec exit status, logs/stats,
+pause/unpause, restart/stop/start and persistent sentinel),
+`owned_build_compose_workflow` (Buildx/tag/inspect, Compose lifecycle/logs and data
+preservation), and `owned_interactive_terminal` (SDK input/resize/Ctrl+C/exit,
+backpressure and container survival). These are adapter tests, not substitutes
+for rendered native UI acceptance. Frontend build, Clippy and the ordinary Rust
+and Node tests pass; opt-in cluster/setup cases remain separately gated.

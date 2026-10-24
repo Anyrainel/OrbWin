@@ -98,10 +98,30 @@ async function worker(mode, runId) {
     return container;
   };
   const redis = await startRedis();
-  assert.equal(
-    await redisPing(redis.getHost(), redis.getMappedPort(6379)),
-    "+PONG\r\n",
-  );
+  const checkRedis = async (stage) => {
+    const inspect = await client.container.dockerode
+      .getContainer(redis.getId())
+      .inspect();
+    progress({
+      stage,
+      host: redis.getHost(),
+      mappedPort: redis.getMappedPort(6379),
+      bindings: inspect.NetworkSettings.Ports,
+      configured: inspect.HostConfig.PortBindings,
+      running: inspect.State.Running,
+      startedAt: inspect.State.StartedAt,
+    });
+    try {
+      return await redisPing(redis.getHost(), redis.getMappedPort(6379));
+    } catch (error) {
+      progress({
+        stage: "failed-redis-guest-probe",
+        result: await redis.exec(["redis-cli", "ping"]),
+      });
+      throw error;
+    }
+  };
+  assert.equal(await checkRedis("before-restart"), "+PONG\r\n");
   const set = await redis.exec(["redis-cli", "set", "proof", runId]);
   assert.equal(set.exitCode, 0);
   if (mode === "assertion") {
@@ -139,10 +159,7 @@ async function worker(mode, runId) {
   assert.equal(query.exitCode, 0);
   assert.equal(query.output.trim(), "42");
   await redis.restart({ timeout: 10000 });
-  assert.equal(
-    await redisPing(redis.getHost(), redis.getMappedPort(6379)),
-    "+PONG\r\n",
-  );
+  assert.equal(await checkRedis("after-restart"), "+PONG\r\n");
   const get = await redis.exec(["redis-cli", "get", "proof"]);
   assert.equal(get.output.trim(), runId);
   const expected = await redis.exec(["sh", "-c", "exit 7"]);

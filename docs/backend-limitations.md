@@ -19,11 +19,23 @@ that a subsequently implemented flow is absent.
 - BL-011: the WSL page now has explicit selected-project integration, scoped Linux
   client guidance and disconnect. Native Ubuntu read/write/Compose/build/restart/
   replaced-source/data-preservation proofs pass. Shared project paths require a
-  live user WSL session and reconnect after distribution exit. A direct owned
-  dockerd Unix listener survives that exit; a shared bind of its socket did not.
+  live user WSL session and reconnect after distribution exit. Both public Unix
+  sockets now use the authenticated Windows adapter relay; a shared bind of the
+  dockerd socket did not survive user-distro exit.
   Transparent `/home` path mapping remains a documented later convenience.
 - BL-012: actual first-run and resource/disk/history reads now exist. Broader native
   settings, apply/restart, conflict and installed qualification remain open.
+- BL-013: Docker Desktop 4.91.0 subsequently started with Rancher returned to its
+  initial stopped state and its remaining zero-length stale IPC directory retained
+  under a sibling backup. Its dedicated daemon passed the OrbWin coexistence pair
+  proof (`orbwin-coexist-fb674c82`). Rancher then also started and both dedicated
+  endpoints remained healthy. Three-engine maintained traffic remains to test.
+- BL-014: Windows allocation, stable bindings, explicit conflict refusal and
+  publication status now pass scoped tests. Repeated Testcontainers found a second
+  stale-publication acknowledgement race after restart. The adapter now requires
+  a fresh observed listener generation after start/restart; current repeated and
+  three-engine qualification are still in progress. Preserve failed evidence;
+  one passing run is not the phase gate.
 
 ## BL-013 — Existing Docker Desktop cannot reach engine readiness
 

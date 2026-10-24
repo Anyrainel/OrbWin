@@ -185,6 +185,10 @@ pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
             "patches/rdd/0007-wsl-shared-socket.patch",
             include_bytes!("../../patches/rdd/0007-wsl-shared-socket.patch"),
         ),
+        (
+            "patches/rdd/0008-windows-port-publication.patch",
+            include_bytes!("../../patches/rdd/0008-windows-port-publication.patch"),
+        ),
     ];
     let actual = manifest["patches"]
         .as_array()

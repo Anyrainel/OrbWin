@@ -792,8 +792,8 @@ impl Resource {
 }
 fn publish(raw: &str) -> Result<String, String> {
     let (mapping, protocol) = raw.rsplit_once('/').unwrap_or((raw, "tcp"));
-    if !["tcp", "udp", "sctp"].contains(&protocol) {
-        return Err("Port protocol must be tcp, udp or sctp.".into());
+    if !["tcp", "udp"].contains(&protocol) {
+        return Err("Windows publication supports TCP and UDP.".into());
     }
     let parts: Vec<_> = mapping.split(':').collect();
     let (host, source, target) =
@@ -806,8 +806,15 @@ fn publish(raw: &str) -> Result<String, String> {
                     .into(),
             ),
         };
-    host.parse::<std::net::Ipv4Addr>()
+    let address = host
+        .parse::<std::net::Ipv4Addr>()
         .map_err(|_| "Published host address must be IPv4.")?;
+    if address != std::net::Ipv4Addr::LOCALHOST && address != std::net::Ipv4Addr::UNSPECIFIED {
+        return Err(
+            "Windows publication supports 127.0.0.1 or 0.0.0.0; host access is localhost only."
+                .into(),
+        );
+    }
     if target.parse::<u16>().ok().filter(|p| *p > 0).is_none()
         || (!source.is_empty() && source.parse::<u16>().is_err())
     {
@@ -1020,9 +1027,26 @@ pub async fn run(
     } else {
         engine::check(&target).await
     };
-    let success = identity.is_ok() && !interrupted && exit_code == Some(0);
+    let publication_error = if identity.is_ok()
+        && !interrupted
+        && exit_code == Some(0)
+        && matches!(
+            request,
+            Request::Engine { running: true } | Request::ConfigureCluster { .. }
+        ) {
+        match engine::publication_failure(&target).await {
+            Ok(message) => message,
+            Err(error) => Some(format!("The backend changed, but Windows publication could not be verified: {error}. Refresh and inspect before retrying.")),
+        }
+    } else {
+        None
+    };
+    let success =
+        identity.is_ok() && publication_error.is_none() && !interrupted && exit_code == Some(0);
     let message = if let Err(e) = identity {
         format!("Engine could not be verified after the operation: {e}. Refresh and inspect before retrying; the operation may have taken effect.")
+    } else if let Some(error) = publication_error {
+        error
     } else if interrupted {
         format!(
             "{reason}. {}",
@@ -1231,6 +1255,8 @@ mod tests {
             "65536",
             "8080:0",
             "8080:80/unknown",
+            "8080:80/sctp",
+            "192.168.1.2:8080:80",
             "bad:8080:80",
         ] {
             assert!(publish(port).is_err(), "{port}");

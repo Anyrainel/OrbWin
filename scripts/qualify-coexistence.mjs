@@ -136,6 +136,7 @@ const hashes = () =>
   }));
 const beforeHashes = hashes();
 const owned = [];
+const conflicts = [];
 const image =
   "redis:7.4.2-alpine@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952";
 async function ping(engine) {
@@ -147,6 +148,14 @@ async function ping(engine) {
       engine.container,
     ]),
   )["6379/tcp"][0];
+  const observedPort = Number(address.HostPort);
+  if (engine.port !== undefined)
+    assert.equal(
+      observedPort,
+      engine.port,
+      `${engine.name} published port changed across the owned restart`,
+    );
+  engine.port = observedPort;
   const deadline = Date.now() + 20000;
   let last;
   while (Date.now() < deadline) {
@@ -229,14 +238,27 @@ try {
       ],
       120,
     );
-    docker(engine, [
-      "exec",
-      engine.container,
-      "redis-cli",
-      "SET",
-      "proof",
-      engine.name,
-    ]);
+    let initialized = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      try {
+        assert.equal(
+          docker(engine, [
+            "exec",
+            engine.container,
+            "redis-cli",
+            "SET",
+            "proof",
+            engine.name,
+          ]),
+          "OK",
+        );
+        initialized = true;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    assert.ok(initialized, `${engine.name} Redis did not become ready`);
     engine.started = docker(engine, [
       "inspect",
       "--format",
@@ -261,6 +283,37 @@ try {
       1,
     );
   checks.push("each engine sees only its own labeled workload");
+  for (const external of engines.slice(1)) {
+    const conflict = `${run}-conflict-${external.name}`;
+    docker(engines[0], [
+      "create",
+      "--name",
+      conflict,
+      "--label",
+      `org.orbwin.qualification=${run}`,
+      "-p",
+      `127.0.0.1:${external.port}:6379`,
+      image,
+    ]);
+    conflicts.push(conflict);
+    assert.throws(
+      () => docker(engines[0], ["start", conflict]),
+      /unavailable|occupied|already in use|conflict/i,
+    );
+    assert.equal(
+      docker(engines[0], [
+        "inspect",
+        "--format",
+        "{{.State.Running}}",
+        conflict,
+      ]),
+      "false",
+    );
+    await ping(external);
+  }
+  checks.push(
+    "ports occupied by other engines fail before OrbWin container start; external traffic is preserved",
+  );
   // Registry ownership is checked before the only lifecycle mutation.
   const base = execute("powershell.exe", [
     "-NoProfile",
@@ -327,6 +380,13 @@ try {
 } catch (error) {
   failure = String(error);
 } finally {
+  for (const container of conflicts) {
+    try {
+      docker(engines[0], ["rm", "-f", container]);
+    } catch (error) {
+      failure = `${failure ?? ""}\nConflict cleanup: ${error}`;
+    }
+  }
   for (const engine of owned) {
     try {
       docker(engine, ["rm", "-f", engine.container]);
@@ -358,4 +418,28 @@ try {
   );
 }
 if (failure) throw new Error(failure);
+if (process.argv.includes("--publish-qualification")) {
+  assert.ok(
+    process.argv.includes("--all"),
+    "Publishing qualification requires all three engines",
+  );
+  assert.equal(identity.binarySha256, verifyBuild(process.cwd()).binarySha256);
+  const qualified = {
+    ...identity,
+    coexistenceQualified: true,
+    qualification: {
+      evidence: resolve(folder, "result.json"),
+      engines: engines.map((engine) => ({
+        name: engine.name,
+        daemonId: engine.id,
+      })),
+      checks,
+      time: new Date().toISOString(),
+    },
+  };
+  writeFileSync(
+    "artifacts/qualification/engine-identity.json",
+    JSON.stringify(qualified, null, 2),
+  );
+}
 console.log(checks.join("\n"));

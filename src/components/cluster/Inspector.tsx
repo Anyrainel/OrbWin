@@ -1,7 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Copy, Plug, RefreshCw } from "lucide-react";
 import * as backend from "../../backend";
-import { Terminal as InteractiveTerminal } from "../Terminal";
+const InteractiveTerminal = lazy(() =>
+  import("../Terminal").then((module) => ({ default: module.Terminal })),
+);
 import { ClusterRemoval, ClusterWait, useOperation } from "../Operations";
 import { copyText, kubectl, listObjects, useRead } from "./api";
 import {
@@ -482,16 +492,18 @@ function Terminal({ object }: { object: K8sObject }) {
           ))}
         </select>
       </label>
-      <InteractiveTerminal
-        key={object.metadata.uid + ":" + container}
-        target={object.metadata.uid}
-        pod={{
-          namespace: object.metadata.namespace,
-          name: object.metadata.name,
-          uid: object.metadata.uid,
-          container,
-        }}
-      />
+      <Suspense fallback={<p role="status">Loading terminal…</p>}>
+        <InteractiveTerminal
+          key={object.metadata.uid + ":" + container}
+          target={object.metadata.uid}
+          pod={{
+            namespace: object.metadata.namespace,
+            name: object.metadata.name,
+            uid: object.metadata.uid,
+            container,
+          }}
+        />
+      </Suspense>
     </div>
   );
 }

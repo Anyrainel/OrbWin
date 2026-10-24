@@ -3,6 +3,7 @@
 mod client_job;
 mod engine;
 mod installation;
+mod local_link;
 mod mounts;
 mod operations;
 mod process;
@@ -210,6 +211,7 @@ fn main() {
             export_text,
             export_support,
             host_diagnostics,
+            local_link::open_local_port,
             wsl::wsl_open_terminal,
             wsl_integration::wsl_project
         ])

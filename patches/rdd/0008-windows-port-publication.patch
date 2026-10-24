@@ -1,0 +1,2327 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_controller.go b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+index 16717651f..4936cb863 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_controller.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+@@ -158,9 +158,13 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 	}
+ 
+ 	// cpus and memory are appended here rather than baked into the template so
++	guestBridge, guestBridgeHash, err := stageGuestBridge()
++	if err != nil {
++		return "", fmt.Errorf("stage owned guest bridge: %w", err)
++	}
+ 	// the spec drives them directly. Lima falls back to its own default when a
+ 	// key is absent, which covers the unset case (cpus 0, memory nil).
+-	lines := []string{baseTemplate}
++	lines := []string{ownedWindowsTemplate(baseTemplate)}
+ 	if cpus := spec.VirtualMachine.CPUs; cpus > 0 {
+ 		lines = append(lines, fmt.Sprintf("cpus: %d", cpus))
+ 	}
+@@ -171,6 +175,8 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 	lines = append(lines,
+ 		"",
+ 		"param:",
++		fmt.Sprintf("  ORBWIN_GUEST_BRIDGE: %q", guestBridge),
++		fmt.Sprintf("  ORBWIN_GUEST_BRIDGE_SHA256: %q", guestBridgeHash),
+ 		fmt.Sprintf("  CONTAINER_ENGINE: %s", spec.ContainerEngine.Name),
+ 		fmt.Sprintf("  HOST_DOCKER_SOCKET: %q", instance.DockerSocket()),
+ 		fmt.Sprintf("  HOST_CONTAINERD_SOCKET: %q", instance.ContainerdSocket()),
+diff --git a/rdd/pkg/controllers/app/app/controllers/guest_bridge.go b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+new file mode 100644
+index 000000000..ae72279d4
+--- /dev/null
++++ b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+@@ -0,0 +1,92 @@
++package controllers
++
++import (
++	"bytes"
++	"crypto/sha256"
++	"fmt"
++	"os"
++	"path/filepath"
++	goruntime "runtime"
++	"strings"
++	"sync"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/embedded"
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
++)
++
++// Windows replacement/open sharing is not equivalent to POSIX rename. Serialize
++// publishers in the single authoritative rdd process; disk identity remains the
++// content hash and is always checked on subsequent calls.
++var guestBridgeStageMu sync.Mutex
++
++// The Windows guest agent already publishes through gvisor. Lima's generic
++// SSH forwarder must not race that owner to bind/remove the same host ports.
++// Unix socket forwarding rules remain intact. Only product instances opt in.
++func ownedWindowsTemplate(base string) string {
++	if goruntime.GOOS != "windows" || (instance.Suffix() != "orbwin" && instance.Suffix() != "orbwin-proof") {
++		return base
++	}
++	return ignoreLimaNetworkPorts(base)
++}
++
++func ignoreLimaNetworkPorts(base string) string {
++	return strings.Replace(strings.ReplaceAll(base, "\r\n", "\n"), "portForwards:\n", "portForwards:\n- guestIP: 0.0.0.0\n  guestIPMustBeZero: false\n  guestPortRange: [1, 65535]\n  proto: any\n  ignore: true\n", 1)
++}
++
++// Stage immutable, content-addressed executable code. This never opens a VM
++// disk. Concurrent reconcilers may stage the same bytes; a mismatched existing
++// file is an error rather than permission to overwrite unknown state.
++func stageGuestBridge() (string, string, error) {
++	if goruntime.GOOS != "windows" || (instance.Suffix() != "orbwin" && instance.Suffix() != "orbwin-proof") || len(embedded.RDDGuest) == 0 {
++		return "", "", nil
++	}
++	return stageGuestBridgeAt(filepath.Join(instance.ShortDir(), "guest-code"), embedded.RDDGuest)
++}
++
++func stageGuestBridgeAt(dir string, payload []byte) (string, string, error) {
++	guestBridgeStageMu.Lock()
++	defer guestBridgeStageMu.Unlock()
++	digest := fmt.Sprintf("%x", sha256.Sum256(payload))
++	if err := os.MkdirAll(dir, 0700); err != nil {
++		return "", "", err
++	}
++	info, err := os.Lstat(dir)
++	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
++		return "", "", fmt.Errorf("guest code directory is not a regular directory")
++	}
++	path := filepath.Join(dir, "rdd-guest-"+digest)
++	if info, err := os.Lstat(path); err == nil {
++		if !info.Mode().IsRegular() {
++			return "", "", fmt.Errorf("guest code path is not a regular file")
++		}
++		data, err := os.ReadFile(path)
++		if err != nil || !bytes.Equal(data, payload) {
++			return "", "", fmt.Errorf("guest code checksum mismatch; preserve and inspect %s", path)
++		}
++		return toLinuxPath(path), digest, nil
++	} else if !os.IsNotExist(err) {
++		return "", "", err
++	}
++	file, err := os.CreateTemp(dir, ".stage-")
++	if err != nil {
++		return "", "", err
++	}
++	defer os.Remove(file.Name())
++	if _, err = file.Write(payload); err == nil {
++		err = file.Sync()
++	}
++	closeErr := file.Close()
++	if err == nil {
++		err = closeErr
++	}
++	if err != nil {
++		return "", "", err
++	}
++	if err = os.Rename(file.Name(), path); err != nil {
++		data, readErr := os.ReadFile(path)
++		if readErr != nil || !bytes.Equal(data, payload) {
++			return "", "", err
++		}
++	}
++	return toLinuxPath(path), digest, nil
++}
+diff --git a/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go b/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go
+new file mode 100644
+index 000000000..d3532e28d
+--- /dev/null
++++ b/rdd/pkg/controllers/app/app/controllers/guest_bridge_test.go
+@@ -0,0 +1,72 @@
++package controllers
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"sync"
++	"testing"
++
++	"sigs.k8s.io/yaml"
++)
++
++func TestGuestBridgeStaging(t *testing.T) {
++	dir := t.TempDir()
++	payload := []byte("verified guest code")
++	var wg sync.WaitGroup
++	for range 12 {
++		wg.Go(func() {
++			_, hash, err := stageGuestBridgeAt(dir, payload)
++			if err != nil || len(hash) != 64 {
++				t.Errorf("stage: %s %v", hash, err)
++			}
++		})
++	}
++	wg.Wait()
++	files, err := os.ReadDir(dir)
++	if err != nil || len(files) != 1 {
++		t.Fatalf("temporary files leaked: %v %v", files, err)
++	}
++	path := filepath.Join(dir, files[0].Name())
++	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if _, _, err := stageGuestBridgeAt(dir, payload); err == nil {
++		t.Fatal("corrupt code was accepted")
++	}
++	data, _ := os.ReadFile(path)
++	if string(data) != "corrupt" {
++		t.Fatal("unknown code overwritten")
++	}
++}
++
++func TestOwnedNetworkForwardingHasOneOwner(t *testing.T) {
++	base, err := os.ReadFile("../lima-template.yaml")
++	if err != nil {
++		t.Fatal(err)
++	}
++	got := ignoreLimaNetworkPorts(string(base))
++	var config struct {
++		PortForwards []struct {
++			Ignore            bool
++			GuestPortRange    []int
++			GuestSocket       string
++			GuestIPMustBeZero *bool
++		}
++	}
++	if err := yaml.Unmarshal([]byte(got), &config); err != nil {
++		t.Fatal(err)
++	}
++	if len(config.PortForwards) < 3 || !config.PortForwards[0].Ignore || len(config.PortForwards[0].GuestPortRange) != 2 || config.PortForwards[0].GuestPortRange[1] != 65535 {
++		t.Fatal("network ignore rule is not first")
++	}
++	if config.PortForwards[0].GuestIPMustBeZero == nil || *config.PortForwards[0].GuestIPMustBeZero {
++		t.Fatal("loopback-specific publications must also be ignored; Lima defaults wildcard GuestIP to exact match")
++	}
++	if strings.Count(got, "guestSocket:") != strings.Count(string(base), "guestSocket:") {
++		t.Fatal("Unix socket rules changed")
++	}
++	if !strings.Contains(got, "guestSocket: /var/run/docker.sock") {
++		t.Fatal("Docker Unix rule lost")
++	}
++}
+diff --git a/rdd/pkg/controllers/app/app/lima-template.yaml b/rdd/pkg/controllers/app/app/lima-template.yaml
+index dfa94a7e5..c6b46849f 100644
+--- a/rdd/pkg/controllers/app/app/lima-template.yaml
++++ b/rdd/pkg/controllers/app/app/lima-template.yaml
+@@ -37,30 +37,64 @@ portForwards:
+   - 0
+   hostSocket: "{{.Param.HOST_CONTAINERD_SOCKET}}"
+ provision:
+-# Add a product-specific Unix listener to the existing dockerd. A bind mount of
+-# /run/docker.sock is insufficient: WSL can unmount shared bind exports when a
+-# client distribution exits. Docker retains endpoint/lifecycle ownership.
++# Carry WSL clients through the same Windows Docker adaptation as named-pipe
++# clients. No second daemon: extend the existing upstream rdd guest bridge.
+ - mode: system
+   script: |
+     #!/bin/bash
+     set -o errexit -o nounset -o pipefail
+     case "$PARAM_HOST_DOCKER_SOCKET" in
+-      *docker-rancher-desktop-orbwin-proof) SHARE=/mnt/wsl/orbwin-proof ;;
+-      *docker-rancher-desktop-orbwin) SHARE=/mnt/wsl/orbwin ;;
++      *docker-rancher-desktop-orbwin-proof) SHARE=/mnt/wsl/orbwin-proof; PROFILE=.rdorbwin-proof ;;
++      *docker-rancher-desktop-orbwin) SHARE=/mnt/wsl/orbwin; PROFILE=.rdorbwin ;;
+       *) exit 0 ;;
+     esac
+-    mkdir -p /etc/systemd/system/docker.service.d
++    AUTH="$PARAM_HOST_HOME_GUEST/$PROFILE/wsl-client-auth"
++    # Existing WSL root disks retain their original overlay. Update only the
++    # owned helper, with verified bytes and same-directory atomic replacement.
++    test -n "$PARAM_ORBWIN_GUEST_BRIDGE"
++    test -n "$PARAM_ORBWIN_GUEST_BRIDGE_SHA256"
++    STAGED=$(mktemp /usr/local/bin/.orbwin-rdd-guest.XXXXXXXX)
++    trap 'rm -f "$STAGED"' EXIT
++    cp -- "$PARAM_ORBWIN_GUEST_BRIDGE" "$STAGED"
++    test "$(sha256sum "$STAGED" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_GUEST_BRIDGE_SHA256"
++    chmod 0755 "$STAGED"
++    systemctl stop rdd-guest.service
++    mv -f -- "$STAGED" /usr/local/bin/rdd-guest
++    trap - EXIT
++    AUTH="${AUTH//%/%%}"
++    mkdir -p /etc/systemd/system/rdd-guest.service.d /etc/systemd/system/docker.service.d
++    rm -f /etc/systemd/system/docker.service.d/orbwin-wsl.conf
++    cat > /etc/systemd/system/docker.service.d/zz-orbwin-wsl.conf <<EOF
++    [Unit]
++    [Service]
++    ExecStartPre=/usr/bin/mkdir -p /run/orbwin
++    ExecStart=
++    ExecStart=/usr/local/bin/wsl-exec /usr/bin/dockerd --add-runtime oci=/usr/sbin/runc \$DOCKER_OPTS --host unix:///run/orbwin/moby-internal.sock
++    ExecStartPost=
++    ExecStartPost=/usr/bin/chmod 0600 /run/orbwin/moby-internal.sock
++    EOF
+     rm -f /etc/systemd/system/docker.socket.d/orbwin-wsl.conf
+     if [[ -f /etc/systemd/system/orbwin-wsl-socket.service ]]; then
+         systemctl stop orbwin-wsl-socket.service
+         rm -f /etc/systemd/system/orbwin-wsl-socket.service
+     fi
+-    cat > /etc/systemd/system/docker.service.d/orbwin-wsl.conf <<EOF
++    cat > /etc/systemd/system/rdd-guest.service.d/orbwin-wsl.conf <<EOF
++    [Unit]
++    Wants=orbwin-wsl-client.service
++    EOF
++    cat > /etc/systemd/system/orbwin-wsl-client.service <<EOF
++    [Unit]
++    Description=OrbWin authenticated WSL Docker client relay
++    Requires=network-setup.service rdd-guest.service
++    After=network-setup.service rdd-guest.service
++    BindsTo=rdd-guest.service
++    PartOf=rdd-guest.service
+     [Service]
+-    ExecStartPre=/usr/bin/mkdir -p $SHARE
+-    ExecStart=
+-    ExecStart=/usr/local/bin/wsl-exec /usr/bin/dockerd --add-runtime oci=/usr/sbin/runc \$DOCKER_OPTS --host unix:///var/run/docker.sock --host unix://$SHARE/docker.sock
+-    ExecStartPost=/usr/bin/chmod a+rw $SHARE/docker.sock
++    Environment="ORBWIN_WSL_SOCKET=$SHARE/docker.sock"
++    Environment="ORBWIN_WSL_TLS_DIR=$AUTH"
++    ExecStart=/usr/local/bin/wsl-exec /usr/local/bin/rdd-guest wsl-client
++    Restart=on-failure
++    RestartSec=5s
+     EOF
+     systemctl daemon-reload
+ # Write runtime parameters as a systemd EnvironmentFile. Using mode:data lets
+@@ -118,7 +152,14 @@ provision:
+     CONTAINERD_ACTION=$([[ $PARAM_CONTAINER_ENGINE = containerd ]] && echo enable || echo disable)
+     DOCKER_ACTION=$([[ $PARAM_CONTAINER_ENGINE = moby ]] && echo enable || echo disable)
+     systemctl "$CONTAINERD_ACTION" containerd.service buildkitd.service
+-    systemctl "$DOCKER_ACTION" docker.service docker.socket
++    systemctl "$DOCKER_ACTION" docker.service
++    case "$PARAM_HOST_DOCKER_SOCKET" in
++      *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++        # Unit dependency lists cannot be cleared in a drop-in. Mask the
++        # inherited weak socket dependency so Docker cannot reclaim the relay.
++        systemctl mask --now docker.socket ;;
++      *) systemctl "$DOCKER_ACTION" docker.socket ;;
++    esac
+ 
+     if [[ $PARAM_KUBERNETES_ENABLED == "true" ]]; then
+         export INSTALL_K3S_VERSION="v${PARAM_KUBERNETES_VERSION}+k3s1"
+diff --git a/rdd/pkg/embedded/.gitignore b/rdd/pkg/embedded/.gitignore
+new file mode 100644
+index 000000000..f938bacd0
+--- /dev/null
++++ b/rdd/pkg/embedded/.gitignore
+@@ -0,0 +1 @@
++/rdd-guest.amd64
+diff --git a/rdd/pkg/embedded/rdd_guest.go b/rdd/pkg/embedded/rdd_guest.go
+new file mode 100644
+index 000000000..cec9c427a
+--- /dev/null
++++ b/rdd/pkg/embedded/rdd_guest.go
+@@ -0,0 +1,5 @@
++package embedded
++
++// RDDGuest is empty in management-only builds. Guest-capable Windows builds
++// embed the same bridge installed in the initial rootfs.
++var RDDGuest []byte
+diff --git a/rdd/pkg/embedded/rdd_guest_windows_distro.go b/rdd/pkg/embedded/rdd_guest_windows_distro.go
+new file mode 100644
+index 000000000..7be6f6949
+--- /dev/null
++++ b/rdd/pkg/embedded/rdd_guest_windows_distro.go
+@@ -0,0 +1,10 @@
++//go:build windows && with_distro
++
++package embedded
++
++import _ "embed"
++
++//go:embed rdd-guest.amd64
++var rddGuest []byte
++
++func init() { RDDGuest = rddGuest }
+diff --git a/rdd/pkg/hostswitch/hostswitch_windows.go b/rdd/pkg/hostswitch/hostswitch_windows.go
+index 0c19f4a2f..78d0a2bcb 100644
+--- a/rdd/pkg/hostswitch/hostswitch_windows.go
++++ b/rdd/pkg/hostswitch/hostswitch_windows.go
+@@ -14,6 +14,7 @@ package hostswitch
+ import (
+ 	"bytes"
+ 	"context"
++	"crypto/tls"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+@@ -21,6 +22,7 @@ import (
+ 	"net"
+ 	"net/http"
+ 	"net/http/httptest"
++	"path/filepath"
+ 	"strings"
+ 	"time"
+ 
+@@ -161,21 +163,65 @@ func runOnce(ctx context.Context, logger logr.Logger, subnet hostSwitchSubnet) e
+ 		ln.Close()
+ 		return fmt.Errorf("failed to listen on API address %q: %w", apiAddr, err)
+ 	}
++	// This listener exists only inside the private gvisor network carried over
++	// vsock. It is not a Windows host TCP listener. WSL's owned Unix relay uses
++	// the same Docker adaptation as the owner-ACL named pipe.
++	tlsConfig, err := socketbridge.WSLServerTLS(filepath.Join(instance.ShortDir(), "wsl-client-auth"))
++	if err != nil {
++		_ = vnLn.Close()
++		_ = ln.Close()
++		return fmt.Errorf("private WSL client identity: %w", err)
++	}
++	dockerLn, err := vn.Listen("tcp", net.JoinHostPort(cfg.GatewayIP, "23760"))
++	if err != nil {
++		_ = vnLn.Close()
++		_ = ln.Close()
++		return fmt.Errorf("private Docker listener: %w", err)
++	}
++	defer dockerLn.Close()
++	dockerLn = tls.NewListener(dockerLn, tlsConfig)
+ 	mux := http.NewServeMux()
++	var epochs publicationEpochs
+ 	mux.Handle("/services/forwarder/all", vn.Mux())
+-	mux.Handle("/services/forwarder/expose", vn.Mux())
+-	mux.Handle("/services/forwarder/unexpose", vn.Mux())
++	mux.Handle("/services/forwarder/expose", epochs.handler(vn.Mux()))
++	mux.Handle("/services/forwarder/unexpose", epochs.handler(vn.Mux()))
+ 
+ 	// gctx is the errgroup's context, always cancelled by the time g.Wait()
+ 	// returns. Only the original ctx distinguishes a clean shutdown from a
+ 	// failure, so the caller reads ctx, not gctx.
+ 	g, gctx := errgroup.WithContext(ctx)
++	var tapIP string
++	for ip := range subnet.StaticDHCPLease {
++		tapIP = ip
++		break
++	}
++	published := func(protocol, port string) bool {
++		all, err := requestVN(vn, http.MethodGet, "/services/forwarder/all", nil)
++		if err != nil || all.Code != http.StatusOK {
++			return false
++		}
++		var forwards []struct{ Local, Remote, Protocol string }
++		if json.Unmarshal(all.Body.Bytes(), &forwards) != nil {
++			return false
++		}
++		for _, forward := range forwards {
++			if forward.Local == net.JoinHostPort("127.0.0.1", port) && forward.Remote == net.JoinHostPort(tapIP, port) && forward.Protocol == protocol {
++				return true
++			}
++		}
++		return false
++	}
++	generation := func(protocol, port string) uint64 {
++		return epochs.generation(protocol, net.JoinHostPort("127.0.0.1", port), func() bool { return published(protocol, port) })
++	}
++	dockerBridge := socketbridge.NewDockerHostBridge(vmGUID, logger, published, generation)
++	g.Go(func() error { return dockerBridge.ServeDocker(gctx, dockerLn) })
+ 
+ 	// Start the host-side socket bridges now that we have the VM GUID. Each
+ 	// listens on a named pipe and forwards connections over vsock to rdd-guest,
+ 	// which the rdd overlay installs in the VM and systemd starts.
+ 	for _, bridge := range []*socketbridge.HostBridge{
+-		socketbridge.NewDockerHostBridge(vmGUID, logger),
++		dockerBridge,
+ 		socketbridge.NewHostBridge(instance.ContainerdSocket(), socketbridge.ContainerdVsockPort, vmGUID, logger),
+ 	} {
+ 		g.Go(func() error {
+diff --git a/rdd/pkg/hostswitch/publication_windows.go b/rdd/pkg/hostswitch/publication_windows.go
+new file mode 100644
+index 000000000..66739aac5
+--- /dev/null
++++ b/rdd/pkg/hostswitch/publication_windows.go
+@@ -0,0 +1,78 @@
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package hostswitch
++
++import (
++	"bytes"
++	"encoding/json"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"sync"
++)
++
++// Observe only successful mutations of the existing forwarder. The actual
++// listener map remains authoritative. A generation distinguishes a restarted
++// listener from the still-live previous publication while guest events queue.
++type publicationEpochs struct {
++	mutex  sync.Mutex
++	next   uint64
++	active map[string]uint64
++}
++
++func (p *publicationEpochs) handler(next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		body, err := io.ReadAll(io.LimitReader(r.Body, 16385))
++		_ = r.Body.Close()
++		if err != nil || len(body) > 16384 {
++			http.Error(w, "forwarder request exceeds 16 KiB", http.StatusRequestEntityTooLarge)
++			return
++		}
++		var request struct {
++			Local    string
++			Protocol string
++		}
++		if json.Unmarshal(body, &request) != nil {
++			http.Error(w, "invalid forwarder request", http.StatusBadRequest)
++			return
++		}
++		if request.Protocol == "" {
++			request.Protocol = "tcp"
++		}
++		r.Body = io.NopCloser(bytes.NewReader(body))
++		response := httptest.NewRecorder()
++		func() {
++			p.mutex.Lock()
++			defer p.mutex.Unlock()
++			next.ServeHTTP(response, r)
++			if response.Code >= 200 && response.Code < 300 {
++				if p.active == nil {
++					p.active = map[string]uint64{}
++				}
++				key := request.Protocol + "/" + request.Local
++				switch r.URL.Path {
++				case "/services/forwarder/expose":
++					p.next++
++					p.active[key] = p.next
++				case "/services/forwarder/unexpose":
++					delete(p.active, key)
++				}
++			}
++		}()
++		for key, values := range response.Header() {
++			w.Header()[key] = values
++		}
++		w.WriteHeader(response.Code)
++		_, _ = w.Write(response.Body.Bytes())
++	})
++}
++
++func (p *publicationEpochs) generation(protocol, local string, actual func() bool) uint64 {
++	p.mutex.Lock()
++	defer p.mutex.Unlock()
++	if !actual() {
++		return 0
++	}
++	return p.active[protocol+"/"+local]
++}
+diff --git a/rdd/pkg/hostswitch/publication_windows_test.go b/rdd/pkg/hostswitch/publication_windows_test.go
+new file mode 100644
+index 000000000..da58168db
+--- /dev/null
++++ b/rdd/pkg/hostswitch/publication_windows_test.go
+@@ -0,0 +1,64 @@
++//go:build windows
++
++package hostswitch
++
++import (
++	"fmt"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"testing"
++)
++
++func TestPublicationGenerationsOnlyObserveSuccessfulOwnedListeners(t *testing.T) {
++	var epochs publicationEpochs
++	var calls atomic.Int32
++	handler := epochs.handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		calls.Add(1)
++		if r.Header.Get("Fail") != "" {
++			w.WriteHeader(409)
++		} else {
++			w.WriteHeader(200)
++		}
++	}))
++	send := func(path, local string, fail bool) {
++		request := httptest.NewRequest("POST", path, strings.NewReader(fmt.Sprintf(`{"local":%q,"protocol":"tcp","remote":"192.168.127.2:50000"}`, local)))
++		if fail {
++			request.Header.Set("Fail", "yes")
++		}
++		handler.ServeHTTP(httptest.NewRecorder(), request)
++	}
++	const local = "127.0.0.1:50000"
++	send("/services/forwarder/expose", local, false)
++	first := epochs.generation("tcp", local, func() bool { return true })
++	if first == 0 || epochs.generation("tcp", local, func() bool { return false }) != 0 {
++		t.Fatal("unverified listener accepted")
++	}
++	send("/services/forwarder/expose", local, true)
++	if epochs.generation("tcp", local, func() bool { return true }) != first {
++		t.Fatal("failed expose advanced generation")
++	}
++	send("/services/forwarder/unexpose", local, false)
++	if epochs.generation("tcp", local, func() bool { return true }) != 0 {
++		t.Fatal("removed listener retained generation")
++	}
++	send("/services/forwarder/expose", local, false)
++	if epochs.generation("tcp", local, func() bool { return true }) <= first {
++		t.Fatal("replacement listener has stale generation")
++	}
++	before := calls.Load()
++	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/services/forwarder/expose", strings.NewReader(strings.Repeat("x", 16385))))
++	if calls.Load() != before {
++		t.Fatal("oversized request reached mutation handler")
++	}
++	var clients sync.WaitGroup
++	for n := 0; n < 32; n++ {
++		clients.Go(func() {
++			send("/services/forwarder/expose", local, false)
++			_ = epochs.generation("tcp", local, func() bool { return true })
++		})
++	}
++	clients.Wait()
++}
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows.go b/rdd/pkg/socketbridge/docker_ports_windows.go
+new file mode 100644
+index 000000000..4c2de4364
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_ports_windows.go
+@@ -0,0 +1,431 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin Windows publication checks. Moby owns persisted bindings; the existing
++// virtual-network forwarder owns Windows listeners. No container/port database.
++//go:build windows
++
++package socketbridge
++
++import (
++	"bytes"
++	"context"
++	"encoding/hex"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/url"
++	"regexp"
++	"strconv"
++	"strings"
++	"time"
++)
++
++// PortPublication reports an actual owned gvisor listener and its expected
++// guest destination, not merely a requested or observed Moby binding.
++type PortPublication func(protocol, port string) bool
++type PortGeneration func(protocol, port string) uint64
++
++type dockerBinding struct {
++	HostIP   string `json:"HostIp"`
++	HostPort string
++}
++type portContainer struct {
++	ID              string
++	HostConfig      struct{ PortBindings map[string][]dockerBinding }
++	State           *struct{ Running *bool }
++	NetworkSettings struct{ Ports map[string][]dockerBinding }
++}
++
++func (c portContainer) valid() bool {
++	if len(c.ID) != 64 || c.State == nil || c.State.Running == nil {
++		return false
++	}
++	_, err := hex.DecodeString(c.ID)
++	return err == nil
++}
++func (c portContainer) running() bool {
++	return c.State != nil && c.State.Running != nil && *c.State.Running
++}
++
++var portLifecycleRoute = regexp.MustCompile(`^(/v[0-9]+\.[0-9]+)?/containers/([^/]+)/(start|restart)$`)
++
++func dockerRead(ctx context.Context, transport http.RoundTripper, path string, into any) (int, error) {
++	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
++	defer cancel()
++	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://orbwin-guest"+path, nil)
++	if err != nil {
++		return 0, err
++	}
++	response, err := transport.RoundTrip(request)
++	if err != nil {
++		return 0, err
++	}
++	defer response.Body.Close()
++	body, err := io.ReadAll(io.LimitReader(response.Body, (4<<20)+1))
++	if err != nil {
++		return response.StatusCode, err
++	}
++	if len(body) > 4<<20 {
++		return response.StatusCode, fmt.Errorf("Docker publication inspection exceeded 4 MiB")
++	}
++	if response.StatusCode < 200 || response.StatusCode >= 300 {
++		return response.StatusCode, nil
++	}
++	return response.StatusCode, json.Unmarshal(body, into)
++}
++
++func portProtocol(key string) (string, error) {
++	parts := strings.Split(key, "/")
++	if len(parts) != 2 {
++		return "", fmt.Errorf("invalid published container port")
++	}
++	number, err := strconv.ParseUint(parts[0], 10, 16)
++	if err != nil || number == 0 || (parts[1] != "tcp" && parts[1] != "udp") {
++		return "", fmt.Errorf("Windows publishing requires TCP/UDP ports 1–65535")
++	}
++	return parts[1], nil
++}
++func hostBinding(binding dockerBinding) error {
++	if binding.HostIP != "" && binding.HostIP != "0.0.0.0" && binding.HostIP != "127.0.0.1" {
++		return fmt.Errorf("Windows publishing currently supports IPv4 localhost; use an empty, wildcard or 127.0.0.1 host address")
++	}
++	return nil
++}
++
++// Convert automatic ports to explicit available Windows ports before Moby
++// creates the container, retaining unknown fields/number precision throughout.
++// A later port claim is handled by the start preflight and publication check.
++func rewriteCreatePorts(ctx context.Context, transport http.RoundTripper, prefix string, body []byte, allocate func(string) (string, error)) ([]byte, error) {
++	var document jsonFields
++	if err := json.Unmarshal(body, &document); err != nil {
++		return nil, err
++	}
++	raw := document["HostConfig"]
++	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
++		return body, nil
++	}
++	var host jsonFields
++	if err := json.Unmarshal(raw, &host); err != nil {
++		return nil, err
++	}
++	bindings := map[string][]jsonFields{}
++	if raw = host["PortBindings"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++		if err := json.Unmarshal(raw, &bindings); err != nil {
++			return nil, err
++		}
++	}
++	var publishAll bool
++	if raw = host["PublishAllPorts"]; len(raw) > 0 {
++		if err := json.Unmarshal(raw, &publishAll); err != nil {
++			return nil, err
++		}
++	}
++	changed := false
++	if publishAll {
++		var image string
++		if err := json.Unmarshal(document["Image"], &image); err != nil {
++			return nil, err
++		}
++		var metadata struct {
++			Config struct{ ExposedPorts map[string]json.RawMessage }
++		}
++		status, err := dockerRead(ctx, transport, prefix+"/images/"+url.PathEscape(image)+"/json", &metadata)
++		if err != nil {
++			return nil, err
++		}
++		if status != 200 {
++			return nil, fmt.Errorf("cannot inspect image exposed ports (Docker status %d)", status)
++		}
++		exposed := map[string]json.RawMessage{}
++		if raw = document["ExposedPorts"]; len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
++			if err = json.Unmarshal(raw, &exposed); err != nil {
++				return nil, err
++			}
++		}
++		for key := range metadata.Config.ExposedPorts {
++			exposed[key] = nil
++		}
++		for key := range exposed {
++			if len(bindings[key]) == 0 {
++				bindings[key] = []jsonFields{{"HostIp": json.RawMessage(`""`), "HostPort": json.RawMessage(`""`)}}
++			}
++		}
++		host["PublishAllPorts"] = json.RawMessage("false")
++		changed = true
++	}
++	count := 0
++	for key, entries := range bindings {
++		protocol, err := portProtocol(key)
++		if err != nil {
++			return nil, err
++		}
++		for _, entry := range entries {
++			if entry == nil {
++				return nil, fmt.Errorf("publication binding must be an object")
++			}
++			count++
++			if count > 2048 {
++				return nil, fmt.Errorf("publication request exceeds 2048 bindings")
++			}
++			var binding dockerBinding
++			raw, _ := json.Marshal(entry)
++			if err = json.Unmarshal(raw, &binding); err != nil {
++				return nil, err
++			}
++			if err = hostBinding(binding); err != nil {
++				return nil, err
++			}
++			if binding.HostPort == "" || binding.HostPort == "0" {
++				port, err := allocate(protocol)
++				if err != nil {
++					return nil, err
++				}
++				entry["HostPort"], _ = json.Marshal(port)
++				changed = true
++			}
++		}
++	}
++	if !changed {
++		return body, nil
++	}
++	host["PortBindings"], _ = json.Marshal(bindings)
++	document["HostConfig"], _ = json.Marshal(host)
++	return json.Marshal(document)
++}
++
++func checkConfiguredPorts(bindings map[string][]dockerBinding, published PortPublication) error {
++	for key, entries := range bindings {
++		protocol, err := portProtocol(key)
++		if err != nil {
++			return err
++		}
++		for _, binding := range entries {
++			if err = hostBinding(binding); err != nil {
++				return err
++			}
++			if binding.HostPort == "" || binding.HostPort == "0" {
++				continue
++			} // Older containers still get a post-start check.
++			port, err := strconv.ParseUint(binding.HostPort, 10, 16)
++			if err != nil || port == 0 {
++				return fmt.Errorf("invalid configured host port")
++			}
++			if published != nil && published(protocol, binding.HostPort) {
++				continue
++			}
++			address := net.JoinHostPort("127.0.0.1", binding.HostPort)
++			if protocol == "tcp" {
++				listener, e := net.Listen("tcp4", address)
++				if e != nil {
++					return fmt.Errorf("Windows host port %s/%s is unavailable: %w. Choose another port; other engines were not stopped", binding.HostPort, protocol, e)
++				}
++				if e = listener.Close(); e != nil {
++					return e
++				}
++			} else {
++				listener, e := net.ListenPacket("udp4", address)
++				if e != nil {
++					return fmt.Errorf("Windows host port %s/%s is unavailable: %w", binding.HostPort, protocol, e)
++				}
++				if e = listener.Close(); e != nil {
++					return e
++				}
++			}
++		}
++	}
++	return nil
++}
++
++type portResponse struct {
++	header   http.Header
++	status   int
++	body     bytes.Buffer
++	overflow bool
++}
++
++func (w *portResponse) Header() http.Header { return w.header }
++func (w *portResponse) WriteHeader(code int) {
++	if w.status == 0 {
++		w.status = code
++	}
++}
++func (w *portResponse) Write(body []byte) (int, error) {
++	if w.status == 0 {
++		w.status = 200
++	}
++	if w.body.Len()+len(body) > 65536 {
++		w.overflow = true
++		return 0, fmt.Errorf("start response exceeds 64 KiB")
++	}
++	return w.body.Write(body)
++}
++
++func portsPublished(bindings map[string][]dockerBinding, published PortPublication) bool {
++	for key, entries := range bindings {
++		protocol, err := portProtocol(key)
++		if err != nil {
++			return false
++		}
++		for _, binding := range entries {
++			if net.ParseIP(binding.HostIP) != nil && net.ParseIP(binding.HostIP).To4() == nil {
++				continue
++			}
++			if binding.HostPort != "" && (published == nil || !published(protocol, binding.HostPort)) {
++				return false
++			}
++		}
++	}
++	return true
++}
++
++func withPortLifecycle(next http.Handler, transport http.RoundTripper, published PortPublication, reservations *portReservations, generations ...PortGeneration) http.Handler {
++	var generation PortGeneration
++	if len(generations) > 0 {
++		generation = generations[0]
++	}
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method == http.MethodGet && r.URL.Path == "/orbwin/port-status" {
++			publicationStatus(w, r, transport, published)
++			return
++		}
++		match := portLifecycleRoute.FindStringSubmatch(r.URL.Path)
++		if r.Method != http.MethodPost || match == nil {
++			next.ServeHTTP(w, r)
++			return
++		}
++		lifecycleCtx, cancelLifecycle := context.WithTimeout(r.Context(), 2*time.Minute)
++		defer cancelLifecycle()
++		r = r.WithContext(lifecycleCtx)
++		path := match[1] + "/containers/" + url.PathEscape(match[2]) + "/json"
++		var container portContainer
++		status, err := dockerRead(r.Context(), transport, path, &container)
++		if err != nil {
++			dockerError(w, 502, "Could not inspect configured publication before dispatch: "+err.Error())
++			return
++		}
++		if status != 200 {
++			dockerError(w, status, "Container inspection failed before dispatch; refresh the target before retrying.")
++			return
++		}
++		if !container.valid() {
++			dockerError(w, 502, "Container inspection was incomplete. No start/restart was dispatched.")
++			return
++		}
++		// Bind preflight and mutation to one inspected ID, even if a name is
++		// concurrently reassigned to a replacement container.
++		path = match[1] + "/containers/" + container.ID + "/json"
++		r.URL.Path = match[1] + "/containers/" + container.ID + "/" + match[3]
++		r.URL.RawPath = ""
++		if status == 200 {
++			release := reservations.beginStart(container.ID)
++			defer release()
++		}
++		if status == 200 {
++			if err = checkConfiguredPorts(container.HostConfig.PortBindings, published); err != nil {
++				dockerError(w, 409, err.Error())
++				return
++			}
++		}
++		response := &portResponse{header: make(http.Header)}
++		before := map[string]uint64{}
++		fresh := generation != nil && (match[3] == "restart" || !container.running())
++		if fresh {
++			for key, entries := range container.HostConfig.PortBindings {
++				protocol, _ := portProtocol(key)
++				for _, binding := range entries {
++					before[protocol+"/"+binding.HostPort] = generation(protocol, binding.HostPort)
++				}
++			}
++		}
++		next.ServeHTTP(response, r)
++		if response.overflow {
++			dockerError(w, 502, "Start response exceeded its bound. Inspect state before retrying; the container may be running.")
++			return
++		}
++		if (response.status >= 200 && response.status < 300) || response.status == http.StatusNotModified {
++			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
++			defer cancel()
++			for {
++				container = portContainer{}
++				status, err = dockerRead(ctx, transport, path, &container)
++				if err == nil && status == 200 && container.valid() && (!container.running() || ((len(container.HostConfig.PortBindings) == 0 || len(container.NetworkSettings.Ports) > 0) && portsPublished(container.NetworkSettings.Ports, published) && (!fresh || newerPublications(container.NetworkSettings.Ports, before, generation)))) {
++					break
++				}
++				select {
++				case <-ctx.Done():
++					dockerError(w, 502, "The container may be running, but its Windows port publication could not be verified. A port may be in use by another service. Refresh and inspect before retrying; no other engine was stopped.")
++					return
++				case <-time.After(100 * time.Millisecond):
++				}
++			}
++		}
++		writePortResponse(w, response)
++	})
++}
++
++func newerPublications(bindings map[string][]dockerBinding, before map[string]uint64, generation PortGeneration) bool {
++	for key, entries := range bindings {
++		protocol, err := portProtocol(key)
++		if err != nil {
++			return false
++		}
++		for _, binding := range entries {
++			if net.ParseIP(binding.HostIP) != nil && net.ParseIP(binding.HostIP).To4() == nil {
++				continue
++			}
++			if binding.HostPort != "" && generation(protocol, binding.HostPort) <= before[protocol+"/"+binding.HostPort] {
++				return false
++			}
++		}
++	}
++	return true
++}
++
++func writePortResponse(w http.ResponseWriter, response *portResponse) {
++	for key, values := range response.header {
++		w.Header()[key] = values
++	}
++	if response.status == 0 {
++		response.status = 200
++	}
++	w.WriteHeader(response.status)
++	_, _ = w.Write(response.body.Bytes())
++}
++
++func publicationStatus(w http.ResponseWriter, r *http.Request, transport http.RoundTripper, published PortPublication) {
++	var containers []struct {
++		ID    string
++		Ports []struct {
++			IP         string
++			PublicPort uint16
++			Type       string
++		}
++	}
++	status, err := dockerRead(r.Context(), transport, "/containers/json", &containers)
++	if err != nil || status != 200 {
++		dockerError(w, 502, "Could not inspect running publications")
++		return
++	}
++	type entry struct {
++		ContainerID string `json:"containerId"`
++		Port        uint16 `json:"port"`
++		Protocol    string `json:"protocol"`
++		Published   bool   `json:"published"`
++	}
++	result := []entry{}
++	for _, container := range containers {
++		for _, port := range container.Ports {
++			if port.PublicPort == 0 || net.ParseIP(port.IP) == nil || net.ParseIP(port.IP).To4() == nil {
++				continue
++			}
++			if len(result) >= 2048 {
++				dockerError(w, 502, "Publication snapshot exceeds 2048 bindings")
++				return
++			}
++			result = append(result, entry{container.ID, port.PublicPort, port.Type, published != nil && published(port.Type, strconv.Itoa(int(port.PublicPort)))})
++		}
++	}
++	w.Header().Set("Content-Type", "application/json")
++	_ = json.NewEncoder(w).Encode(result)
++}
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows_test.go b/rdd/pkg/socketbridge/docker_ports_windows_test.go
+new file mode 100644
+index 000000000..9a887d4d2
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_ports_windows_test.go
+@@ -0,0 +1,350 @@
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package socketbridge
++
++import (
++	"bytes"
++	"context"
++	"crypto/tls"
++	"crypto/x509"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"strings"
++	"sync"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++func TestConcurrentAllocationClaimsAreBoundedAndCloseOnCancellation(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	pool := newPortReservations(ctx)
++	defer cancel()
++	var workers sync.WaitGroup
++	allocated := make(chan *portReservation, 32)
++	failures := make(chan error, 32)
++	for i := 0; i < 32; i++ {
++		workers.Go(func() {
++			entry, err := pool.allocate("tcp")
++			if err != nil {
++				failures <- err
++			} else {
++				allocated <- entry
++			}
++		})
++	}
++	workers.Wait()
++	close(allocated)
++	close(failures)
++	for err := range failures {
++		t.Fatal(err)
++	}
++	seen := map[string]bool{}
++	var entries []*portReservation
++	for entry := range allocated {
++		if seen[entry.key] {
++			t.Fatal("duplicate live allocation")
++		}
++		seen[entry.key] = true
++		entries = append(entries, entry)
++	}
++	if len(entries) != 32 {
++		t.Fatal("lost allocation")
++	}
++	for _, entry := range entries {
++		listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", entry.port))
++		if err == nil {
++			listener.Close()
++			t.Fatal("reservation did not hold the port")
++		}
++	}
++	cancel()
++	pool.close()
++	for _, entry := range entries {
++		listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", entry.port))
++		if err != nil {
++			t.Fatal("cancelled allocation retained its FD:", err)
++		}
++		listener.Close()
++	}
++	if _, err := pool.allocate("tcp"); err == nil {
++		t.Fatal("allocation continued after cancellation")
++	}
++}
++
++func TestFailedCreateReleasesItsAllocation(t *testing.T) {
++	var port string
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		var body struct {
++			HostConfig struct{ PortBindings map[string][]dockerBinding }
++		}
++		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
++			t.Error(err)
++		}
++		port = body.HostConfig.PortBindings["80/tcp"][0].HostPort
++		w.WriteHeader(500)
++		fmt.Fprint(w, `{"message":"injected create failure"}`)
++	}))
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	pool := newPortReservations(ctx)
++	response := httptest.NewRecorder()
++	dockerHandlerReserved(transport, nil, pool).ServeHTTP(response, httptest.NewRequest("POST", "/containers/create", strings.NewReader(`{"HostConfig":{"PortBindings":{"80/tcp":[{"HostPort":""}]}}}`)))
++	if response.Code != 500 || port == "" {
++		t.Fatalf("wrong create outcome: %d %s", response.Code, response.Body)
++	}
++	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", port))
++	if err != nil {
++		t.Fatal("failed create retained its allocation:", err)
++	}
++	listener.Close()
++}
++
++func TestAutomaticPortsPersistExplicitWindowsBindings(t *testing.T) {
++	body := []byte(`{"Future":9007199254740993,"HostConfig":{"Unknown":{"value":9007199254740995},"PortBindings":{"6379/tcp":[{"HostIp":"127.0.0.1","HostPort":"","Future":true}],"53/udp":[{"HostPort":"0"}]}}}`)
++	count := 0
++	changed, err := rewriteCreatePorts(context.Background(), nil, "", body, func(protocol string) (string, error) {
++		count++
++		if protocol != "tcp" && protocol != "udp" {
++			t.Fatal(protocol)
++		}
++		return "49199", nil
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if count != 2 || !bytes.Contains(changed, []byte(`9007199254740993`)) || !bytes.Contains(changed, []byte(`9007199254740995`)) || !bytes.Contains(changed, []byte(`"Future":true`)) {
++		t.Fatalf("fields changed: %s", changed)
++	}
++	repeated, err := rewriteCreatePorts(context.Background(), nil, "", changed, func(string) (string, error) { t.Fatal("reallocated explicit port"); return "", nil })
++	if err != nil || !bytes.Equal(repeated, changed) {
++		t.Fatalf("explicit binding changed: %s %v", repeated, err)
++	}
++	for _, body := range []string{`{"HostConfig":{"PortBindings":{"80/tcp":[null]}}}`, `{"HostConfig":{"PortBindings":{"80/sctp":[{"HostPort":""}]}}}`, `{"HostConfig":{"PortBindings":{"80/tcp":[{"HostIp":"192.0.2.1","HostPort":""}]}}}`} {
++		if _, err := rewriteCreatePorts(context.Background(), nil, "", []byte(body), func(string) (string, error) { t.Fatal("allocated an unsupported binding"); return "", nil }); err == nil {
++			t.Fatal("accepted unsupported binding")
++		}
++	}
++}
++
++func TestPublishAllUsesImageAndRequestExposedPorts(t *testing.T) {
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method != "GET" || r.URL.Path != "/v1.54/images/image/json" {
++			t.Errorf("wrong inspection: %s", r.URL.Path)
++		}
++		fmt.Fprint(w, `{"Config":{"ExposedPorts":{"80/tcp":{}}}}`)
++	}))
++	body, err := rewriteCreatePorts(context.Background(), transport, "/v1.54", []byte(`{"Image":"image","ExposedPorts":{"53/udp":{}},"HostConfig":{"PublishAllPorts":true},"Future":9007199254740993}`), func(string) (string, error) { return "49198", nil })
++	if err != nil {
++		t.Fatal(err)
++	}
++	var value struct {
++		HostConfig struct {
++			PublishAllPorts bool
++			PortBindings    map[string][]dockerBinding
++		}
++	}
++	if json.Unmarshal(body, &value) != nil || value.HostConfig.PublishAllPorts || len(value.HostConfig.PortBindings) != 2 {
++		t.Fatalf("publish-all not expanded: %s", body)
++	}
++}
++
++func TestIncompleteInspectionCannotDispatchStart(t *testing.T) {
++	var mutations atomic.Int32
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method == "POST" {
++			mutations.Add(1)
++			w.WriteHeader(204)
++		} else {
++			fmt.Fprint(w, `{"State":{"Running":false}}`)
++		}
++	}))
++	response := httptest.NewRecorder()
++	dockerHandlerPorts(transport, nil).ServeHTTP(response, httptest.NewRequest("POST", "/containers/name/start", nil))
++	if response.Code != 502 || mutations.Load() != 0 {
++		t.Fatalf("partial inspection dispatched mutation: %d", response.Code)
++	}
++}
++
++func TestForeignHostPortFailsBeforeStartDispatch(t *testing.T) {
++	listener, err := net.Listen("tcp4", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	_, port, _ := net.SplitHostPort(listener.Addr().String())
++	var mutations atomic.Int32
++	transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method == "POST" {
++			mutations.Add(1)
++			w.WriteHeader(204)
++			return
++		}
++		fmt.Fprintf(w, `{"Id":%q,"HostConfig":{"PortBindings":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":%q}]}},"State":{"Running":false}}`, strings.Repeat("a", 64), port)
++	}))
++	response := httptest.NewRecorder()
++	dockerHandlerPorts(transport, func(string, string) bool { return false }).ServeHTTP(response, httptest.NewRequest("POST", "/v1.54/containers/owned/start", nil))
++	if response.Code != 409 || mutations.Load() != 0 || !strings.Contains(response.Body.String(), "unavailable") {
++		t.Fatalf("false start: %d %s mutations=%d", response.Code, response.Body, mutations.Load())
++	}
++}
++
++func TestStartWaitsForOwnedPublicationAndReportsUncertainty(t *testing.T) {
++	for _, ready := range []bool{true, false} {
++		t.Run(fmt.Sprint(ready), func(t *testing.T) {
++			listener, err := net.Listen("tcp4", "127.0.0.1:0")
++			if err != nil {
++				t.Fatal(err)
++			}
++			_, port, _ := net.SplitHostPort(listener.Addr().String())
++			listener.Close()
++			var started atomic.Bool
++			var checks atomic.Int32
++			transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if r.Method == "POST" {
++					if r.URL.Path != "/containers/"+strings.Repeat("a", 64)+"/start" {
++						t.Errorf("start used mutable name: %s", r.URL.Path)
++					}
++					started.Store(true)
++					w.WriteHeader(204)
++					return
++				}
++				fmt.Fprintf(w, `{"Id":%q,"State":{"Running":%t},"HostConfig":{"PortBindings":{"80/tcp":[{"HostPort":%q}]}},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":%q}]}}}`, strings.Repeat("a", 64), started.Load(), port, port)
++			}))
++			request := httptest.NewRequest("POST", "/containers/owned/start", nil)
++			ctx, cancel := context.WithTimeout(request.Context(), 300*time.Millisecond)
++			defer cancel()
++			request = request.WithContext(ctx)
++			response := httptest.NewRecorder()
++			dockerHandlerPorts(transport, func(string, string) bool {
++				if !started.Load() {
++					return false
++				}
++				return ready && checks.Add(1) >= 2
++			}).ServeHTTP(response, request)
++			if ready {
++				if response.Code != 204 || checks.Load() < 2 {
++					t.Fatalf("did not wait for publication: %d", response.Code)
++				}
++			} else if response.Code != 502 || !strings.Contains(response.Body.String(), "may be running") {
++				t.Fatalf("false publication success: %d %s", response.Code, response.Body)
++			}
++		})
++	}
++}
++
++func TestRestartRequiresNewPublicationGeneration(t *testing.T) {
++	for _, replacement := range []bool{false, true} {
++		t.Run(fmt.Sprint(replacement), func(t *testing.T) {
++			var revision atomic.Uint64
++			revision.Store(1)
++			var reads atomic.Int32
++			transport := testDockerTransport(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++				if r.Method == "POST" {
++					if replacement {
++						timer := time.AfterFunc(40*time.Millisecond, func() { revision.Store(2) })
++						t.Cleanup(func() { timer.Stop() })
++					}
++					w.WriteHeader(204)
++					return
++				}
++				reads.Add(1)
++				fmt.Fprintf(w, `{"Id":%q,"State":{"Running":true},"HostConfig":{"PortBindings":{"80/tcp":[{"HostPort":"55000"}]}},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"55000"}]}}}`, strings.Repeat("a", 64))
++			}))
++			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
++			defer cancel()
++			pool := newPortReservations(ctx)
++			handler := dockerHandlerReserved(transport, func(string, string) bool { return true }, pool, func(string, string) uint64 { return revision.Load() })
++			response := httptest.NewRecorder()
++			handler.ServeHTTP(response, httptest.NewRequest("POST", "/containers/owned/restart", nil).WithContext(ctx))
++			if replacement && response.Code != 204 {
++				t.Fatalf("replacement rejected: %d %s", response.Code, response.Body)
++			}
++			if replacement && revision.Load() != 2 {
++				t.Fatal("restart returned before queued publication replacement")
++			}
++			if !replacement && response.Code != 502 {
++				t.Fatalf("previous listener acknowledged restart: %d", response.Code)
++			}
++			if reads.Load() < 2 {
++				t.Fatal("no post-mutation inspection")
++			}
++		})
++	}
++}
++
++func TestWSLMutualTLSRejectsAnonymousAndForeignClients(t *testing.T) {
++	directory := filepath.Join(t.TempDir(), "identity")
++	config, err := WSLServerTLS(directory)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var calls atomic.Int32
++	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); fmt.Fprint(w, "owned") }))
++	server.TLS = config
++	server.StartTLS()
++	defer server.Close()
++	ca, err := os.ReadFile(filepath.Join(directory, "ca.pem"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	roots := x509.NewCertPool()
++	roots.AppendCertsFromPEM(ca)
++	request := func(certificates []tls.Certificate) error {
++		transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, ServerName: wslServerName, RootCAs: roots, Certificates: certificates}}
++		defer transport.CloseIdleConnections()
++		client := &http.Client{Transport: transport, Timeout: 3 * time.Second}
++		response, err := client.Get(server.URL)
++		if err == nil {
++			defer response.Body.Close()
++			_, err = io.ReadAll(response.Body)
++		}
++		return err
++	}
++	if request(nil) == nil || calls.Load() != 0 {
++		t.Fatal("anonymous client reached Docker handler")
++	}
++	other := filepath.Join(t.TempDir(), "foreign")
++	if _, err = WSLServerTLS(other); err != nil {
++		t.Fatal(err)
++	}
++	foreign, err := tls.LoadX509KeyPair(filepath.Join(other, "client.pem"), filepath.Join(other, "client.key"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if request([]tls.Certificate{foreign}) == nil || calls.Load() != 0 {
++		t.Fatal("foreign client reached Docker handler")
++	}
++	owned, err := tls.LoadX509KeyPair(filepath.Join(directory, "client.pem"), filepath.Join(directory, "client.key"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = request([]tls.Certificate{owned}); err != nil || calls.Load() != 1 {
++		t.Fatalf("owned client failed: %v", err)
++	}
++	before, _ := os.ReadFile(filepath.Join(directory, "client.key"))
++	if _, err = WSLServerTLS(directory); err != nil {
++		t.Fatal(err)
++	}
++	after, _ := os.ReadFile(filepath.Join(directory, "client.key"))
++	if !bytes.Equal(before, after) {
++		t.Fatal("silently replaced identity")
++	}
++	if err = os.WriteFile(filepath.Join(directory, "server.key"), []byte("corrupt"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = WSLServerTLS(directory); err == nil {
++		t.Fatal("accepted corrupt identity")
++	}
++	after, _ = os.ReadFile(filepath.Join(directory, "server.key"))
++	if string(after) != "corrupt" {
++		t.Fatal("reset corrupt identity without explicit repair")
++	}
++}
+diff --git a/rdd/pkg/socketbridge/docker_reservations_windows.go b/rdd/pkg/socketbridge/docker_reservations_windows.go
+new file mode 100644
+index 000000000..7a9fe160b
+--- /dev/null
++++ b/rdd/pkg/socketbridge/docker_reservations_windows.go
+@@ -0,0 +1,160 @@
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package socketbridge
++
++import (
++	"context"
++	"fmt"
++	"io"
++	"net"
++	"sync"
++	"time"
++)
++
++// Only short-lived allocation FDs are cached. Moby owns persisted bindings and
++// the existing gvisor forwarder owns active listeners. Reservations expire after
++// 30 seconds, survive no hostagent restart, and never start/stop a container.
++type portReservation struct {
++	key, port, container string
++	listener             io.Closer
++	timer                *time.Timer
++	generation           uint64
++}
++type portReservations struct {
++	mutex   sync.Mutex
++	entries map[string]*portReservation
++	closed  bool
++}
++
++func newPortReservations(ctx context.Context) *portReservations {
++	pool := &portReservations{entries: map[string]*portReservation{}}
++	context.AfterFunc(ctx, pool.close)
++	return pool
++}
++func (p *portReservations) close() {
++	p.mutex.Lock()
++	defer p.mutex.Unlock()
++	p.closed = true
++	for _, entry := range p.entries {
++		if entry.timer != nil {
++			entry.timer.Stop()
++		}
++		if entry.listener != nil {
++			_ = entry.listener.Close()
++		}
++	}
++	p.entries = map[string]*portReservation{}
++}
++func (p *portReservations) discard(entries []*portReservation) {
++	p.mutex.Lock()
++	defer p.mutex.Unlock()
++	for _, entry := range entries {
++		if p.entries[entry.key] != entry {
++			continue
++		}
++		if entry.timer != nil {
++			entry.timer.Stop()
++		}
++		if entry.listener != nil {
++			_ = entry.listener.Close()
++			entry.listener = nil
++		}
++		delete(p.entries, entry.key)
++	}
++}
++func (p *portReservations) allocate(protocol string) (*portReservation, error) {
++	p.mutex.Lock()
++	defer p.mutex.Unlock()
++	if p.closed {
++		return nil, fmt.Errorf("host port allocator is closing")
++	}
++	if len(p.entries) >= 256 {
++		return nil, fmt.Errorf("256 host port allocations are pending; start or remove prepared containers and retry shortly")
++	}
++	for attempt := 0; attempt < 64; attempt++ {
++		var listener io.Closer
++		var address net.Addr
++		switch protocol {
++		case "tcp":
++			value, err := net.Listen("tcp4", "127.0.0.1:0")
++			if err != nil {
++				return nil, err
++			}
++			listener = value
++			address = value.Addr()
++		case "udp":
++			value, err := net.ListenPacket("udp4", "127.0.0.1:0")
++			if err != nil {
++				return nil, err
++			}
++			listener = value
++			address = value.LocalAddr()
++		default:
++			return nil, fmt.Errorf("only TCP/UDP allocation is supported")
++		}
++		_, port, err := net.SplitHostPort(address.String())
++		if err != nil {
++			_ = listener.Close()
++			return nil, err
++		}
++		key := protocol + "/" + port
++		if _, busy := p.entries[key]; busy {
++			_ = listener.Close()
++			continue
++		}
++		entry := &portReservation{key: key, port: port, listener: listener}
++		p.entries[key] = entry
++		p.schedule(entry, 30*time.Second)
++		return entry, nil
++	}
++	return nil, fmt.Errorf("could not select an unclaimed Windows port within the allocation bound")
++}
++func (p *portReservations) associate(entries []*portReservation, container string) {
++	p.mutex.Lock()
++	defer p.mutex.Unlock()
++	for _, entry := range entries {
++		if p.entries[entry.key] == entry {
++			entry.container = container
++		}
++	}
++}
++func (p *portReservations) beginStart(container string) func() {
++	p.mutex.Lock()
++	var starting []*portReservation
++	for _, entry := range p.entries {
++		if entry.container != container || container == "" {
++			continue
++		}
++		if entry.timer != nil {
++			entry.timer.Stop()
++		}
++		if entry.listener != nil {
++			_ = entry.listener.Close()
++			entry.listener = nil
++		}
++		p.schedule(entry, 3*time.Minute)
++		starting = append(starting, entry)
++	}
++	p.mutex.Unlock()
++	return func() { p.discard(starting) }
++}
++
++// Caller holds mutex. Generation prevents an already-fired old timer from
++// deleting a claim that was transferred from create to an active start request.
++func (p *portReservations) schedule(entry *portReservation, timeout time.Duration) {
++	entry.generation++
++	generation := entry.generation
++	entry.timer = time.AfterFunc(timeout, func() {
++		p.mutex.Lock()
++		defer p.mutex.Unlock()
++		if p.entries[entry.key] != entry || entry.generation != generation {
++			return
++		}
++		if entry.listener != nil {
++			_ = entry.listener.Close()
++			entry.listener = nil
++		}
++		delete(p.entries, entry.key)
++	})
++}
+diff --git a/rdd/pkg/socketbridge/docker_windows.go b/rdd/pkg/socketbridge/docker_windows.go
+index e50e97143..c6eb44c81 100644
+--- a/rdd/pkg/socketbridge/docker_windows.go
++++ b/rdd/pkg/socketbridge/docker_windows.go
+@@ -15,16 +15,26 @@ import (
+ 	"net/http"
+ 	"net/http/httputil"
+ 	"regexp"
++	"strings"
+ 	"sync"
+ 	"time"
+ 
+ 	"github.com/Microsoft/go-winio"
+ 	"github.com/Microsoft/go-winio/pkg/guid"
++	"golang.org/x/net/netutil"
+ )
+ 
+ var createRoute = regexp.MustCompile(`^/(?:v[0-9]+\.[0-9]+/)?(containers|volumes)/create$`)
+ 
+ func dockerHandler(transport http.RoundTripper) http.Handler {
++	return dockerHandlerPorts(transport, nil)
++}
++
++func dockerHandlerPorts(transport http.RoundTripper, published PortPublication) http.Handler {
++	return dockerHandlerReserved(transport, published, newPortReservations(context.Background()))
++}
++
++func dockerHandlerReserved(transport http.RoundTripper, published PortPublication, reservations *portReservations, generation ...PortGeneration) http.Handler {
+ 	proxy := &httputil.ReverseProxy{
+ 		Rewrite: func(p *httputil.ProxyRequest) {
+ 			p.Out.URL.Scheme = "http"
+@@ -37,7 +47,14 @@ func dockerHandler(transport http.RoundTripper) http.Handler {
+ 			dockerError(w, http.StatusBadGateway, "The OrbWin guest connection failed. Inspect engine status before retrying; a mutation may already have taken effect.")
+ 		},
+ 	}
+-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++	base := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		var allocated []*portReservation
++		retain := false
++		defer func() {
++			if !retain {
++				reservations.discard(allocated)
++			}
++		}()
+ 		if match := createRoute.FindStringSubmatch(r.URL.Path); r.Method == http.MethodPost && match != nil {
+ 			// Only finite create JSON is buffered; builds, logs, events and upgrades
+ 			// use the standard streaming proxy directly.
+@@ -54,12 +71,47 @@ func dockerHandler(transport http.RoundTripper) http.Handler {
+ 				dockerError(w, http.StatusBadRequest, "Invalid create request: "+err.Error())
+ 				return
+ 			}
++			if match[1] == "containers" {
++				prefix := strings.TrimSuffix(r.URL.Path, "/containers/create")
++				body, err = rewriteCreatePorts(r.Context(), transport, prefix, body, func(protocol string) (string, error) {
++					entry, err := reservations.allocate(protocol)
++					if err != nil {
++						return "", err
++					}
++					allocated = append(allocated, entry)
++					return entry.port, nil
++				})
++				if err != nil {
++					dockerError(w, http.StatusBadRequest, "Cannot configure Windows port publication: "+err.Error())
++					return
++				}
++			}
+ 			r.Body = io.NopCloser(bytes.NewReader(body))
+ 			r.ContentLength = int64(len(body))
+ 			r.TransferEncoding = nil
+ 		}
+-		proxy.ServeHTTP(dockerResponse{w}, r)
++		if len(allocated) > 0 {
++			response := &portResponse{header: make(http.Header)}
++			proxy.ServeHTTP(response, r)
++			if response.overflow {
++				dockerError(w, 502, "Create response exceeded 64 KiB. Inspect state before retrying; a container may have been created.")
++				return
++			}
++			if response.status >= 200 && response.status < 300 {
++				var created struct{ ID string }
++				if json.Unmarshal(response.body.Bytes(), &created) != nil || len(created.ID) != 64 {
++					dockerError(w, 502, "Create returned no full container ID. Inspect state before retrying; a container may have been created.")
++					return
++				}
++				reservations.associate(allocated, created.ID)
++				retain = true
++			}
++			writePortResponse(w, response)
++		} else {
++			proxy.ServeHTTP(dockerResponse{w}, r)
++		}
+ 	})
++	return withPortLifecycle(base, transport, published, reservations, generation...)
+ }
+ 
+ func dockerError(w http.ResponseWriter, status int, message string) {
+@@ -71,7 +123,8 @@ func dockerError(w http.ResponseWriter, status int, message string) {
+ // The bridge owns listener, HTTP server and all accepted connections, including
+ // hijacked exec/BuildKit streams. Cancellation closes all of them. No UI state
+ // participates. No environment HTTP proxy is consulted by the fixed dialer.
+-func (b *HostBridge) serveDocker(ctx context.Context, listener net.Listener) error {
++func (b *HostBridge) ServeDocker(ctx context.Context, listener net.Listener) error {
++	b.reservationOnce.Do(func() { b.reservations = newPortReservations(ctx) })
+ 	transport := &http.Transport{
+ 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+ 			vm, err := guid.FromString(b.vmGUID.String())
+@@ -88,11 +141,11 @@ func (b *HostBridge) serveDocker(ctx context.Context, listener net.Listener) err
+ 		IdleConnTimeout:       30 * time.Second,
+ 		ResponseHeaderTimeout: 0,
+ 	}
+-	return serveDockerHTTP(ctx, listener, dockerHandler(transport), transport.CloseIdleConnections)
++	return serveDockerHTTP(ctx, listener, dockerHandlerReserved(transport, b.published, b.reservations, b.generation), transport.CloseIdleConnections)
+ }
+ 
+ func serveDockerHTTP(ctx context.Context, listener net.Listener, handler http.Handler, closeIdle func()) error {
+-	tracked := &dockerListener{Listener: listener, ctx: ctx, connections: map[*dockerConn]struct{}{}}
++	tracked := &dockerListener{Listener: netutil.LimitListener(listener, 64), ctx: ctx, connections: map[*dockerConn]struct{}{}}
+ 	server := &http.Server{
+ 		Handler:           handler,
+ 		ReadHeaderTimeout: 15 * time.Second,
+diff --git a/rdd/pkg/socketbridge/host_identity_windows_test.go b/rdd/pkg/socketbridge/host_identity_windows_test.go
+index 8cbdb89fc..652d1b733 100644
+--- a/rdd/pkg/socketbridge/host_identity_windows_test.go
++++ b/rdd/pkg/socketbridge/host_identity_windows_test.go
+@@ -13,7 +13,7 @@ import (
+ )
+ 
+ func TestDockerBridgeUsesAdvertisedInstanceSocket(t *testing.T) {
+-	b := NewDockerHostBridge(hvsock.GUID{}, logr.Discard())
++	b := NewDockerHostBridge(hvsock.GUID{}, logr.Discard(), nil, nil)
+ 	if b.pipeName != instance.DockerSocket() {
+ 		t.Fatalf("bridge %q differs from advertised socket %q", b.pipeName, instance.DockerSocket())
+ 	}
+diff --git a/rdd/pkg/socketbridge/host_windows.go b/rdd/pkg/socketbridge/host_windows.go
+index 7c93fb2b3..3032046b7 100644
+--- a/rdd/pkg/socketbridge/host_windows.go
++++ b/rdd/pkg/socketbridge/host_windows.go
+@@ -11,6 +11,7 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"net"
++	"sync"
+ 
+ 	"github.com/Microsoft/go-winio"
+ 	"github.com/go-logr/logr"
+@@ -35,18 +36,24 @@ const (
+ // HostBridge listens on a Windows named pipe and forwards each accepted
+ // connection to the guest via Hyper-V vsock.
+ type HostBridge struct {
+-	docker    bool
+-	pipeName  string
+-	vmGUID    hvsock.GUID
+-	vsockPort uint32
+-	log       logr.Logger
++	reservationOnce sync.Once
++	reservations    *portReservations
++	published       PortPublication
++	generation      PortGeneration
++	docker          bool
++	pipeName        string
++	vmGUID          hvsock.GUID
++	vsockPort       uint32
++	log             logr.Logger
+ }
+ 
+ // NewDockerHostBridge creates a HostBridge that forwards the Docker named pipe
+ // to the guest vsock agent.
+-func NewDockerHostBridge(vmGUID hvsock.GUID, log logr.Logger) *HostBridge {
++func NewDockerHostBridge(vmGUID hvsock.GUID, log logr.Logger, published PortPublication, generation PortGeneration) *HostBridge {
+ 	b := NewHostBridge(instance.DockerSocket(), VsockForwardPort, vmGUID, log)
+ 	b.docker = true
++	b.published = published
++	b.generation = generation
+ 	return b
+ }
+ 
+@@ -83,7 +90,7 @@ func (b *HostBridge) Run(ctx context.Context) error {
+ 	}
+ 	b.log.Info("Listening", "pipe", b.pipeName, "vsockPort", b.vsockPort)
+ 	if b.docker {
+-		return b.serveDocker(ctx, ln)
++		return b.ServeDocker(ctx, ln)
+ 	}
+ 
+ 	go func() {
+diff --git a/rdd/pkg/socketbridge/wsl_auth_windows.go b/rdd/pkg/socketbridge/wsl_auth_windows.go
+new file mode 100644
+index 000000000..0617f9200
+--- /dev/null
++++ b/rdd/pkg/socketbridge/wsl_auth_windows.go
+@@ -0,0 +1,219 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin private WSL relay identity. No OS certificate store or public listener.
++//go:build windows
++
++package socketbridge
++
++import (
++	"crypto/ecdsa"
++	"crypto/elliptic"
++	"crypto/rand"
++	"crypto/tls"
++	"crypto/x509"
++	"crypto/x509/pkix"
++	"encoding/pem"
++	"errors"
++	"fmt"
++	"io"
++	"math/big"
++	"os"
++	"path/filepath"
++	"strings"
++	"time"
++
++	"golang.org/x/sys/windows"
++)
++
++const wslServerName = "orbwin-wsl-gateway"
++
++func authBytes(path string) ([]byte, error) {
++	file, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer file.Close()
++	bytes, err := io.ReadAll(io.LimitReader(file, 65537))
++	if err != nil {
++		return nil, err
++	}
++	if len(bytes) > 65536 {
++		return nil, fmt.Errorf("WSL certificate file exceeds 64 KiB")
++	}
++	return bytes, nil
++}
++
++func WSLServerTLS(directory string) (*tls.Config, error) {
++	absolute, err := filepath.Abs(directory)
++	if err != nil {
++		return nil, err
++	}
++	directory = absolute
++	if stat, err := os.Lstat(directory); errors.Is(err, os.ErrNotExist) {
++		if err = createWSLIdentity(directory); err != nil {
++			return nil, err
++		}
++	} else if err != nil {
++		return nil, err
++	} else if !stat.IsDir() || stat.Mode()&os.ModeSymlink != 0 {
++		return nil, fmt.Errorf("WSL identity directory is not an owned directory; preserved")
++	}
++	if err := restrictWSLIdentity(directory); err != nil {
++		return nil, fmt.Errorf("cannot protect private WSL identity: %w", err)
++	}
++	ca, err := authBytes(filepath.Join(directory, "ca.pem"))
++	if err != nil {
++		return nil, err
++	}
++	certificate, err := authBytes(filepath.Join(directory, "server.pem"))
++	if err != nil {
++		return nil, err
++	}
++	key, err := authBytes(filepath.Join(directory, "server.key"))
++	if err != nil {
++		return nil, err
++	}
++	pair, err := tls.X509KeyPair(certificate, key)
++	if err != nil {
++		return nil, fmt.Errorf("WSL server identity is invalid; preserved: %w", err)
++	}
++	pool := x509.NewCertPool()
++	if !pool.AppendCertsFromPEM(ca) {
++		return nil, fmt.Errorf("WSL CA is invalid; preserved")
++	}
++	// Validate the companion client identity too, so incomplete state fails at
++	// startup rather than publishing a listener no owned client can use.
++	client, err := authBytes(filepath.Join(directory, "client.pem"))
++	if err != nil {
++		return nil, err
++	}
++	clientKey, err := authBytes(filepath.Join(directory, "client.key"))
++	if err != nil {
++		return nil, err
++	}
++	clientPair, err := tls.X509KeyPair(client, clientKey)
++	if err != nil {
++		return nil, err
++	}
++	clientCert, err := x509.ParseCertificate(clientPair.Certificate[0])
++	if err != nil {
++		return nil, err
++	}
++	if _, err = clientCert.Verify(x509.VerifyOptions{Roots: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
++		return nil, fmt.Errorf("WSL client identity cannot be verified; preserved: %w", err)
++	}
++	serverCert, err := x509.ParseCertificate(pair.Certificate[0])
++	if err != nil {
++		return nil, err
++	}
++	if _, err = serverCert.Verify(x509.VerifyOptions{Roots: pool, DNSName: wslServerName, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
++		return nil, fmt.Errorf("WSL server identity cannot be verified; preserved: %w", err)
++	}
++	return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert}, nil
++}
++
++func createWSLIdentity(directory string) error {
++	if err := os.MkdirAll(filepath.Dir(directory), 0700); err != nil {
++		return err
++	}
++	staged, err := os.MkdirTemp(filepath.Dir(directory), ".wsl-auth-pending-")
++	if err != nil {
++		return err
++	}
++	// Only the newly created staging directory is disposable. The published
++	// directory, existing identities and unrelated files are never removed here.
++	if filepath.Dir(staged) != filepath.Dir(directory) || !strings.HasPrefix(filepath.Base(staged), ".wsl-auth-pending-") {
++		return fmt.Errorf("invalid WSL identity staging scope")
++	}
++	defer os.RemoveAll(staged)
++	if err = restrictWSLIdentity(staged); err != nil {
++		return err
++	}
++	serial := func() (*big.Int, error) { return rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128)) }
++	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
++	if err != nil {
++		return err
++	}
++	number, err := serial()
++	if err != nil {
++		return err
++	}
++	now := time.Now()
++	expires := now.AddDate(10, 0, 0)
++	ca := &x509.Certificate{SerialNumber: number, Subject: pkix.Name{CommonName: "OrbWin private WSL relay CA"}, NotBefore: now.Add(-24 * time.Hour), NotAfter: expires, IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign}
++	der, err := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
++	if err != nil {
++		return err
++	}
++	write := func(name, kind string, bytes []byte) error {
++		file, err := os.OpenFile(filepath.Join(staged, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
++		if err != nil {
++			return err
++		}
++		if _, err = file.Write(pem.EncodeToMemory(&pem.Block{Type: kind, Bytes: bytes})); err == nil {
++			err = file.Sync()
++		}
++		closed := file.Close()
++		if err != nil {
++			return err
++		}
++		return closed
++	}
++	if err = write("ca.pem", "CERTIFICATE", der); err != nil {
++		return err
++	}
++	for _, role := range []string{"server", "client"} {
++		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
++		if err != nil {
++			return err
++		}
++		number, err := serial()
++		if err != nil {
++			return err
++		}
++		leaf := &x509.Certificate{SerialNumber: number, Subject: pkix.Name{CommonName: "OrbWin WSL " + role}, NotBefore: now.Add(-24 * time.Hour), NotAfter: expires, KeyUsage: x509.KeyUsageDigitalSignature}
++		if role == "server" {
++			leaf.DNSNames = []string{wslServerName}
++			leaf.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
++		} else {
++			leaf.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
++		}
++		der, err := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, caKey)
++		if err != nil {
++			return err
++		}
++		encoded, err := x509.MarshalPKCS8PrivateKey(key)
++		if err != nil {
++			return err
++		}
++		if err = write(role+".pem", "CERTIFICATE", der); err != nil {
++			return err
++		}
++		if err = write(role+".key", "PRIVATE KEY", encoded); err != nil {
++			return err
++		}
++	}
++	if err = os.Rename(staged, directory); err != nil {
++		// A concurrent hostagent may have published a complete identity first.
++		if _, exists := os.Stat(directory); exists == nil {
++			return nil
++		}
++		return err
++	}
++	return nil
++}
++
++func restrictWSLIdentity(directory string) error {
++	user, err := windows.GetCurrentProcessToken().GetTokenUser()
++	if err != nil {
++		return err
++	}
++	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")")
++	if err != nil {
++		return err
++	}
++	dacl, _, err := descriptor.DACL()
++	if err != nil {
++		return err
++	}
++	return windows.SetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
++}
+diff --git a/rdd/src/rdd-guest/main.go b/rdd/src/rdd-guest/main.go
+index 2ba3f87c4..2a46a00bf 100644
+--- a/rdd/src/rdd-guest/main.go
++++ b/rdd/src/rdd-guest/main.go
+@@ -24,7 +24,7 @@ import (
+ 
+ const (
+ 	dockerVsockPort     = 16660
+-	dockerSockPath      = "/var/run/docker.sock"
++	dockerSockPath      = "/run/orbwin/moby-internal.sock"
+ 	containerdVsockPort = 16661
+ 	containerdSockPath  = "/run/k3s/containerd/containerd.sock"
+ )
+@@ -39,6 +39,38 @@ var forwards = []struct {
+ }
+ 
+ func main() {
++	// Keep the original vsock bridge in its original namespace. The same
++	// binary's Unix-client mode is a separate systemd worker in the engine
++	// network namespace; it has no lifecycle authority over Docker or rdd.
++	if len(os.Args) > 1 {
++		if len(os.Args) != 2 || os.Args[1] != "wsl-client" {
++			log.Fatal("unsupported rdd-guest mode")
++		}
++		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++		defer stop()
++		var listeners []net.Listener
++		for _, path := range []string{os.Getenv("ORBWIN_WSL_SOCKET"), "/var/run/docker.sock"} {
++			listener, err := listenWSLClient(path)
++			if err != nil {
++				for _, active := range listeners {
++					_ = active.Close()
++				}
++				log.Fatalf("owned Docker client socket: %v", err)
++			}
++			listeners = append(listeners, listener)
++		}
++		slots := make(chan struct{}, 64)
++		var clients sync.WaitGroup
++		for _, listener := range listeners {
++			clients.Go(func() {
++				if err := serveWSLClients(ctx, listener, slots); err != nil {
++					log.Fatalf("owned WSL client listener: %v", err)
++				}
++			})
++		}
++		clients.Wait()
++		return
++	}
+ 	// Listen on every port before serving any, so a failed listen exits at start.
+ 	listeners := make([]net.Listener, len(forwards))
+ 	for i, f := range forwards {
+diff --git a/rdd/src/rdd-guest/wsl_client.go b/rdd/src/rdd-guest/wsl_client.go
+new file mode 100644
+index 000000000..01d062105
+--- /dev/null
++++ b/rdd/src/rdd-guest/wsl_client.go
+@@ -0,0 +1,151 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin's Unix client entrypoint in the existing rdd guest bridge. It carries
++// bytes to the same Windows Docker adapter, retaining upgrades and half-close.
++package main
++
++import (
++	"context"
++	"crypto/tls"
++	"crypto/x509"
++	"errors"
++	"fmt"
++	"io"
++	"log"
++	"net"
++	"os"
++	"path/filepath"
++	"syscall"
++	"time"
++)
++
++const dockerClientGateway = "192.168.127.1:23760"
++
++func listenWSLClient(path string) (net.Listener, error) {
++	if path != "/mnt/wsl/orbwin/docker.sock" && path != "/mnt/wsl/orbwin-proof/docker.sock" && path != "/var/run/docker.sock" {
++		return nil, fmt.Errorf("refuse a non-owned WSL socket path")
++	}
++	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
++		return nil, err
++	}
++	if file, err := os.Lstat(path); err == nil {
++		if file.Mode()&os.ModeSocket == 0 {
++			return nil, fmt.Errorf("existing WSL endpoint is not a Unix socket; preserved")
++		}
++		connection, err := net.DialTimeout("unix", path, 200*time.Millisecond)
++		if err == nil {
++			_ = connection.Close()
++			return nil, fmt.Errorf("existing WSL endpoint is active; preserved")
++		}
++		if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ECONNREFUSED) {
++			return nil, fmt.Errorf("cannot verify stale WSL socket: %w", err)
++		}
++		if err = os.Remove(path); err != nil {
++			return nil, err
++		}
++	} else if !errors.Is(err, os.ErrNotExist) {
++		return nil, err
++	}
++	listener, err := net.Listen("unix", path)
++	if err != nil {
++		return nil, err
++	}
++	// Match the selected upstream's current-user WSL Docker access policy. This
++	// is within one Windows user's shared WSL utility VM, not a multi-user daemon.
++	if err = os.Chmod(path, 0666); err != nil {
++		_ = listener.Close()
++		return nil, err
++	}
++	return listener, nil
++}
++
++func serveWSLClients(ctx context.Context, listener net.Listener, slots chan struct{}) error {
++	stop := context.AfterFunc(ctx, func() { _ = listener.Close() })
++	defer stop()
++	defer listener.Close()
++	for {
++		select {
++		case slots <- struct{}{}:
++		case <-ctx.Done():
++			return nil
++		}
++		connection, err := listener.Accept()
++		if err != nil {
++			<-slots
++			if ctx.Err() != nil {
++				return nil
++			}
++			return err
++		}
++		go func() { defer func() { <-slots }(); relayWSLClient(ctx, connection, dockerClientGateway) }()
++	}
++}
++
++func relayWSLClient(ctx context.Context, connection net.Conn, address string) {
++	defer connection.Close()
++	config, err := wslClientTLS(os.Getenv("ORBWIN_WSL_TLS_DIR"))
++	if err != nil {
++		log.Printf("WSL client identity is unavailable: %v", err)
++		return
++	}
++	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
++	upstream, err := (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: config}).DialContext(dialCtx, "tcp4", address)
++	cancel()
++	if err != nil {
++		log.Printf("WSL client upstream is unavailable: %v", err)
++		return
++	}
++	defer upstream.Close()
++	stop := context.AfterFunc(ctx, func() { _ = connection.Close(); _ = upstream.Close() })
++	defer stop()
++	client, ok := connection.(halfCloser)
++	if !ok {
++		return
++	}
++	server, ok := upstream.(halfCloser)
++	if !ok {
++		return
++	}
++	pipe(client, server)
++}
++
++func wslClientTLS(directory string) (*tls.Config, error) {
++	if !filepath.IsAbs(directory) {
++		return nil, fmt.Errorf("owned WSL identity path must be absolute")
++	}
++	read := func(name string) ([]byte, error) {
++		file, err := os.Open(filepath.Join(directory, name))
++		if err != nil {
++			return nil, err
++		}
++		defer file.Close()
++		bytes, err := io.ReadAll(io.LimitReader(file, 65537))
++		if err != nil {
++			return nil, err
++		}
++		if len(bytes) > 65536 {
++			return nil, fmt.Errorf("WSL identity file exceeds 64 KiB")
++		}
++		return bytes, nil
++	}
++	ca, err := read("ca.pem")
++	if err != nil {
++		return nil, err
++	}
++	certificate, err := read("client.pem")
++	if err != nil {
++		return nil, err
++	}
++	key, err := read("client.key")
++	if err != nil {
++		return nil, err
++	}
++	pair, err := tls.X509KeyPair(certificate, key)
++	if err != nil {
++		return nil, err
++	}
++	pool := x509.NewCertPool()
++	if !pool.AppendCertsFromPEM(ca) {
++		return nil, fmt.Errorf("owned WSL CA is invalid")
++	}
++	return &tls.Config{MinVersion: tls.VersionTLS13, ServerName: "orbwin-wsl-gateway", RootCAs: pool, Certificates: []tls.Certificate{pair}}, nil
++}
+diff --git a/rdd/src/rdd-guest/wsl_client_test.go b/rdd/src/rdd-guest/wsl_client_test.go
+new file mode 100644
+index 000000000..c3244dd19
+--- /dev/null
++++ b/rdd/src/rdd-guest/wsl_client_test.go
+@@ -0,0 +1,166 @@
++// SPDX-License-Identifier: Apache-2.0
++package main
++
++import (
++	"bufio"
++	"context"
++	"crypto/ecdsa"
++	"crypto/elliptic"
++	"crypto/rand"
++	"crypto/tls"
++	"crypto/x509"
++	"encoding/pem"
++	"fmt"
++	"io"
++	"math/big"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++)
++
++func clientFixture(t *testing.T) (string, *tls.Config) {
++	t.Helper()
++	directory := t.TempDir()
++	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
++	if err != nil {
++		t.Fatal(err)
++	}
++	authority := &x509.Certificate{SerialNumber: big.NewInt(1), IsCA: true, BasicConstraintsValid: true, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageCertSign}
++	ca, err := x509.CreateCertificate(rand.Reader, authority, authority, &key.PublicKey, key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), DNSNames: []string{"orbwin-wsl-gateway"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth}}
++	certificate, err := x509.CreateCertificate(rand.Reader, leaf, authority, &key.PublicKey, key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	encoded, err := x509.MarshalPKCS8PrivateKey(key)
++	if err != nil {
++		t.Fatal(err)
++	}
++	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate})
++	private := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded})
++	root := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ca})
++	for name, bytes := range map[string][]byte{"ca.pem": root, "client.pem": cert, "client.key": private} {
++		if err = os.WriteFile(filepath.Join(directory, name), bytes, 0600); err != nil {
++			t.Fatal(err)
++		}
++	}
++	pair, err := tls.X509KeyPair(cert, private)
++	if err != nil {
++		t.Fatal(err)
++	}
++	pool := x509.NewCertPool()
++	pool.AppendCertsFromPEM(root)
++	return directory, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert}
++}
++
++func TestWSLRelayPreservesEarlyUpgradeAndHalfClose(t *testing.T) {
++	directory, config := clientFixture(t)
++	t.Setenv("ORBWIN_WSL_TLS_DIR", directory)
++	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		connection, buffer, err := w.(http.Hijacker).Hijack()
++		if err != nil {
++			return
++		}
++		defer connection.Close()
++		fmt.Fprint(connection, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: proof\r\n\r\n")
++		bytes, err := io.ReadAll(buffer.Reader)
++		if err == nil {
++			_, _ = connection.Write(append([]byte("drained:"), bytes...))
++		}
++	}))
++	server.TLS = config
++	server.StartTLS()
++	defer server.Close()
++	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "client.sock"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	done := make(chan struct{})
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	go func() {
++		defer close(done)
++		connection, err := listener.Accept()
++		if err == nil {
++			relayWSLClient(ctx, connection, server.Listener.Addr().String())
++		}
++	}()
++	connection, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: listener.Addr().String(), Net: "unix"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer connection.Close()
++	connection.SetDeadline(time.Now().Add(4 * time.Second))
++	fmt.Fprint(connection, "GET / HTTP/1.1\r\nHost: proof\r\nConnection: Upgrade\r\nUpgrade: proof\r\n\r\nearly-bytes")
++	reader := bufio.NewReader(connection)
++	response, err := http.ReadResponse(reader, &http.Request{Method: "GET"})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if response.StatusCode != 101 {
++		t.Fatal(response.Status)
++	}
++	if err = connection.CloseWrite(); err != nil {
++		t.Fatal(err)
++	}
++	bytes, err := io.ReadAll(reader)
++	if err != nil || string(bytes) != "drained:early-bytes" {
++		t.Fatalf("half-close lost output: %q %v", bytes, err)
++	}
++	select {
++	case <-done:
++	case <-ctx.Done():
++		t.Fatal("relay did not finish")
++	}
++}
++
++func TestWSLRelayCancellationAndCredentialBounds(t *testing.T) {
++	directory, config := clientFixture(t)
++	t.Setenv("ORBWIN_WSL_TLS_DIR", directory)
++	server := httptest.NewUnstartedServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
++	server.TLS = config
++	server.StartTLS()
++	defer server.Close()
++	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "cancel.sock"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer listener.Close()
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		connection, err := listener.Accept()
++		if err == nil {
++			relayWSLClient(ctx, connection, server.Listener.Addr().String())
++		}
++	}()
++	connection, err := net.Dial("unix", listener.Addr().String())
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer connection.Close()
++	cancel()
++	select {
++	case <-done:
++	case <-time.After(time.Second):
++		t.Fatal("cancelled relay remained active")
++	}
++	if err = os.WriteFile(filepath.Join(directory, "ca.pem"), make([]byte, 65537), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if _, err = wslClientTLS(directory); err == nil {
++		t.Fatal("accepted oversized credentials")
++	}
++	if _, err = listenWSLClient(filepath.Join(t.TempDir(), "foreign.sock")); err == nil {
++		t.Fatal("accepted non-owned endpoint")
++	}
++}

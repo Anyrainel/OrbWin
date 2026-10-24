@@ -1,11 +1,13 @@
 import { isValidElement, useEffect, useState, type ReactNode } from "react";
 import * as backend from "../../backend";
+import { LocalPortLink } from "../LocalPortLink";
 import {
   imageUsers,
   isRunning,
   labels,
   name,
-  ports,
+  publishedPorts,
+  publicationWarning,
   target,
   text,
   volumeUsers,
@@ -156,7 +158,7 @@ export function InfoPanel({
     return () => abort.abort();
   }, [page, revision]);
   const data = inspect.state === "ready" ? inspect.data : undefined;
-  const portList = ports(row.Ports);
+  const portList = publishedPorts(row);
   const linkable = isRunning(row);
   let body: ReactNode;
   if (page === "containers") {
@@ -164,6 +166,11 @@ export function InfoPanel({
     const networks = get(data, "NetworkSettings", "Networks");
     body = (
       <>
+        {publicationWarning(row) && (
+          <p className="notice" role="alert">
+            {publicationWarning(row)}
+          </p>
+        )}
         <Section
           title="Status"
           items={[
@@ -194,9 +201,9 @@ export function InfoPanel({
             (port): Item => [
               `${port.containerPort}/${port.protocol}`,
               port.url && linkable ? (
-                <a href={port.url} target="_blank" rel="noreferrer noopener">
+                <LocalPortLink port={port.hostPort}>
                   localhost:{port.hostPort}
-                </a>
+                </LocalPortLink>
               ) : (
                 `${port.hostIp || "*"}:${port.hostPort}`
               ),

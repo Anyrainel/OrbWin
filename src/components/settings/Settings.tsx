@@ -233,8 +233,8 @@ export function Settings({
               ))}
             </div>
             <p className="settings-hint">
-              Applies to OrbWin content. The Windows title bar follows the
-              Windows app theme.
+              Applies to OrbWin content and its Windows title bar. Match Windows
+              follows your system appearance.
             </p>
             <h2>Engine</h2>
             <dl className="properties">
@@ -298,7 +298,8 @@ export function Settings({
               </Row>
               <Row term="Coexistence">
                 Docker Desktop and Rancher Desktop keep their own endpoints.
-                Simultaneous-engine operation is not yet qualified (BL-001).
+                Use an explicit endpoint when choosing which engine an external
+                client should use. OrbWin does not switch your global defaults.
               </Row>
             </dl>
             <h2>Restart</h2>
@@ -379,17 +380,17 @@ export function Settings({
             <h2>Port publishing</h2>
             <dl className="properties">
               <Row term="Default bind address">
-                Ports published from the Run form bind 127.0.0.1 unless you
-                enter another IPv4 address. A container port alone gets a
-                dynamic localhost port.
+                Published TCP and UDP services are accessible from Windows at
+                127.0.0.1. A container port alone gets a dynamic localhost port.
+                LAN and IPv6 publication are not supported yet.
               </Row>
               <Row term="Port conflicts">
-                Behavior when another engine or Windows app already listens on
-                the host port is not yet qualified, so a conflict may not be
-                reported clearly. If a published port does not answer, check for
-                another listener (for example{" "}
-                <code>netstat -ano | findstr :8080</code>) and choose another
-                port.
+                OrbWin checks Windows ports before starting a container and
+                verifies publication afterward. If another app owns the port,
+                choose a different port. A container restored by the engine may
+                be running with an unavailable host port; its details show a
+                warning and withhold the service link until publication
+                succeeds.
               </Row>
               <Row term="Container IP access">
                 Direct access to container IPs from Windows is not provided. Use
