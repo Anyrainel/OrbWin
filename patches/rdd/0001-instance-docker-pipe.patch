@@ -1,0 +1,157 @@
+diff --git a/rdd/pkg/instance/docker_isolation_windows_test.go b/rdd/pkg/instance/docker_isolation_windows_test.go
+new file mode 100644
+index 000000000..84e9f2340
+--- /dev/null
++++ b/rdd/pkg/instance/docker_isolation_windows_test.go
+@@ -0,0 +1,43 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation regression coverage.
++//go:build windows
++
++package instance
++
++import (
++	"fmt"
++	"path/filepath"
++	"testing"
++
++	"github.com/Microsoft/go-winio"
++	"gotest.tools/v3/assert"
++)
++
++func TestDockerInstanceIsolation(t *testing.T) {
++	for _, suffix := range []string{"orbwin", "2", "qualification"} {
++		t.Run(suffix, func(t *testing.T) {
++			runTestProcess(t, func(t *testing.T) {
++				want := `\\.\pipe\docker-rancher-desktop-` + suffix
++				assert.Equal(t, want, DockerSocket())
++				assert.Equal(t, "npipe:////./pipe/docker-rancher-desktop-"+suffix, DockerEndpoint())
++			}, "RDD_INSTANCE="+suffix)
++		})
++	}
++}
++
++func TestIndependentPipeListeners(t *testing.T) {
++	// Real Windows listener allocation, with unique names; never bind a user's
++	// actual engine endpoint. Both listeners must coexist and reject takeover.
++	for _, suffix := range []string{"orbwin", "rancher"} {
++		// Use the test's temporary directory base as a per-run identity.
++		name := fmt.Sprintf(`\\.\pipe\orbwin-test-%s-%s`, filepath.Base(t.TempDir()), suffix)
++		ln, err := winio.ListenPipe(name, nil)
++		assert.NilError(t, err)
++		t.Cleanup(func() { ln.Close() })
++		duplicate, err := winio.ListenPipe(name, nil)
++		if err == nil {
++			duplicate.Close()
++			t.Fatalf("occupied pipe accepted a second listener: %s", name)
++		}
++	}
++}
+diff --git a/rdd/pkg/instance/instance.go b/rdd/pkg/instance/instance.go
+index 56db27ae2..3547334f4 100644
+--- a/rdd/pkg/instance/instance.go
++++ b/rdd/pkg/instance/instance.go
+@@ -10,6 +10,7 @@ import (
+ 	"path/filepath"
+ 	"runtime"
+ 	"strconv"
++	"strings"
+ 	"sync"
+ )
+ 
+@@ -159,20 +160,20 @@ var KubeConfig = sync.OnceValue(func() string {
+ // DockerSocket returns the path to the Docker socket for this instance
+ // (e.g., ~/.rd2/docker.sock). This is the host-side socket that Lima
+ // port-forwards from the guest's /var/run/docker.sock.
+-// On Windows, returns the named pipe path (\\.\pipe\docker_engine).
++// On Windows, returns an instance-owned named pipe, never the shared default.
+ var DockerSocket = sync.OnceValue(func() string {
+ 	if runtime.GOOS == "windows" {
+-		return `\\.\pipe\docker_engine`
++		return `\\.\pipe\docker-` + Name()
+ 	}
+ 	return filepath.Join(ShortDir(), "docker.sock")
+ })
+ 
+ // DockerEndpoint returns the full Docker endpoint URL for this instance.
+-// On Windows this is a named-pipe URL (npipe:////./pipe/docker_engine);
++// On Windows this is the instance-owned named-pipe URL;
+ // on Unix it is a unix-socket URL (unix:///path/to/docker.sock).
+ var DockerEndpoint = sync.OnceValue(func() string {
+ 	if runtime.GOOS == "windows" {
+-		return `npipe:////./pipe/docker_engine`
++		return "npipe://" + strings.ReplaceAll(DockerSocket(), `\`, "/")
+ 	}
+ 	return "unix://" + DockerSocket()
+ })
+diff --git a/rdd/pkg/instance/instance_test.go b/rdd/pkg/instance/instance_test.go
+index 1cb11d883..529c6759f 100644
+--- a/rdd/pkg/instance/instance_test.go
++++ b/rdd/pkg/instance/instance_test.go
+@@ -152,7 +152,7 @@ func TestLogDir(t *testing.T) {
+ func TestDockerEndpoint(t *testing.T) {
+ 	runTestProcess(t, func(t *testing.T) {
+ 		if runtime.GOOS == "windows" {
+-			assert.Equal(t, "npipe:////./pipe/docker_engine", DockerEndpoint())
++			assert.Equal(t, "npipe:////./pipe/docker-rancher-desktop-2", DockerEndpoint())
+ 		} else {
+ 			assert.Equal(t, fmt.Sprintf("unix://%s/docker.sock", ShortDir()), DockerEndpoint())
+ 		}
+diff --git a/rdd/pkg/socketbridge/host_identity_windows_test.go b/rdd/pkg/socketbridge/host_identity_windows_test.go
+new file mode 100644
+index 000000000..8cbdb89fc
+--- /dev/null
++++ b/rdd/pkg/socketbridge/host_identity_windows_test.go
+@@ -0,0 +1,23 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: the bridge and endpoint discovery must share one identity.
++//go:build windows
++
++package socketbridge
++
++import (
++	"testing"
++
++	"github.com/go-logr/logr"
++	"github.com/linuxkit/virtsock/pkg/hvsock"
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
++)
++
++func TestDockerBridgeUsesAdvertisedInstanceSocket(t *testing.T) {
++	b := NewDockerHostBridge(hvsock.GUID{}, logr.Discard())
++	if b.pipeName != instance.DockerSocket() {
++		t.Fatalf("bridge %q differs from advertised socket %q", b.pipeName, instance.DockerSocket())
++	}
++	if b.pipeName == `\\.\pipe\docker_engine` || b.pipeName == `\\.\pipe\dockerDesktopLinuxEngine` {
++		t.Fatalf("bridge selected a foreign pipe: %q", b.pipeName)
++	}
++}
+diff --git a/rdd/pkg/socketbridge/host_windows.go b/rdd/pkg/socketbridge/host_windows.go
+index 320daed78..7cdb6b55e 100644
+--- a/rdd/pkg/socketbridge/host_windows.go
++++ b/rdd/pkg/socketbridge/host_windows.go
+@@ -15,13 +15,11 @@ import (
+ 	"github.com/Microsoft/go-winio"
+ 	"github.com/go-logr/logr"
+ 	"github.com/linuxkit/virtsock/pkg/hvsock"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
+ )
+ 
+ const (
+-	// DockerPipeName is the well-known Windows named pipe that Docker CLI
+-	// and Docker Desktop use to reach dockerd.
+-	DockerPipeName = `\\.\pipe\docker_engine`
+-
+ 	// VsockForwardPort is the AF_VSOCK port on which rdd-guest serves the
+ 	// Docker socket inside the VM. Must match dockerVsockPort in
+ 	// rdd/src/rdd-guest/main.go.
+@@ -45,7 +43,7 @@ type HostBridge struct {
+ // NewDockerHostBridge creates a HostBridge that forwards the Docker named pipe
+ // to the guest vsock agent.
+ func NewDockerHostBridge(vmGUID hvsock.GUID, log logr.Logger) *HostBridge {
+-	return NewHostBridge(DockerPipeName, VsockForwardPort, vmGUID, log)
++	return NewHostBridge(instance.DockerSocket(), VsockForwardPort, vmGUID, log)
+ }
+ 
+ // NewHostBridge creates a HostBridge that forwards pipeName to vsockPort in

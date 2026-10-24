@@ -1,0 +1,15 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_controller.go b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+index 065555f14..03fac27ae 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_controller.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+@@ -49,7 +49,9 @@ type ControllerDiscovery interface {
+ 
+ const (
+ 	appName                        = "app"
+-	limaVMName, inputConfigMapName = "rd", "rd"
++	// Lima's WSL driver registers "lima-" + VM name globally for this user;
++	// LIMA_HOME alone does not isolate the distro from stock Rancher's lima-rd.
++	limaVMName, inputConfigMapName = "orbwin", "rd"
+ 
+ 	// requeueAfterDeletion is how long to wait between checks while the LimaVM
+ 	// controller is running its teardown (stopping the VM, removing disk files).

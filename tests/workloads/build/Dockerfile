@@ -1,0 +1,3 @@
+FROM alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+RUN printf 'orbwin-build-proof\n' > /proof.txt
+CMD ["cat", "/proof.txt"]

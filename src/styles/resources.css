@@ -1,0 +1,240 @@
+/* Resource list/inspector refinements. Tokens follow docs/design-system.md. */
+.resource-list .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.resource-item {
+  position: relative;
+}
+.resource-item.stopped .row-copy,
+.resource-item.stopped .resource-symbol,
+.project-item.stopped .project-row strong {
+  opacity: 0.6;
+}
+.resource-item .resource-row.selected .row-copy,
+.resource-item .resource-row.selected .resource-symbol {
+  opacity: 1;
+}
+.resource-row.selected + .quick-actions {
+  background: var(--selected);
+}
+.quick-actions {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: none;
+  gap: 2px;
+  padding-left: 6px;
+  background: var(--sidebar-bg);
+  border-radius: 6px;
+}
+.resource-item:hover > .quick-actions,
+.resource-item:focus-within > .quick-actions {
+  display: flex;
+}
+.quick-action {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--text);
+}
+.quick-action:hover {
+  background: var(--control-hover);
+  color: var(--text-strong);
+}
+.quick-action.danger {
+  border: 0;
+}
+.row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.in-use {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--control-hover);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.project-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.list-sort {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 0 4px 6px;
+}
+.list-sort select {
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.batch-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 6px;
+  margin-bottom: 6px;
+  background: var(--dialog-bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 11px;
+}
+.batch-bar > span {
+  margin-right: auto;
+  padding-left: 3px;
+}
+.batch-bar .button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.context-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 190px;
+  max-width: 320px;
+  padding: 4px;
+  background: var(--dialog-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.context-menu [role="menuitem"] {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+.context-menu [role="menuitem"]:hover,
+.context-menu [role="menuitem"]:focus-visible {
+  background: var(--selected);
+  color: var(--selected-text);
+  outline: 0;
+}
+.context-menu [role="menuitem"].danger {
+  border: 0;
+}
+.context-menu [aria-disabled="true"] {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+.context-menu [aria-disabled="true"]:hover {
+  background: var(--hover);
+  color: var(--text-tertiary);
+}
+.context-menu small {
+  font-size: 10px;
+  white-space: normal;
+}
+.list-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 2;
+  cursor: col-resize;
+}
+.list-resizer:hover,
+.list-resizer:focus-visible {
+  background: color-mix(in srgb, var(--focus) 35%, transparent);
+  outline: 0;
+}
+.info-status {
+  font-size: 11px;
+  margin: 0 0 14px 10px;
+}
+.info-section {
+  margin-bottom: 20px;
+}
+.info-section a {
+  color: var(--focus);
+}
+.info-pairs summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--heading-muted);
+  margin: 0 0 10px 10px;
+}
+.info-pairs dd {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+.info-pairs .command-output {
+  margin-top: 12px;
+}
+.operation-batch {
+  max-height: 160px;
+  overflow: auto;
+  margin: 12px 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text);
+}
+.sparklines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+.sparkline {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-radius: 8px;
+}
+.sparkline figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.sparkline figcaption strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.sparkline svg {
+  width: 100%;
+  height: 40px;
+  display: block;
+}
+.sparkline polyline {
+  fill: none;
+  stroke: var(--icon);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+.sparkline-base {
+  stroke: var(--border-strong);
+  vector-effect: non-scaling-stroke;
+}

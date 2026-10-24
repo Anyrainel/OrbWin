@@ -1,0 +1,6 @@
+{
+  "name": "orbwin-testcontainers-qualification",
+  "private": true,
+  "type": "module",
+  "dependencies": { "testcontainers": "12.2.1" }
+}

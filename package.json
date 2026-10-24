@@ -1,0 +1,39 @@
+{
+  "name": "orbwin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "verify:preview": "node scripts/verify-preview.mjs",
+    "build": "tsc -b && vite build",
+    "test": "node --test scripts/*.test.mjs",
+    "upstream:prepare": "node scripts/upstream.mjs",
+    "upstream:test": "node scripts/upstream.mjs test",
+    "tools:bootstrap": "node scripts/bootstrap-tools.mjs",
+    "backend:build": "node scripts/build-backend.mjs",
+    "backend:bundle": "node scripts/build-backend.mjs --with-distro",
+    "session:build": "node scripts/build-session.mjs",
+    "backend:proof": "node scripts/prove-control-plane.mjs",
+    "backend:guest-proof": "node scripts/prove-guest.mjs",
+    "qualify:workloads": "node scripts/qualify-workloads.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "prettier": "3.6.2",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.0"
+  }
+}

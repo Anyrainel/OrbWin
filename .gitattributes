@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.xz binary
+*.ico binary
+*.patch -whitespace
+docs/third-party/rancher-desktop-LICENSE.txt -whitespace

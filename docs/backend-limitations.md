@@ -1,0 +1,225 @@
+# Backend limitations
+
+Updated 2026-10-22 Pacific. Entries distinguish source findings from observed
+runtime proofs. Source-only findings do not establish runtime behavior.
+
+## BL-001 — Shared Windows Docker endpoint
+
+- Flow: simultaneous engines, Docker discovery. Baseline: `af6511ad4e065e24e7258f575a0fc090c10cdbda`.
+- Source reproducer: `rdd/pkg/instance/instance.go` and `pkg/socketbridge/host_windows.go`
+  upstream select `docker_engine` regardless of instance suffix.
+- Impact: context selection alone cannot prevent listener collision or wrong-engine routing.
+- Adaptation: patch 0001 gives each instance a pipe used by both discovery and bridge.
+  UI always targets the OrbWin endpoint explicitly. No global context switch.
+- Owner: OrbWin host integration. Phase 1. No upstream issue filed yet.
+- Exit: simultaneous real Docker/Compose/Buildx and helper-container tests pass in
+  both engine start orders. Current tests cover identity and real isolated pipe allocation only.
+
+Update: isolated Docker CLI traffic and the service/build baseline now pass on
+the dedicated pipe. The simultaneous/implicit-client portion of the exit remains
+unqualified.
+
+## BL-002 — WSL host-switch guest identity and fixed ports
+
+- Flow: simultaneous Rancher 2.0 guests. Same baseline as BL-001.
+- Reproducer: `pkg/hostswitch/hostswitch_windows.go:getVMGUID` explicitly assumes
+  one matching openSUSE instance. Ports 6670/6657 and signature discovery are
+  shared with guest networking; `src/networking` must be adapted consistently.
+- Impact: selecting a distinct pipe cannot establish the guest behind it is ours.
+  WSL shared-VM behavior needs an actual scoped proof; do not boot unmodified guests.
+- Adaptation: backend start is unavailable until the guest identity contract and
+  host/guest ports are isolated and qualified. Diagnostics explain the reason.
+- Candidate patch 0002 now separates the product discovery signature and four
+  vsock ports, veth link names and WSL bridge address. The proxy uses the same
+  changed address. Paired source contract checks and host tests are required;
+  these are not runtime proof. The product supports one owned guest only.
+- Additional source evidence: `src/networking/cmd/network/setup_linux.go`
+  unconditionally cleans up `veth-rd-wsl` in the originating WSL namespace;
+  sharing the name risks altering another engine's integration. The candidate
+  uses a separate name and subnet, whose route conflicts still need testing.
+- Pinned Lima dependency `v2.3.0-beta.1.0.20261005214905-0ae2df64800a`
+  registers, starts, stops and deletes `lima-` + VM name in
+  `pkg/driver/wsl2/wsl_driver_windows.go`. The stock App names its VM `rd`;
+  a separate LIMA_HOME does not separate this global WSL registration. Patch
+  0003 changes the App VM name to `orbwin` (`lima-orbwin`). Existing app-controller
+  tests pass. No registration/boot/delete operation has been run.
+- Owner: OrbWin upstream adaptation. Phase 1. No upstream issue filed yet.
+- Exit: identity tied to a specific owned guest, wrong-guest rejection, collision
+  tests, restart order and live simultaneous workload traffic pass.
+
+## BL-003 — Runtime build and packaging qualification pending
+
+- Flow: install/start, all workload operations. Same baseline.
+- Evidence: this source pin requires Go 1.27, generated Linux Lima guest agent,
+  overlaid WSL distro and native SQLite build. Original host inventory had no Go
+  on PATH; project-local verified Go 1.27.3 now runs the focused patch tests.
+- Impact: no qualified OrbWin backend bundle is available yet; do not fall back
+  to a competing daemon or present an empty inventory as a successful connection.
+- Adaptation: explicit unavailable state, retry and build guidance in diagnostics.
+- Owner: OrbWin build. Phase 1. Exit: reproducible native bundle plus real API,
+  workload, preservation and coexistence qualification. Not a phase exclusion.
+
+Update: the native management build, all six guest binaries, rootfs overlay and
+guest-capable bundle now build. Management-only and isolated guest/Linux smoke
+proofs passed, as did a Redis/PostgreSQL/Compose/Buildx baseline. This entry now
+covers remaining installer/release and full runtime qualification, not a missing
+development executable. Raw evidence is under the task-owned artifacts directory.
+
+## BL-004 — Persisted readiness can precede current guest provisioning
+
+- Flow: restart/readiness. Same pinned source plus OrbWin patches.
+- Observed reproducer: cleanly stop the task-owned service, resume it, wait only
+  on App `ContainerEngineReady=True`, immediately run Docker info/version.
+  A stored condition returned before the pipe existed. Another run briefly
+  answered info, then version returned EOF while provisioning stopped the guest
+  target; the guest log records the Docker socket temporarily absent.
+- Impact: workload startup can race provisioning; this is not established as a
+  spontaneous engine crash. Preserve raw logs and classify correctly.
+- Adaptation: isolated restart proof uses upstream `ctl wait-condition` on the
+  owned LimaVM `Running=True`, reason `Started`, `--since=startup`, followed by
+  bounded actual endpoint/identity checks. Native inventory probes identity and
+  never starts/restarts the service. UI lifecycle integration remains pending.
+- Owner: OrbWin lifecycle adapter/upstream review, phase 1. No issue filed.
+- Exit: repeated cold/warm starts, interrupted starts, healthy reattachment and
+  failed-start behavior pass without stale readiness or unintended restarts.
+
+## BL-005 — Native Windows bind source syntax is not translated
+
+- Flow: ordinary Windows Docker CLI `--mount`; same source/patches and WSL 2.7.11.
+- Observed: `src=F:\Codes\Orbwin\tests\workloads\bind source` is rejected by
+  the Linux daemon as a non-absolute mount path. The equivalent explicit
+  `/mnt/f/Codes/Orbwin/tests/workloads/bind source` read-only directory mount
+  returns the expected sentinel file.
+- Impact: the full Windows-path client journey does not yet pass. Non-system
+  drive access exists through explicit WSL drive paths, including spaces.
+- Adaptation: the Run form now accepts existing local Windows drive paths,
+  canonicalizes them and maps them to WSL `/mnt/<drive>` paths. Parser tests
+  passed; the separate runtime proof is deferred until host availability is
+  confirmed. General CLI/Compose traffic is not translated. This does not
+  qualify ordinary Windows CLI/Compose paths or hide the missing adaptation.
+- Owner: OrbWin Windows integration/upstream boundary, phase 1. No issue filed.
+- Exit: native Windows drive/file/directory/read-only/Compose forms pass with
+  unknown Docker fields and streaming/session semantics preserved. No broad
+  Docker API rewrite is selected yet.
+
+2026-10-24 observed update: the Run adapter's live mount test initially rejected
+canonical `\\?\F:\...` sources as named volumes. Local-drive classification is
+fixed with a regression check. The rerun passed directory reads with spaces,
+file writes visible on Windows, read-only rejection, container-restart
+preservation and scoped cleanup (`bind-1792825893112476800.json`). A separately
+targeted Windows Docker CLI `--mount` still fails with a non-absolute source
+error. This qualifies only typed Run requests on the exercised F-drive paths;
+it does not close BL-005. See the readiness reassessment for commands and limits.
+
+## BL-006 — Requested guest resource allocation is not an observed WSL limit
+
+- Flow: CPU/memory settings. Proof App requested 2 CPUs and 2Gi; Docker info
+  reported 16 CPUs and 49,257,504,768 bytes available to the WSL environment.
+- Impact: do not claim these App settings enforce independent guest allocation.
+  WSL shares platform resources; exact enforcement needs upstream/WSL audit.
+- Adaptation: resource editing stays unavailable, with scope to be explained
+  before enabling it. Do not change global `.wslconfig` on the user's behalf.
+- Owner: OrbWin settings/WSL integration, phase 1. No issue filed.
+- Exit: resource scope and restart implications are documented and tested; UI
+  distinguishes any global WSL setting from a product-only setting.
+
+## BL-007 — Cleanup, disk usage and reset have no backend operation
+
+Labels in BL-007 to BL-012: **source-only** means read from OrbWin code or
+upstream source; **observed** means seen in a running system; **unverified**
+means unknown. Nothing in these entries has been run against a live engine.
+
+- Flow: prune, storage overview, volume/virtual-disk size, reset.
+- Evidence: source-only. No prune or `docker system df` adapter is wired;
+  volume and virtual-disk sizes are unmeasured. BL-002 records that no reset
+  operation exists. Whether the Docker prune/df endpoints behave correctly on
+  this engine is unverified.
+- Impact: OrbStack-style reclaim-space and reset flows cannot be offered.
+- UI adaptation: cleanup is list-and-remove-selected over images, volumes and
+  networks; sizes are not shown rather than estimated; restart is stop + start.
+- Owner: OrbWin adapter, phase 1. No upstream issue filed.
+- Exit: df/prune adapter qualified with preservation tests; sizes measured on a
+  live engine; a defined reset scope that cannot touch user distributions.
+
+## BL-008 — Batch and group operations are sequential without rollback
+
+- Flow: multi-select batch actions, Compose group actions.
+- Evidence: source-only. Batch actions run one resource at a time; a failure
+  mid-batch leaves earlier operations applied. Group remove leaves project
+  networks behind. Project logs/down are offered only when exactly one Windows
+  compose file label is present. Image/volume "in use" markers rely on the
+  `containers` prop now passed from App; unverified against live data.
+- Impact: partial completion is possible; leftover networks may accumulate.
+- UI adaptation: per-item results, no atomicity claim, no rollback.
+- Owner: OrbWin UI adapter, phase 1. No upstream issue filed.
+- Exit: live multi-select and Compose group runs, including mid-batch failure
+  and cancellation, with leftovers cleaned or explained.
+
+## BL-009 — Port links may not open from the native window
+
+- Flow: open a published port from a row or Info tab.
+- Evidence: source-only. Links use `target=_blank`; the Tauri app has no opener
+  plugin, so native-window behavior is unverified.
+- Impact: links may do nothing or open an unexpected window.
+- UI adaptation: none yet beyond showing the address.
+- Owner: OrbWin Tauri integration, phase 1.
+- Exit: verify in the native app; add an opener capability if links fail.
+
+## BL-010 — Kubernetes views have bounded depth
+
+- Flow: pod inspection, terminal, port-forward.
+- Evidence: source-only. List and inspector (Info/Logs/YAML/Events) exist. Pod
+  Terminal is a single non-interactive `clusterExec`. Port-forward lives only
+  while its dialog is open, so no persistent service link exists. Logs are the
+  last 500 lines without follow. Namespaces with no resources of the viewed
+  kind are not listed. Not run against a live cluster.
+- Impact: no persistent service access comparable to OS-008/010.
+- UI adaptation: limits shown; nothing simulated.
+- Owner: OrbWin adapter, phase 1.
+- Exit: interactive exec, followed logs and persistent forwards qualified, or
+  limits accepted explicitly with rationale.
+
+## BL-011 — WSL page is a name-based read-only list
+
+- Flow: WSL distributions page, open terminal.
+- Evidence: source-only. The list is parsed from `wsl --list --verbose`; roles
+  are inferred by name only. The Rust `wsl_open_terminal` command compiled but
+  is untested; it rejects engine distros.
+- Impact: roles may be misclassified; terminal launch is unproven.
+- UI adaptation: read-only list, no mutation controls.
+- Owner: OrbWin WSL integration, phase 1.
+- Exit: reliable owned/engine identification; terminal launch tested; user
+  distribution independence verified.
+
+## BL-012 — Settings and first-run behavior unqualified
+
+- Flow: settings changes, first run, port conflicts.
+- Evidence: source-only/unverified. Which settings need restart is unknown; the
+  restart banner reflects only rdd `Settled`. First-run provisioning is not
+  automated (BL-003). Host-port conflict handling is unqualified. The forced
+  light theme does not change the Windows title bar.
+- Impact: a setting needing restart may apply without a prompt.
+- UI adaptation: banner states only what rdd reports.
+- Owner: OrbWin settings/lifecycle, phase 1.
+- Exit: per-setting apply/restart behavior documented and tested; conflicts
+  exercised.
+
+## Historical UI adapter gaps — 2026-10-22 correction
+
+At the time of the initial correction, the list/inspector UI exposed Builds, Pods and Services explicitly.
+Their histories/cluster reads and setup remain unwired. Info displays only fields
+returned by the existing read-only inventory, not full Docker inspect output.
+Stats, Logs, Terminal and Files tabs explain missing adapters; no stream, exec,
+filesystem, mutation or build operation is simulated. Compose groups derive only
+from returned project labels and have not been exercised against a live project
+in this correction. This is implementation debt in full phase-1 scope, rather
+than evidence that rdd cannot support these operations. Reproduce by opening the
+native app and selecting the relevant destination/tab. Existing BL-001 through
+BL-006 and their exit criteria remain applicable.
+
+The later ordinary-workflow implementation supersedes this historical UI-only
+description: actual mutations, full inspect, builds/Compose, logs/stats,
+interactive terminals and workload-cluster adapters now exist. See
+verification/workflows-2026-10-22.md for successful runtime evidence and pending
+native/host qualification. Files, first-run and other coverage gaps remain in
+phase-1-coverage.md; they are not automatically upstream backend limitations.

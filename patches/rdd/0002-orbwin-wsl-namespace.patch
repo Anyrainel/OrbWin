@@ -1,0 +1,126 @@
+diff --git a/rdd/pkg/hostswitch/hostswitch_windows.go b/rdd/pkg/hostswitch/hostswitch_windows.go
+index 3af9788ac..0c19f4a2f 100644
+--- a/rdd/pkg/hostswitch/hostswitch_windows.go
++++ b/rdd/pkg/hostswitch/hostswitch_windows.go
+@@ -84,8 +84,8 @@ func validateSubnet(subnet string) (*hostSwitchSubnet, error) {
+ // guest-side network-setup binary. They differ from Rancher Desktop 1.x's
+ // so a 1.x VM on the same machine cannot answer our handshake.
+ const (
+-	vsockHandshakePort = 6670
+-	vsockListenPort    = 6657
++	vsockHandshakePort = 16670
++	vsockListenPort    = 16657
+ 	handshakeTimeout   = 5 * time.Minute
+ 
+ 	// relayMinDuration is how long a vsock data connection must last before we
+@@ -101,7 +101,7 @@ const (
+ 	// signaturePhrase identifies our distro among all running Hyper-V VMs.
+ 	// This value is a protocol contract with the guest-side network-setup
+ 	// binary and must not be changed independently.
+-	signaturePhrase = "github.com/rancher-sandbox/rancher-desktop-opensuse/src/go/networking"
++	signaturePhrase = "dev.orbwin/wsl-network/v1"
+ 	readySignal     = "READY"
+ 
+ 	gatewayMacAddr = "5a:94:ef:e4:0c:dd"
+@@ -430,9 +430,10 @@ func vsockHandshake(ctx context.Context, logger logr.Logger) (net.Listener, hvso
+ // is re-scanned every second so that VMs starting after the initial scan
+ // (e.g., the WSL2 utility VM on a fresh system) are discovered.
+ //
+-// The signature-based discovery assumes only one opensuse WSL2 instance
+-// runs at a time. With multiple instances, the first match wins and the
+-// others get no host-switch networking.
++// OrbWin uses a distinct product signature and port namespace. This is discovery,
++// not cryptographic authentication. Only one OrbWin guest is supported; a second
++// instance of this product must not be launched. Stock Rancher guests cannot
++// answer this product's discovery protocol.
+ func getVMGUID(ctx context.Context, logger logr.Logger) (hvsock.GUID, error) {
+ 	ctx, cancel := context.WithCancel(ctx)
+ 	defer cancel()
+diff --git a/rdd/pkg/socketbridge/host_windows.go b/rdd/pkg/socketbridge/host_windows.go
+index 7cdb6b55e..8f6c2e976 100644
+--- a/rdd/pkg/socketbridge/host_windows.go
++++ b/rdd/pkg/socketbridge/host_windows.go
+@@ -23,12 +23,12 @@ const (
+ 	// VsockForwardPort is the AF_VSOCK port on which rdd-guest serves the
+ 	// Docker socket inside the VM. Must match dockerVsockPort in
+ 	// rdd/src/rdd-guest/main.go.
+-	VsockForwardPort uint32 = 6660
++	VsockForwardPort uint32 = 16660
+ 
+ 	// ContainerdVsockPort is the AF_VSOCK port on which rdd-guest serves the
+ 	// containerd socket inside the VM. Must match containerdVsockPort in
+ 	// rdd/src/rdd-guest/main.go.
+-	ContainerdVsockPort uint32 = 6661
++	ContainerdVsockPort uint32 = 16661
+ )
+ 
+ // HostBridge listens on a Windows named pipe and forwards each accepted
+diff --git a/rdd/src/networking/cmd/network/setup_linux.go b/rdd/src/networking/cmd/network/setup_linux.go
+index 1cc6eb018..406a757ea 100644
+--- a/rdd/src/networking/cmd/network/setup_linux.go
++++ b/rdd/src/networking/cmd/network/setup_linux.go
+@@ -54,10 +54,10 @@ const (
+ 	nsenter                 = "/usr/bin/nsenter"
+ 	unshare                 = "/usr/bin/unshare"
+ 	defaultTapDevice        = "eth0"
+-	WSLVeth                 = "veth-rd-wsl"
+-	WSLVethIP               = "192.168.143.2"
+-	namespaceVeth           = "veth-rd-ns"
+-	namespaceVethIP         = "192.168.143.1"
++	WSLVeth                 = "veth-ow-wsl"
++	WSLVethIP               = "192.168.144.2"
++	namespaceVeth           = "veth-ow-ns"
++	namespaceVethIP         = "192.168.144.1"
+ 	defaultNamespaceService = "network-namespace.service"
+ 	cidrOnes                = 24
+ 	cidrBits                = 32
+diff --git a/rdd/src/networking/cmd/proxy/wsl_integration_linux.go b/rdd/src/networking/cmd/proxy/wsl_integration_linux.go
+index f030d74d5..99767c232 100644
+--- a/rdd/src/networking/cmd/proxy/wsl_integration_linux.go
++++ b/rdd/src/networking/cmd/proxy/wsl_integration_linux.go
+@@ -29,7 +29,7 @@ var (
+ const (
+ 	defaultLogPath = "/var/log/wsl-proxy.log"
+ 	defaultSocket  = "/run/wsl-proxy.sock"
+-	bridgeIPAddr   = "192.168.143.1"
++	bridgeIPAddr   = "192.168.144.1"
+ 	// Set UDP buffer size to 8 MB
+ 	defaultUDPBufferSize = 8 * 1024 * 1024 // 8 MB in bytes
+ )
+diff --git a/rdd/src/networking/pkg/vsock/constants.go b/rdd/src/networking/pkg/vsock/constants.go
+index 136de6eaa..7dd3bfba3 100644
+--- a/rdd/src/networking/pkg/vsock/constants.go
++++ b/rdd/src/networking/pkg/vsock/constants.go
+@@ -7,13 +7,13 @@ package vsock
+ 
+ // vsock constants used for handshake and signaling between host and VM.
+ const (
+-	SignaturePhrase = "github.com/rancher-sandbox/rancher-desktop-opensuse/src/go/networking"
++	SignaturePhrase = "dev.orbwin/wsl-network/v1"
+ 	ReadySignal     = "READY"
+ )
+ 
+ // Default vsock ports for communication between host and VM. The VM dials the
+ // host switch's listen port; both sides use the same handshake port.
+ const (
+-	DefaultHandshakePort = 6670
+-	DefaultListenPort    = 6657
++	DefaultHandshakePort = 16670
++	DefaultListenPort    = 16657
+ )
+diff --git a/rdd/src/rdd-guest/main.go b/rdd/src/rdd-guest/main.go
+index e4382d369..2ba3f87c4 100644
+--- a/rdd/src/rdd-guest/main.go
++++ b/rdd/src/rdd-guest/main.go
+@@ -23,9 +23,9 @@ import (
+ )
+ 
+ const (
+-	dockerVsockPort     = 6660
++	dockerVsockPort     = 16660
+ 	dockerSockPath      = "/var/run/docker.sock"
+-	containerdVsockPort = 6661
++	containerdVsockPort = 16661
+ 	containerdSockPath  = "/run/k3s/containerd/containerd.sock"
+ )
+ 

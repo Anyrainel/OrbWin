@@ -1,0 +1,266 @@
+/* Kubernetes list + inspector and WSL distributions. Reuses the shared tokens
+   and classes from styles.css; only layout specific to these pages lives here. */
+.k8s-workspace {
+  display: flex;
+  height: 100%;
+  min-height: 460px;
+}
+.k8s-workspace .list-pane {
+  flex-shrink: 0;
+  min-height: 0;
+}
+.k8s-workspace .resource-list {
+  min-height: 0;
+}
+.k8s-inspector {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.k8s-inspector .detail-content {
+  min-height: 0;
+}
+.k8s-state {
+  padding: 24px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 12px;
+}
+.k8s-error-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+  max-height: 220px;
+  overflow: auto;
+}
+.k8s-stale {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: var(--error-bg);
+  color: var(--error-text);
+  overflow-wrap: anywhere;
+  max-height: 90px;
+  overflow: auto;
+}
+.k8s-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 12px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.k8s-filter select {
+  flex: 1;
+  min-width: 0;
+  border-radius: 5px;
+}
+.k8s-workspace .project-controls {
+  flex-shrink: 0;
+  margin: 8px 12px;
+}
+
+/* Rows */
+.k8s-row {
+  position: relative;
+}
+.k8s-row .resource-row {
+  margin-bottom: 2px;
+}
+.k8s-row-actions {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 4px;
+}
+.k8s-row:hover .k8s-row-actions,
+.k8s-row:focus-within .k8s-row-actions {
+  display: flex;
+}
+.k8s-row:hover .row-meta,
+.k8s-row:focus-within .row-meta {
+  visibility: hidden;
+}
+.k8s-row-action {
+  width: 26px;
+  height: 26px;
+  background: var(--dialog-bg);
+  color: var(--text-strong);
+}
+.k8s-row-action:hover {
+  background: var(--surface-active);
+}
+.k8s-dot.ok {
+  background: var(--success);
+}
+.k8s-dot.warn {
+  background: var(--warning);
+}
+.k8s-dot.bad {
+  background: var(--danger);
+}
+.k8s-dot.idle {
+  background: var(--status-idle);
+}
+.k8s-dot {
+  margin: 0;
+}
+.k8s-tone.ok {
+  color: var(--success);
+}
+.k8s-tone.warn {
+  color: var(--warning-text);
+}
+.k8s-tone.bad {
+  color: var(--danger-text);
+}
+
+/* Detail */
+.k8s-title-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 7px;
+  flex-shrink: 0;
+  align-items: center;
+}
+.k8s-title-actions .action-row {
+  margin: 0;
+}
+.detail-properties dd small {
+  color: var(--muted);
+}
+.k8s-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.k8s-chips code {
+  background: var(--control-hover);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.k8s-ports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.k8s-ports li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.k8s-ports .button {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.k8s-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.k8s-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.k8s-inline-search {
+  margin: 0;
+  flex: 1;
+  min-width: 140px;
+}
+.k8s-log,
+.k8s-yaml {
+  max-height: none;
+  height: max(260px, calc(100vh - 300px));
+  white-space: pre;
+  overflow-wrap: normal;
+  margin: 0;
+}
+.k8s-log.wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.k8s-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.k8s-events li {
+  display: grid;
+  grid-template-columns: 64px 140px 1fr auto;
+  gap: 10px;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.k8s-event-type.Warning {
+  color: var(--warning-text);
+}
+
+/* WSL page */
+.wsl-group {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--heading-muted);
+  padding: 12px 10px 4px;
+}
+.wsl-group small {
+  display: block;
+  font-weight: 400;
+  margin-top: 2px;
+}
+.wsl-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-active);
+  color: var(--text);
+  margin-left: 6px;
+}
+.resource-row.selected .wsl-badge {
+  background: var(--selected-muted);
+  color: var(--selected);
+}
+.wsl-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  margin: 8px 0;
+}
+.wsl-command code {
+  overflow-wrap: anywhere;
+}
+.wsl-section {
+  margin-top: 22px;
+}
+.wsl-section h3 {
+  margin: 0 0 8px 10px;
+}
+@media (max-width: 760px) {
+  .k8s-events li {
+    grid-template-columns: 1fr;
+  }
+}

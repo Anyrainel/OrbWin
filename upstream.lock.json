@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/rancher-sandbox/rancher-desktop-2.git",
+  "commit": "af6511ad4e065e24e7258f575a0fc090c10cdbda",
+  "status": "development baseline; not runtime-qualified",
+  "go": {
+    "version": "1.27.3",
+    "windowsAmd64Sha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff"
+  },
+  "patches": [
+    "patches/rdd/0001-instance-docker-pipe.patch",
+    "patches/rdd/0002-orbwin-wsl-namespace.patch",
+    "patches/rdd/0003-owned-wsl-distro.patch",
+    "patches/rdd/0004-guard-product-environment.patch"
+  ],
+  "patchedFiles": {
+    "rdd/pkg/instance/docker_isolation_windows_test.go": "dfabb6cc9f2bdcc52c5243f63df3bb9e3ba5b0370a48db712404710017523138",
+    "rdd/pkg/instance/instance.go": "2ac76da53d35f1cdbedf061370c082aca4a9149a7ebf3afc0b89f06342852397",
+    "rdd/pkg/instance/instance_test.go": "688975349b656c1d569f9a207bc207ed48ea8101300d4e2fcb1d948f68710aaf",
+    "rdd/pkg/socketbridge/host_identity_windows_test.go": "d50d43f0bb87187ae6b72f16360b68edee4c3852bdbf1aebb77ed389846ff6bf",
+    "rdd/pkg/socketbridge/host_windows.go": "bbacfe46a1593ba44d35e8906b97b7c2c9c09dc73681869b50c16d7caba1b1ea",
+    "rdd/pkg/hostswitch/hostswitch_windows.go": "3ad24b6796ccf1ed27b0a25c1c43db788dfc95eef7f3dc080dbe3560306ba672",
+    "rdd/src/rdd-guest/main.go": "fabd4fa2e5e40a1abadb95ea3773140259097546495410fe115c8dfd126f4352",
+    "rdd/src/networking/pkg/vsock/constants.go": "909fc0ffbe0b778c289f5c1178fc58906c5d15c84476847d76a94b26a1a45662",
+    "rdd/src/networking/cmd/network/setup_linux.go": "4f344108aa8ec8995c36e5c41c6710930aad9657af315217e854e09d55ae2dbd",
+    "rdd/src/networking/cmd/proxy/wsl_integration_linux.go": "7438a35047f45342492590e5f7d70ddbd7cbd2bf2c92fb87fe235ddfb2cb291e",
+    "rdd/pkg/controllers/app/app/controllers/app_controller.go": "f7c161c9ea7135bf846383255d4b143b6ddacc1ff667af35efae0764706cdf07",
+    "rdd/cmd/rdd/main.go": "afe32da3c5d472fbce23698e05f975cb11d2c925401f930887cda3b4866f2bac",
+    "rdd/cmd/rdd/orbwin_environment.go": "a15e4bf4af8d2f856c9a2461a4f1057ae0a7157cb3012fa0a5c81d53640aa04e",
+    "rdd/cmd/rdd/orbwin_environment_test.go": "04eae506281929beacf3d49fc26bb07d85d56b8eeadc3222a93085e4c44bc0be"
+  }
+}

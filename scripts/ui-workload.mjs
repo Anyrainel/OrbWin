@@ -1,0 +1,23 @@
+// Disposable real inventory for native UI review; exact owned engine and project.
+import {execFileSync} from "node:child_process";
+import {readFileSync,writeFileSync} from "node:fs";
+import {resolve} from "node:path";
+import {fileURLToPath} from "node:url";
+import {randomUUID} from "node:crypto";
+import {verifyBuild} from "./build-identity.mjs";
+import {endpoint} from "./engine-identity.mjs";
+const root=fileURLToPath(new URL("../",import.meta.url));
+const identity=JSON.parse(readFileSync(resolve(root,"artifacts/qualification/runtime-identity.json")));
+const build=verifyBuild(root);
+if(!identity.identityVerified||identity.endpoint!==endpoint||identity.binarySha256!==build.binarySha256)throw new Error("Owned identity is unavailable or stale");
+const recordPath=resolve(root,"artifacts/qualification/ui-workload.json");
+const stop=process.argv.includes("--down");
+const record=stop?JSON.parse(readFileSync(recordPath)):{project:`orbwin-ui-${randomUUID().slice(0,8)}`,endpoint,daemonId:identity.daemonId,created:new Date().toISOString()};
+if(!/^orbwin-ui-[0-9a-f]{8}$/.test(record.project)||record.endpoint!==endpoint||record.daemonId!==identity.daemonId)throw new Error("UI project record is foreign");
+const docker=resolve(process.env.ProgramFiles??"C:/Program Files","Docker/Docker/resources/bin/docker.exe");
+const cli=args=>execFileSync(docker,["--config",resolve(identity.home,".rdorbwin/docker"),"--host",endpoint,...args],{cwd:root,windowsHide:true,encoding:"utf8",timeout:150000,maxBuffer:1024*1024,env:{...process.env,DOCKER_CONTEXT:"",DOCKER_TLS_VERIFY:"",DOCKER_CERT_PATH:"",DOCKER_HOST:endpoint}}).trim();
+if(JSON.parse(cli(["info","--format","{{json .}}"])).ID!==identity.daemonId)throw new Error("Wrong engine");
+writeFileSync(recordPath,JSON.stringify({...record,status:stop?"cleanup-started":"creation-started"},null,2));
+cli(["compose","--project-name",record.project,"--file",resolve(root,"tests/workloads/compose.yaml"),...(stop?["down","--volumes"]:["up","--detach","--wait","--wait-timeout=120"])]);
+writeFileSync(recordPath,JSON.stringify({...record,status:stop?"removed":"running"},null,2));
+console.log(`${record.project}: ${stop?"removed":"ready for native review"}`);

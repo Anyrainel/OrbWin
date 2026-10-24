@@ -1,0 +1,87 @@
+diff --git a/rdd/cmd/rdd/main.go b/rdd/cmd/rdd/main.go
+index 3e58fed78..ce147e71b 100644
+--- a/rdd/cmd/rdd/main.go
++++ b/rdd/cmd/rdd/main.go
+@@ -126,6 +126,12 @@ func newVersionCommand() *cobra.Command {
+ func main() {
+ 	os.Args = multiCallArgs(os.Args)
+ 	parseInstanceFlag()
++	// Some dynamic help paths initialize the service. Establish product identity
++	// and private client configuration before constructing any Cobra commands.
++	if err := prepareOrbWinEnvironment(); err != nil {
++		fmt.Fprintln(os.Stderr, err)
++		os.Exit(2)
++	}
+ 
+ 	cmd := &cobra.Command{
+ 		Use:   "rdd",
+diff --git a/rdd/cmd/rdd/orbwin_environment.go b/rdd/cmd/rdd/orbwin_environment.go
+new file mode 100644
+index 000000000..43ba6d990
+--- /dev/null
++++ b/rdd/cmd/rdd/orbwin_environment.go
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin product boundary: never operate a stock Rancher instance or shared
++// client configuration, including from dynamic help or autostart paths.
++package main
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
++)
++
++func validateOrbWinInstance(name string) error {
++	if name != "orbwin" && name != "orbwin-proof" {
++		return fmt.Errorf("OrbWin build refuses instance %q; use orbwin (or orbwin-proof for management-only tests)", name)
++	}
++	return nil
++}
++
++func prepareOrbWinEnvironment() error {
++	name := os.Getenv("RDD_INSTANCE")
++	if name == "" {
++		name = "orbwin"
++		if err := os.Setenv("RDD_INSTANCE", name); err != nil {
++			return err
++		}
++	}
++	if err := validateOrbWinInstance(name); err != nil {
++		return err
++	}
++	for key, path := range map[string]string{
++		"DOCKER_CONFIG": filepath.Join(instance.ShortDir(), "docker"),
++		"KUBECONFIG":    filepath.Join(instance.ShortDir(), "kube-client.config"),
++	} {
++		if err := os.Setenv(key, path); err != nil {
++			return err
++		}
++	}
++	return nil
++}
+diff --git a/rdd/cmd/rdd/orbwin_environment_test.go b/rdd/cmd/rdd/orbwin_environment_test.go
+new file mode 100644
+index 000000000..87d4a005a
+--- /dev/null
++++ b/rdd/cmd/rdd/orbwin_environment_test.go
+@@ -0,0 +1,17 @@
++// SPDX-License-Identifier: Apache-2.0
++package main
++
++import "testing"
++
++func TestOrbWinRejectsForeignInstances(t *testing.T) {
++	for _, name := range []string{"2", "test", "orbwin-other", "../orbwin", `orbwin\..\2`, "OR BWIN"} {
++		if err := validateOrbWinInstance(name); err == nil {
++			t.Fatalf("accepted foreign identity %q", name)
++		}
++	}
++	for _, name := range []string{"orbwin", "orbwin-proof"} {
++		if err := validateOrbWinInstance(name); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
