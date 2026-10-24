@@ -191,7 +191,7 @@ export function EngineSetup({
                           : setupAvailable
                             ? "Set up a private WSL engine. Guest components may be downloaded; the optional Kubernetes cluster starts disabled."
                             : engine === "error"
-                              ? `The engine check failed with an unrecognised error. Starting may not resolve it. ${status?.message ?? ""}`
+                              ? `The engine is unavailable. ${status?.message ?? "Open diagnostics for details before retrying."}`
                               : "Available after the backend is verified."}
               </p>
               {lifecycle.result &&

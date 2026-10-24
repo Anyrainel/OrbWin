@@ -56,6 +56,10 @@ impl Target {
                     include_bytes!("../../backend-tools/session/publication.go").as_slice(),
                 ),
                 (
+                    "files.go",
+                    include_bytes!("../../backend-tools/session/files.go").as_slice(),
+                ),
+                (
                     "go.sum",
                     include_bytes!("../../backend-tools/session/go.sum").as_slice(),
                 ),
@@ -260,23 +264,28 @@ pub async fn status() -> Status {
             upgrade_available: false,
             resources: Some(resources),
         },
-        Err(detail) => Status {
-            available: false,
-            endpoint: ENDPOINT,
-            message: if detail.contains("failed to connect")
-                || detail.contains("error during connect")
-            {
-                "The owned OrbWin engine is offline. Refresh when it is running.".into()
-            } else {
-                "The owned backend could not be verified. Open diagnostics for the next step."
-                    .into()
-            },
-            version: None,
-            diagnostic: Some(detail),
-            setup_available: crate::installation::available(),
-            upgrade_available: crate::installation::upgrade_available(),
-            resources: None,
-        },
+        Err(detail) => {
+            let preparation_issue = crate::installation::preparation_issue();
+            Status {
+                available: false,
+                endpoint: ENDPOINT,
+                message: if preparation_issue.is_some() {
+                    "The engine's registered home cannot be used by this installation. Open diagnostics and use the original installation to manage it. OrbWin has not adopted or removed its data.".into()
+                } else if detail.contains("failed to connect")
+                    || detail.contains("error during connect")
+                {
+                    "The owned OrbWin engine is offline. Refresh when it is running.".into()
+                } else {
+                    "The owned backend could not be verified. Open diagnostics for the next step."
+                        .into()
+                },
+                version: None,
+                diagnostic: Some(preparation_issue.unwrap_or(detail)),
+                setup_available: crate::installation::available(),
+                upgrade_available: crate::installation::upgrade_available(),
+                resources: None,
+            }
+        }
     }
 }
 

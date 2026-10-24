@@ -40,10 +40,12 @@ export type ClusterResource =
   | "persistentVolumeClaims";
 export type Operation =
   | { kind: "setup" }
+  | { kind: "prepareUpdate" }
   | { kind: "registryList" }
   | { kind: "registryLogin"; server: string; username: string; secret: string }
   | { kind: "registryForget"; server: string }
   | { kind: "diskUsage" }
+  | { kind: "files"; target: string; path: string; action: "list" | "read" }
   | {
       kind: "buildHistory";
       action: "list" | "inspect" | "logs";

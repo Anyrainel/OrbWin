@@ -39,6 +39,7 @@ impl Drop for Lease<'_> {
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Request {
     Setup,
+    PrepareUpdate,
     RegistryList,
     RegistryLogin {
         server: String,
@@ -49,6 +50,11 @@ pub enum Request {
         server: String,
     },
     DiskUsage,
+    Files {
+        target: String,
+        path: String,
+        action: FileAction,
+    },
     BuildHistory {
         action: BuildHistoryAction,
         reference: String,
@@ -233,6 +239,13 @@ pub enum ContainerAction {
     Unpause,
 }
 
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum FileAction {
+    List,
+    Read,
+}
+
 struct Plan {
     args: Vec<String>,
     mutation: bool,
@@ -300,6 +313,7 @@ impl Request {
         let mut seconds = 120;
         let mut input = None;
         let args: Vec<String> = match self {
+            Self::PrepareUpdate => vec![],
             Self::RegistryList => {
                 mutation = false;
                 vec![]
@@ -319,6 +333,28 @@ impl Request {
             Self::DiskUsage => {
                 mutation = false;
                 vec!["system".into(), "df".into(), "--format=json".into()]
+            }
+            Self::Files {
+                target: selected,
+                path,
+                action,
+            } => {
+                target(Resource::Container, selected)?;
+                if !path.starts_with('/') || path.len() > 2048 || path.contains(['\0', '\\']) {
+                    return Err("Use an absolute Linux container path (maximum 2048 bytes).".into());
+                }
+                mutation = false;
+                seconds = 20;
+                vec![
+                    "files".into(),
+                    selected.clone(),
+                    path.clone(),
+                    match action {
+                        FileAction::List => "list",
+                        FileAction::Read => "read",
+                    }
+                    .into(),
+                ]
             }
             Self::BuildHistory { action, reference } => {
                 mutation = false;
@@ -971,6 +1007,9 @@ pub async fn run(
     if matches!(request, Request::Setup) {
         return crate::installation::setup(&output, &mut cancelled).await;
     }
+    if matches!(request, Request::PrepareUpdate) {
+        return crate::installation::prepare_update(&output, &mut cancelled).await;
+    }
     if matches!(
         request,
         Request::RegistryList | Request::RegistryLogin { .. } | Request::RegistryForget { .. }
@@ -990,7 +1029,11 @@ pub async fn run(
     ) || request.is_management_read()
         || request.is_cluster();
     let stopping = matches!(request, Request::Engine { running: false });
-    let binary = if management {
+    let file_read = matches!(request, Request::Files { .. });
+    let binary = if file_read {
+        engine::check(&target).await?;
+        target.session().await?
+    } else if management {
         target.rdd().await?
     } else {
         engine::check(&target).await?;
@@ -1041,6 +1084,11 @@ pub async fn run(
                 )
                 .args(&plan.args[1..]);
         }
+    } else if file_read {
+        command
+            .arg("files")
+            .arg(target.daemon_id())
+            .args(&plan.args[1..]);
     } else {
         command
             .env("PATH", crate::runtime::client_path()?)
@@ -1049,7 +1097,7 @@ pub async fn run(
             .arg("--host")
             .arg(engine::ENDPOINT);
     }
-    if !request.is_cluster() && !request.is_management_read() {
+    if !file_read && !request.is_cluster() && !request.is_management_read() {
         command.args(&plan.args);
     }
     command
@@ -1083,10 +1131,54 @@ pub async fn run(
         ),
     )
     .await?;
+    let client_result = if client_result.exit_code == Some(0)
+        && !client_result.interrupted
+        && matches!(request, Request::Engine { running: true })
+    {
+        // A freshly started management service can retain an already-true App
+        // Settled condition when `running=true` changes no generation. Require
+        // Lima's current-service startup, as first-run setup already does.
+        // This is a bounded observation of rdd, never a second reconciler.
+        output
+            .send(Output::Data {
+                stream: "stdout",
+                bytes: b"Waiting for the current backend startup and guest connection...\n"
+                    .to_vec(),
+            })
+            .map_err(|_| "The output viewer disconnected")?;
+        let mut readiness = Command::new(target.rdd().await?);
+        readiness
+            .args([
+                "ctl",
+                "wait-condition",
+                "limavms/orbwin",
+                "Running=True",
+                "--reason=Started",
+                "--since=startup",
+                "--namespace=rancher-desktop",
+                "--timeout=180s",
+            ])
+            .env("USERPROFILE", target.home())
+            .env("HOME", target.home())
+            .env("RDD_INSTANCE", "orbwin")
+            .env("RDD_DEVELOPER_MODE", "1")
+            .env("RDD_KEEP_LOGS", "1")
+            .env_remove("RDD_LOG_DIR")
+            .env_remove("LIMA_HOME")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        readiness.creation_flags(0x08000000);
+        run_client(readiness, None, &output, &mut cancelled, 190, false).await?
+    } else {
+        client_result
+    };
     let ClientResult {
         exit_code,
-        interrupted,
-        reason,
+        mut interrupted,
+        mut reason,
     } = client_result;
     let identity = if stopping || request.is_management_read() {
         Ok(serde_json::Value::Null)
@@ -1100,9 +1192,21 @@ pub async fn run(
             request,
             Request::Engine { running: true } | Request::ConfigureCluster { .. }
         ) {
-        match engine::publication_failure(&target).await {
-            Ok(message) => message,
-            Err(error) => Some(format!("The backend changed, but Windows publication could not be verified: {error}. Refresh and inspect before retrying.")),
+        output
+            .send(Output::Data {
+                stream: "stdout",
+                bytes: b"Verifying Windows port publication (up to 30 seconds)...\n".to_vec(),
+            })
+            .map_err(|_| "The output viewer disconnected")?;
+        match crate::readiness::publication(||engine::publication_failure(&target), &mut cancelled, Duration::from_secs(30), Duration::from_secs(1)).await {
+            crate::readiness::Publication::Ready => None,
+            crate::readiness::Publication::Unavailable(message) => Some(message),
+            crate::readiness::Publication::Failed(error) => Some(format!("The backend changed, but Windows publication could not be verified: {error}. Refresh and inspect before retrying.")),
+            crate::readiness::Publication::Cancelled => {
+                interrupted=true;
+                reason="Cancelled while verifying Windows publication".into();
+                None
+            },
         }
     } else {
         None
@@ -1416,6 +1520,28 @@ mod tests {
         }
         .plan()
         .is_err());
+    }
+    #[test]
+    fn file_reads_are_bounded_nonmutating_and_reject_host_paths() {
+        for path in ["relative", "C:\\Windows", "/bad\0file", "/bad\\file"] {
+            assert!(Request::Files {
+                target: ID.into(),
+                path: path.into(),
+                action: FileAction::List
+            }
+            .plan()
+            .is_err());
+        }
+        let plan = Request::Files {
+            target: ID.into(),
+            path: "/space ü/file".into(),
+            action: FileAction::Read,
+        }
+        .plan()
+        .unwrap();
+        assert!(!plan.mutation);
+        assert_eq!(plan.seconds, 20);
+        assert_eq!(plan.args, ["files", ID, "/space ü/file", "read"]);
     }
     #[test]
     fn destructive_operations_never_force_or_remove_attached_volumes() {

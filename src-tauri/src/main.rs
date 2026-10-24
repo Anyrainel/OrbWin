@@ -7,6 +7,7 @@ mod local_link;
 mod mounts;
 mod operations;
 mod process;
+mod readiness;
 mod registry;
 mod runtime;
 #[path = "session.rs"]

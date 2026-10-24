@@ -1,5 +1,10 @@
 # Phase 1 readiness reassessment — 2026-10-24
 
+Historical checkpoint: subsequent fixes and qualification are recorded in
+[the completion record](phase-1-completion.md) and
+[current coverage](../phase-1-coverage.md). The decision below describes this
+earlier checkpoint, not the later working tree.
+
 **Decision: not ready for Phase 1 acceptance or a Phase 2 implementation handoff.**
 The current product is a working development build with successful scoped engine
 proofs. Required implementation and qualification remain open. Passing the

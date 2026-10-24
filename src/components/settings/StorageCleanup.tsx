@@ -69,8 +69,8 @@ type Result = { target: string; label: string; ok: boolean; message: string };
 // Docker-data cleanup without a broad prune: the native adapter deliberately
 // has no prune (src-tauri/src/operations.rs). Each selected item is removed
 // with the existing single-resource operation, one at a time, after a
-// per-category confirmation. Cancel stops after the current item; an
-// interrupted removal may still have committed, so the inventory is re-read.
+// per-category confirmation. Cancel stops the client and remaining requests;
+// an interrupted removal may still have committed, so inventory is re-read.
 export function StorageCleanup({
   inventory,
   disabled,
@@ -222,8 +222,12 @@ export function StorageCleanup({
             className="button compact"
             onClick={() => controller.current?.abort()}
           >
-            Stop after current item
+            Cancel cleanup
           </button>
+          <span>
+            The current removal may already have committed. State is refreshed
+            before another cleanup.
+          </span>
         </div>
       )}
       {sections.map((section) => {

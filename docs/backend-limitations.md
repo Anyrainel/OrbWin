@@ -8,6 +8,27 @@ that a subsequently implemented flow is absent.
 
 ## 2026-10-24 implementation updates
 
+- Current completion evidence supersedes older open-status prose below:
+  installed first-run/cancel/resume, NSIS refusal/replacement/uninstall/reinstall,
+  measured baseline, native logs/TTY/forwarding/storage/diagnostic export and
+  explicit reconnect now pass their recorded cases. BL-015's guest dependency
+  is bundled on the twelve-patch backend. Files uses bounded read-only Docker
+  archives. Current full accounting is in `phase-1-coverage.md`; historical
+  source-only entries are not claims that these adapters remain absent.
+- New-App creation selects Kubernetes 1.35.3 while disabled: the upstream 1.34.6
+  default exceeds bundled kubectl 1.36's supported skew. Existing clusters are
+  never silently upgraded. Installed explicit upgrade retained its PVC marker.
+- BL-006 / BL-016: the selected-source capability audit now distinguishes WSL
+  resource scope, absent standalone proxy settings and missing whole-engine
+  backup/relocation/migration transactions. Settings explain shared resources
+  and direct-network qualification; these are not simulated configuration flows.
+  See `verification/upstream-capability-audit.md`.
+- BL-003 / BL-012: ordinary per-user installation and native first-run
+  cancellation/resume created a fresh installed engine, distinct from the
+  archived development fixture. Its three-engine coexistence proof passed.
+  Installer replacement/uninstall retention and the complete baseline remain
+  open; an intermittent Windows API failure during restart is under investigation.
+
 - BL-015: native Kubernetes forwarding exposed a missing guest `socat` runtime
   dependency. The local listener opens but forwarding the first request fails.
   The UI retains the concrete error and removes the dead link. Signed openSUSE
@@ -49,6 +70,51 @@ that a subsequently implemented flow is absent.
   three-engine proof passed on binary `29073605…`; see the active completion
   record for exact evidence IDs. This closes these tested cases. Failed evidence
   remains retained; broader compatibility and Phase 1 gates remain separate.
+
+## BL-017 — Guest tap loss requires explicit recovery
+
+- Flow/version: network interruption on the twelve-patch backend `0896047d…`.
+- Evidence/reproducer: `artifacts/qualification/owned-link-flap.json`. The test
+  verified the owned WSL registration, private namespace and tap MAC, armed an
+  independent restoration, then brought only that tap down. The tap disappeared;
+  Docker API access survived but all four HTTP probes failed and restoration
+  reported the missing device. This injects guest-device loss, not a demonstrated
+  ordinary Ethernet, Wi-Fi or VPN transition.
+- Impact/adaptation: Docker running does not establish application reachability.
+  Use the explicit Settings restart when workload networking is broken. In the
+  installed test, native Prepare update then Start restored the exact HTTP marker
+  and daemon identity. A second API-verified system/qualification-pod-only
+  injection also passed ordinary native Restart, preserving the Docker marker
+  and installed cluster PVC UID/PV/marker with a Ready node. Recovery can
+  interrupt workloads; restart policies apply.
+  Do not reset data, stop other engines or use global WSL shutdown.
+- Owner/target: upstream networking adapter; investigate automatic device recovery
+  in Phase 2. No upstream issue is claimed. Host sleep qualification is separate.
+- Acceptance/regression: preserve this failed injection, qualify explicit recovery
+  and require exact identity/data/foreign-engine checks for any later automatic fix.
+
+## BL-016 — Standalone settings and whole-engine convenience boundaries
+
+- Flow/version: proxy settings, whole-engine backup/restore, disk relocation and
+  migration from other engines; Rancher source
+  `af6511ad4e065e24e7258f575a0fc090c10cdbda` and OrbWin's recorded patches.
+- Evidence/reproducer: inspect the complete AppSpec, registered CLI constructors
+  and corresponding controllers as recorded in
+  `verification/upstream-capability-audit.md`. No supported transactions for
+  these capabilities were found in those executable interfaces. Electron
+  preferences and proposal documents are not standalone implementations.
+- Impact/adaptation: Settings states direct-network qualification and the absence
+  of an application proxy setting. OrbWin does not alter global proxy/VPN/WSL
+  settings. Object operations and selected-project integration remain available.
+  No live disk copy, implicit migration or product backup success is offered.
+  Test-only offline fixture exports do not establish a product recovery contract.
+- Owner/target: OrbWin upstream adapter and Phase 2 convenience work. No upstream
+  issue has been filed; this is a scoped capability finding, not a reproduced
+  upstream defect.
+- Acceptance/regression: revisit the source/API audit on each upstream update;
+  add such controls only with a documented transaction, cancellation/recovery
+  semantics and real preservation tests. Direct networking does not qualify
+  managed proxies or VPN transitions. BL-006 separately covers resource scope.
 
 ## BL-015 — Kubernetes forwarding lacks the guest socat dependency
 

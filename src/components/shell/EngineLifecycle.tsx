@@ -11,12 +11,18 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { useToast } from "./Toasts";
 
 // One shared lifecycle client for the sidebar switch, first-run screen,
-// settings and command palette. It only issues the existing `engine` operation
-// (rdd `set running=…`); rdd remains the lifecycle owner. The native adapter
+// settings and command palette. Explicit setup, running-state and application
+// replacement requests are forwarded to rdd; it remains the lifecycle owner. The native adapter
 // rejects a second concurrent mutation, so this is not a second orchestrator.
 // Cancelling kills the CLI client, not the daemon: rdd may still converge on
 // the requested state, so every outcome is followed by a fresh status read.
-export type LifecycleAction = "setup" | "start" | "stop" | "restart";
+export type LifecycleAction =
+  | "setup"
+  | "start"
+  | "reconnect"
+  | "stop"
+  | "restart"
+  | "prepareUpdate";
 export type LifecycleResult = {
   action: LifecycleAction;
   success: boolean;
@@ -33,6 +39,8 @@ type Lifecycle = {
   setup: () => void;
   requestStop: () => void;
   requestRestart: () => void;
+  requestReconnect: () => void;
+  requestPrepareUpdate: () => void;
   cancel: () => void;
 };
 const Context = createContext<Lifecycle | null>(null);
@@ -45,8 +53,10 @@ export function useEngineLifecycle() {
 const labels: Record<LifecycleAction, string> = {
   setup: "Set up",
   start: "Start",
+  reconnect: "Reconnect",
   stop: "Stop",
   restart: "Restart",
+  prepareUpdate: "Prepare update",
 };
 
 export function EngineLifecycleProvider({
@@ -62,9 +72,9 @@ export function EngineLifecycleProvider({
   const [startedAt, setStartedAt] = useState(0);
   const [output, setOutput] = useState("");
   const [result, setResult] = useState<LifecycleResult | null>(null);
-  const [confirm, setConfirm] = useState<"setup" | "stop" | "restart" | null>(
-    null,
-  );
+  const [confirm, setConfirm] = useState<
+    "setup" | "stop" | "restart" | "reconnect" | "prepareUpdate" | null
+  >(null);
   const active = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const settled = useRef(onSettled);
@@ -87,13 +97,17 @@ export function EngineLifecycleProvider({
           ]
         : [
             {
-              running: next === "start",
+              running: next === "start" || next === "reconnect",
               stage:
                 next === "setup"
                   ? "Setting up OrbWin…"
                   : next === "start"
                     ? "Starting engine…"
-                    : "Stopping engine…",
+                    : next === "reconnect"
+                      ? "Reconnecting backend…"
+                      : next === "prepareUpdate"
+                        ? "Preparing for application update…"
+                        : "Stopping engine…",
             },
           ];
     let outcome: LifecycleResult = {
@@ -110,7 +124,9 @@ export function EngineLifecycleProvider({
           crypto.randomUUID(),
           next === "setup"
             ? { kind: "setup" }
-            : { kind: "engine", running: step.running },
+            : next === "prepareUpdate"
+              ? { kind: "prepareUpdate" }
+              : { kind: "engine", running: step.running },
           (chunk) => setOutput((previous) => (previous + chunk).slice(-65536)),
           abort.signal,
         );
@@ -148,11 +164,15 @@ export function EngineLifecycleProvider({
         outcome.message =
           next === "setup"
             ? "OrbWin setup completed and the owned engine identity was verified."
-            : next === "stop"
-              ? "Engine stopped. Persistent disks are retained."
-              : next === "start"
-                ? "Engine started and the owned endpoint was verified."
-                : "Engine restarted (stopped, then started) and the owned endpoint was verified.";
+            : next === "prepareUpdate"
+              ? "OrbWin is ready for application replacement. Close OrbWin, then run the installer or uninstaller. Engine data is retained."
+              : next === "reconnect"
+                ? "Backend reconnected and the owned engine endpoint was verified."
+                : next === "stop"
+                  ? "Engine stopped. Persistent disks are retained."
+                  : next === "start"
+                    ? "Engine started and the owned endpoint was verified."
+                    : "Engine restarted (stopped, then started) and the owned endpoint was verified.";
       setResult(outcome);
       notify(
         outcome.success ? "success" : outcome.cancelled ? "info" : "error",
@@ -183,6 +203,12 @@ export function EngineLifecycleProvider({
     requestRestart: () => {
       if (!active.current) setConfirm("restart");
     },
+    requestReconnect: () => {
+      if (!active.current) setConfirm("reconnect");
+    },
+    requestPrepareUpdate: () => {
+      if (!active.current) setConfirm("prepareUpdate");
+    },
     cancel: () => controller.current?.abort(),
   };
   return (
@@ -193,16 +219,24 @@ export function EngineLifecycleProvider({
           title={
             confirm === "setup"
               ? "Prepare OrbWin engine?"
-              : confirm === "stop"
-                ? "Stop OrbWin engine?"
-                : "Restart OrbWin engine?"
+              : confirm === "reconnect"
+                ? "Reconnect OrbWin backend?"
+                : confirm === "prepareUpdate"
+                  ? "Prepare for application update?"
+                  : confirm === "stop"
+                    ? "Stop OrbWin engine?"
+                    : "Restart OrbWin engine?"
           }
           confirmLabel={
             confirm === "setup"
               ? "Continue"
-              : confirm === "stop"
-                ? "Stop engine"
-                : "Restart engine"
+              : confirm === "reconnect"
+                ? "Reconnect backend"
+                : confirm === "prepareUpdate"
+                  ? "Prepare update"
+                  : confirm === "stop"
+                    ? "Stop engine"
+                    : "Restart engine"
           }
           destructive
           onCancel={() => setConfirm(null)}
@@ -215,9 +249,13 @@ export function EngineLifecycleProvider({
           <p>
             {confirm === "setup"
               ? "Creates or resumes the private engine. If a bundled backend update is needed, it stops the owned backend before applying it, interrupting Docker and Kubernetes workloads. Setup verifies the same engine identity before accepting existing data. Guest components may be downloaded. Cancelling stops the client; accepted backend work may continue."
-              : confirm === "stop"
-                ? "Stops the OrbWin guest and interrupts its containers and Kubernetes workloads."
-                : "Stops the OrbWin guest, then starts it again. Running containers and Kubernetes workloads are interrupted; containers restart only according to their restart policy."}{" "}
+              : confirm === "reconnect"
+                ? "Requests the engine's running state again. If the management service has stopped, this backend can restart its guest while reconnecting, interrupting Docker and Kubernetes workloads. Containers resume according to their restart policy. Cancelling stops the request client; accepted backend work may continue."
+                : confirm === "prepareUpdate"
+                  ? "Stops the OrbWin engine and its background service so application files can be replaced. Docker and Kubernetes workloads are interrupted. Close OrbWin after preparation completes, then run the installer or uninstaller."
+                  : confirm === "stop"
+                    ? "Stops the OrbWin guest and interrupts its containers and Kubernetes workloads."
+                    : "Stops the OrbWin guest, then starts it again. Running containers and Kubernetes workloads are interrupted; containers restart only according to their restart policy."}{" "}
             Persistent disks are retained. Docker Desktop, Rancher Desktop and
             your own WSL distributions are not stopped.
           </p>

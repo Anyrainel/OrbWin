@@ -15,7 +15,6 @@ import {
   ChevronRight,
   Database,
   ExternalLink,
-  Folder,
   Layers,
   MoreHorizontal,
   Network,
@@ -31,6 +30,7 @@ import { actionsFor, groupActions, type Action } from "./resources/actions";
 import { ContextMenu, type MenuRequest } from "./resources/ContextMenu";
 import { InfoPanel } from "./resources/InfoPanel";
 import { StatsPanel } from "./resources/StatsPanel";
+import { FilesPanel } from "./resources/FilesPanel";
 import {
   entries,
   imageUsers,
@@ -686,13 +686,12 @@ export function ResourceList({
                     row={detail}
                     containers={containers}
                   />
-                  <div className="capability-note">
-                    <Folder size={16} />
-                    <span>
-                      File browsing is not connected in this development build.
-                    </span>
-                  </div>
                 </>
+              ) : page === "containers" && tab === "Files" ? (
+                <FilesPanel
+                  key={resourceTarget(page, detail)}
+                  target={resourceTarget(page, detail)}
+                />
               ) : page === "containers" && tab === "Stats" ? (
                 <StatsPanel
                   key={resourceTarget(page, detail)}
@@ -721,7 +720,7 @@ export function ResourceList({
                         ? "Logs apply to containers only."
                         : tab === "Terminal"
                           ? "Interactive sessions apply to containers only."
-                          : "Native filesystem access is not connected. Image contents must remain read-only."}
+                          : "File reads use a container's filesystem, including its mounted volumes. Select an existing container, then open Files. Image metadata is available in Info; no temporary container is created or started for this view."}
                   </p>
                   <p>The selected resource has not been changed.</p>
                 </div>

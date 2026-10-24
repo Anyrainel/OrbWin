@@ -213,6 +213,13 @@ func run(input io.Reader, output io.Writer) (int, error) {
 	}
 }
 func main() {
+	if len(os.Args) == 6 && os.Args[1] == "files" {
+		if err := files(os.Stdout, os.Args[2], os.Args[3], os.Args[4], os.Args[5]); err != nil {
+			fmt.Fprintln(os.Stderr, "OrbWin files:", err)
+			os.Exit(125)
+		}
+		return
+	}
 	if len(os.Args) > 1 {
 		if len(os.Args) != 3 || os.Args[1] != "port-status" {
 			fmt.Fprintln(os.Stderr, "Unsupported OrbWin client arguments")

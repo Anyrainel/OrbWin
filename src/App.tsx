@@ -287,15 +287,13 @@ function Shell({
       {
         id: "start",
         section: "Engine",
-        label: "Start engine",
+        label: connected ? "Reconnect backend…" : "Start engine",
         disabledReason:
           lifecycleBusy ??
-          (connected
-            ? "The engine is already running."
-            : canStartEngine(status)
-              ? undefined
-              : "The backend must be verified and its engine offline."),
-        run: lifecycle.start,
+          (connected || canStartEngine(status)
+            ? undefined
+            : "The backend must be verified and its engine offline."),
+        run: connected ? lifecycle.requestReconnect : lifecycle.start,
       },
       {
         id: "stop",

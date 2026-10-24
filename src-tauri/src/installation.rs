@@ -63,6 +63,20 @@ pub(crate) fn upgrade_available() -> bool {
     preparation_mode() == Some(true)
 }
 
+// Keep ownership refusal visible even before a runtime identity exists. A fresh
+// installed application must not describe somebody else's registration as a
+// missing component, or suggest adopting/deleting that engine as recovery.
+pub(crate) fn preparation_issue() -> Option<String> {
+    let directory = match runtime::state_dir() {
+        Ok(directory) => directory,
+        Err(error) => return Some(error),
+    };
+    if runtime::identity_path().ok().as_deref() != Some(directory.join("runtime.json").as_path()) {
+        return None;
+    }
+    registration(&directory.join("home"), "lima-orbwin").err()
+}
+
 fn preparation_mode() -> Option<bool> {
     let Ok(directory) = runtime::state_dir() else {
         return None;
@@ -212,6 +226,77 @@ pub(crate) async fn setup(
         endpoint: engine::ENDPOINT,
     };
     setup_at(&location, output, cancelled).await
+}
+
+pub(crate) async fn prepare_update(
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+) -> Result<Outcome, String> {
+    let directory = runtime::state_dir()?;
+    let home = runtime::cli_path(&directory.join("home"))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0);
+    }
+    let _lock = options.open(directory.join("setup.lock"))
+        .map_err(|_| "Another setup is active or its lock is inaccessible. Wait and retry before preparing an update.")?;
+    let target = engine::target()?;
+    let binary = target.rdd().await?;
+    if target.home().canonicalize().map_err(|e| e.to_string())?
+        != home.canonicalize().map_err(|e| e.to_string())?
+    {
+        return Err("Application update preparation requires the installed engine home. No service change was sent.".into());
+    }
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(r"\\.\pipe\docker-rancher-desktop-orbwin")
+    {
+        Ok(connection) => {
+            drop(connection);
+            engine::check(&target).await?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {
+            return Err(
+                "The engine endpoint is busy or inaccessible. No service change was sent.".into(),
+            )
+        }
+    }
+    let location = SetupLocation {
+        directory,
+        instance: "orbwin",
+        vm: "orbwin",
+        endpoint: engine::ENDPOINT,
+    };
+    stage(output,"Stopping the owned backend for application file replacement. Docker and Kubernetes workloads are interrupted; persistent data is retained…")?;
+    rdd(
+        &binary,
+        &location,
+        &["service", "stop", "--timeout=60s"],
+        None,
+        output,
+        cancelled,
+        70,
+    )
+    .await?;
+    executable_released(&binary)?;
+    Ok(Outcome {success:true,mutation:true,interrupted:false,exit_code:Some(0),message:"OrbWin is ready for application replacement. Close OrbWin, then run the installer or uninstaller. Engine data and registration are retained.".into()})
+}
+
+fn executable_released(binary: &Path) -> Result<(), String> {
+    let mut probe = std::fs::OpenOptions::new();
+    probe.write(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        probe.share_mode(0);
+    }
+    drop(probe.open(binary).map_err(|_|"The backend stopped, but Windows still holds an application file open. Close active OrbWin clients and retry preparation before running the installer. Data is retained.")?);
+    Ok(())
 }
 
 async fn setup_at(
@@ -402,7 +487,10 @@ async fn setup_at(
             output,
             "Provisioning the owned WSL guest. rdd may download and install guest components…",
         )?;
-        let app=serde_json::to_vec(&serde_json::json!({"apiVersion":"app.rancherdesktop.io/v1alpha1","kind":"App","metadata":{"name":"app"},"spec":{"running":true,"namespace":"rancher-desktop","containerEngine":{"name":"moby"},"kubernetes":{"enabled":false},"application":{"addPath":"manual"}}})).map_err(|e|e.to_string())?;
+        // New installations select the qualified 1.35 release: upstream's 1.34
+        // default exceeds the bundled kubectl 1.36 client's supported skew.
+        // This creation-only choice never upgrades an existing App or cluster.
+        let app=serde_json::to_vec(&serde_json::json!({"apiVersion":"app.rancherdesktop.io/v1alpha1","kind":"App","metadata":{"name":"app"},"spec":{"running":true,"namespace":"rancher-desktop","containerEngine":{"name":"moby"},"kubernetes":{"enabled":false,"version":"1.35.3"},"application":{"addPath":"manual"}}})).map_err(|e|e.to_string())?;
         rdd(
             &binary,
             location,
@@ -528,6 +616,24 @@ async fn setup_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn replacement_probe_rejects_mapped_images_and_never_changes_file_contents() {
+        assert!(executable_released(&std::env::current_exe().unwrap()).is_err());
+        let path = std::env::temp_dir().join(format!(
+            "orbwin-replacement-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"retained bytes").unwrap();
+        executable_released(&path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"retained bytes");
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn backend_replacement_requires_the_recorded_home_endpoint_and_identity() {

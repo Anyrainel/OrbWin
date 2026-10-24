@@ -465,3 +465,142 @@ Forty-two Node tests, frontend production build, thirty ordinary Rust tests and
 Clippy pass. Go ordinary, race and explicit synthetic Windows vault tests pass.
 This closes the registry implementation checkpoint; installed-product and
 remaining phase-wide gates still apply.
+
+### Installed packaging, files, measurements and recovery — 2026-10-24
+
+The ordinary per-user install uses `%LOCALAPPDATA%/OrbWin` for immutable files
+and sibling `OrbWinData/home` for state. Native fresh first-run cancellation and
+Resume created daemon `d9c00194-ea9d-439a-8561-6a0ec580fbd5`; this is a fresh
+engine, not migration of the archived development fixture. Installed three-engine
+coexistence passed `orbwin-coexist-f0528dd8`. The twelve-patch rdd hash remains
+`0896047d…`. The former development guest was exported and inspected before only
+that task-created registration was retired; its exact persistent sentinel and
+archives remain under `artifacts/main-qualification-preserved-c8a23249…`.
+
+The separate packaging overlay stages checksum-bound backend/helpers/clients,
+licenses for 772 resolved dependencies (zero missing notices), pinned guest
+source RPMs, MPL source and upstream patches. NSIS current-user installation is
+unsigned. A mapped backend aborts installation before file replacement; the
+native refusal retained the active HTTP marker. Settings' explicit Prepare
+update then stopped the owned service and verified its executable was released.
+Native uninstall with **Remove window preferences** selected removed the app
+but retained runtime identity and WSL disk registration. Reinstall retained the
+daemon and named-volume marker. See `architecture/packaging.md` for file-lock,
+partial-copy and data-lifetime constraints; final-current-bundle QA continues.
+
+Native testing caught and corrected two packaging/startup issues: an incomplete
+custom English file made maintenance labels blank (custom language files replace
+all defaults), and persisted App Settled state could let Start return before a
+resumed management service's guest was ready. Start now also requires current-
+service Lima readiness before actual Docker identity/publication verification.
+The corrected installed Start passed after uninstall/reinstall.
+
+The Files placeholder is replaced by bounded read-only Docker archive access for
+containers, including stopped containers and their mounted volumes. No guest
+shell, host extraction or implicit helper container is used. Native listing and
+UTF-8 preview displayed the exact retained marker from a stopped Nginx container.
+Partial listings, sparse logical data, large/binary/special files, path safety,
+stale reads and cancellation are bounded; see `architecture/container-files.md`.
+The Go helper's ordinary/race tests and Rust argument checks pass.
+
+Installed baseline `orbwin-baseline-744ab973` passed three 37-second restarts,
+stable idle samples, cached/uncached builds and C/F/selected-Ubuntu filesystem
+samples against predefined budgets, retaining identity/data/global configs and
+cleaning its fixtures. The earlier intermittent 502 and cleanup-reporting failure
+remain retained; the passing repeat does not establish their root cause. See
+`baseline-2026-10-24.md`. Installed contained faults `orbwin-faults-39a2f549`
+passed cgroup OOM/137 and tmpfs ENOSPC with named-volume data preservation.
+These are scoped container-pressure tests, not host-wide resource exhaustion.
+
+Native review at the 900x600 client minimum passed settings, light/system
+appearance including the title bar, bounded logs/search/wrap, diagnostic export,
+partial batch outcomes and selected storage cleanup. The two-network batch
+retained the active network, removed the unused network and reported 1/2 success.
+Storage removed only the two stopped test containers, retaining the active HTTP
+service, marker volume and unselected volumes. Filtered log export contained
+exactly one matching line; diagnostic export excluded credentials/workload files.
+Raw UI observations and exports are in `artifacts/qualification/native-installed-*`
+and `native-visible-1499.log`.
+
+Guarded process faults verified exact executable/creation identity before killing
+only the owned management process or hostagent. Management loss left Docker/HTTP
+healthy in all ten samples, while a fresh Settings read correctly failed. Resuming
+management restarted the guest on this pin and interrupted Docker; do not claim
+seamless adoption. Reconnect is therefore an explicit confirmed running-state
+request with interruption wording and actual readiness checks. Its new native
+confirmation still requires final-current-bundle qualification.
+
+Hostagent loss and exact owned `wsl --terminate lima-orbwin` caused rdd's own
+recovery, without a new supervisor or global WSL shutdown. Native reads exposed
+the unavailable/Starting state and Refresh returned connected afterward. Read-only
+postchecks retained daemon `d9c00194…`, the HTTP marker and restart policy, both
+external daemon identities and global config hashes. See `installed-recovery-*`
+JSON records. Ubuntu's selected project export retained its exact mount signature
+`2112:1374236`, and the explicit Linux client still reached the same daemon after
+guest recovery. User distributions were not terminated.
+
+### Final installed bundle regression checks
+
+Installer `fa03b4512dd2a1c69249ee10b8f0d9fb92026018a02b3510b4e44a5f0e7d876d`
+passed actual NSIS silent replacement outside the development host, following
+native Prepare update and window closure. All four installed executable hashes
+matched the installer payload/build records; the runtime identity was unchanged.
+The final installed app started successfully with the existing HTTP fixture's
+`unless-stopped` policy, returned its exact saved marker and retained daemon
+`d9c00194…`. Read-only postchecks again retained both foreign daemon IDs and
+global configuration hashes. This qualifies the bounded startup/publication fix.
+
+Native detach and reattach of the task HTTP container passed on this bundle.
+After detach the Info panel immediately displayed “No connected containers.”;
+after reattach it displayed the container/address and HTTP returned the saved
+marker. The earlier stale inspector result remains the motivation for tagging
+inspect reads with their immutable inventory snapshot and cancelling stale reads.
+
+An additional isolated-network fault did **not** pass automatic recovery:
+bringing only the owned guest tap down caused its removal, so the armed up-link
+restoration could not find the device. Docker stayed reachable, but HTTP did not
+recover automatically. The failed `owned-link-flap.json` is retained. Native
+Prepare update and subsequent Start restored the network and marker without a
+reset or changing the daemon identity. This is observed explicit recovery, not
+evidence of transparent host-network/VPN recovery; see BL-017.
+
+Native confirmed reconnect subsequently passed after a second exact management
+process loss. A fresh Settings read first reported the refused management API;
+the confirmation warned about guest restart/workload interruption. Reconnect
+returned healthy configuration and the exact HTTP marker. Postchecks retained
+the original daemon, both external engines and global configurations. This is
+explicit recovery with an interruption, not seamless adoption.
+
+A second tap-loss injection first refused to run because the newly enabled
+cluster added containers without the ordinary fixture label. The harness was
+then narrowed to permit only API-verified system pods and the exact recorded
+qualification namespace/UID; unknown workloads still refuse. The repeated
+injection reproduced tap removal. Ordinary native Restart recovered HTTP and
+retained the installed PVC UID, PV, marker and Ready node. This qualifies the
+documented explicit recovery without relying on application-update preparation.
+
+The installed optional cluster also enabled successfully. Its initial upstream
+default was 1.34.6; kubectl 1.36.4 warned that this exceeds supported version
+skew. New-App creation now explicitly selects the already-qualified 1.35.3 while
+leaving Kubernetes disabled. Existing Apps are preserved. The installed explicit
+1.34.6 → 1.35.3 upgrade passed and retained PVC UID `df8cf086…`, its PV, the
+unique saved marker and a Ready node (`installed-cluster.json`). This is separate
+from the prior archived development cluster's upgrade evidence.
+
+Final local checks pass: 42 Node tests, 37 ordinary Rust tests (eight opt-in
+qualification tests are separate), Clippy with warnings denied, Rust formatting,
+frontend production build and whitespace validation. The session helper's
+ordinary/race checks passed after the bounded archive parser changes. Review
+covered operation ownership/cancellation, identity checks before mutation,
+installer state separation/quiescence, archive byte/logical/entry limits and
+stale inspector reads. These checks do not prove absence of defects.
+
+The installed D9 engine then passed Testcontainers suite `ed404a2b…` with the
+optional 1.35.3 cluster and both other engines running. Normal Redis/PostgreSQL,
+two concurrent normal workers, intentional assertion failure and cancellation
+all passed. Ryuk remained enabled, no task containers/helpers remained, and
+global client configurations were unchanged. Raw expected-cancellation warnings
+are retained; cancellation is not reported as a successful application exit.
+
+Phase 1 remains in progress until whole-host sleep/resume and final scope/gate
+reconciliation are complete.

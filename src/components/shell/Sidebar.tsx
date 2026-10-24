@@ -160,7 +160,7 @@ export function Sidebar({
               ? "Cancel closes the client only"
               : status?.version
                 ? `Docker ${status.version}`
-                : "Development build"}
+                : "Engine not connected"}
           </small>
         </div>
         {lifecycle.action ? (

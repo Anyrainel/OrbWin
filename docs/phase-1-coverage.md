@@ -1,5 +1,41 @@
 # Phase 1 coverage
 
+## Current qualification — 2026-10-24
+
+The table below supersedes the historical implementation inventory later in this
+file. Phase 1 remains in progress pending physical host sleep/resume and final
+acceptance accounting. Exact evidence and failures are in the
+[completion record](verification/phase-1-completion.md).
+
+| Family | Implemented and observed | Supported adaptation / qualification boundary |
+| --- | --- | --- |
+| Onboarding and lifecycle | Installed first-run cancellation/resume, owned identity, current-start readiness; explicit start/stop/restart and confirmed reconnect; closing UI retains workloads | rdd owns lifecycle. Native Prepare update releases application files; update/uninstall/reinstall retained engine data. |
+| Containers and Compose | Real creation/actions/full inspect, grouping, selection and sequential batch outcomes; run form, Compose lifecycle/logs, resource/build/Compose preservation proofs | Common creation fields are in the form; advanced Docker options use the bundled explicitly targeted CLI or Compose. Partial batch results have no rollback. |
+| Logs, terminal and stats | Native Docker/pod TTY input/resize/Ctrl+C/exit/closure, bounded followed logs/search/wrap/export; actual stats and sparklines | Export saves visible output; broader debug-shell capabilities are not implied. |
+| Images and builds | Pull/tag/remove/inspect, Buildx progress/cancel and retained history; native private pull/private-base build, authentication rejection and Forget | Windows vault helper and private client configs; no global credential/default changes. |
+| Files | Installed container-directory listing and UTF-8 preview, including mounted named-volume data in a stopped container | Read-only Docker archives, bounded scans/entries/previews and honest partial/error/cancel states. No implicit helper workload for standalone images/volumes. See [contract](architecture/container-files.md). |
+| Volumes and storage | Create/attach/inspect/remove, in-use rejection, sentinel retention across restarts/upgrades; native disk usage and selected cleanup | Whole-engine backup/relocation has no supported standalone transaction in the inspected backend (BL-016). Unselected volumes are retained. |
+| Networks and access | Native create/remove/connect/disconnect and refreshed Info; scoped localhost TCP/UDP allocation, conflicts, Windows/WSL/delegated client proofs | LAN/IPv6 and automatic names/HTTPS remain unqualified conveniences. Guest-device loss needs explicit recovery (BL-017); it does not qualify ordinary host-network/VPN transitions. |
+| Kubernetes | Optional enable/disable/version controls, workloads/claims/apply/UID-safe deletion, followed logs, native pod TTY and persistent pod/service localhost forwarding; version upgrade retains PVC/PV/sentinel | Pin-specific guest dependencies are bundled. Workload cluster and backend management API are separate. Forward cancellation retains the pod. |
+| WSL integration | Selected non-root Ubuntu connect/inspect/disconnect; real bind identity, Linux clients/Compose/Buildx/credentials, source replacement, idle/restart preservation and native terminal launch | A selected export needs a live user-distro session; reconnect guidance is explicit. Transparent arbitrary `/home` mapping remains later convenience. |
+| Settings | Native theme/title bar, navigation/keyboard and minimum-size review; explicit lifecycle/cluster/version controls and client guidance | Requested resources are distinguished from shared WSL allocation (BL-006); unsupported proxy transactions are explained (BL-016). Tray/autostart and public auto-update remain later UI conveniences. |
+| Recovery and diagnostics | Installed management/hostagent/owned-guest faults, fresh errors/retry and exact preserved markers; native bounded diagnostic export; contained cgroup OOM/tmpfs ENOSPC | Reconnect can restart the guest and interrupt workloads. No reset or global WSL shutdown as routine recovery. Physical sleep/resume remains open. |
+| Compatibility and packaging | Twelve replayable patches; installed three-engine workloads/conflicts/restart; repeated/concurrent Testcontainers/Ryuk; C/F/Ubuntu paths; actual NSIS install/refusal/update/uninstall/reinstall and file/data retention | One explicit Windows x64 host matrix, unsigned local installer. Additional OS/client versions and public signing/distribution need qualification. See [packaging](architecture/packaging.md) and [baseline](verification/baseline-2026-10-24.md). |
+| Migration | Actual standalone source/API audit completed | No source-version-specific migration transaction found. No automatic interchange assumed; custom migration remains Phase 2 (BL-016). |
+
+These adaptations distinguish supported contracts, missing standalone capabilities
+and later conveniences. They do not remove ordinary Docker or local Kubernetes
+development from Phase 1. Independent OrbStack research was not edited.
+
+Reset accounting: the Settings page explicitly explains Docker-only and full
+product reset, and directs space recovery to selected-object cleanup. Separate
+VM/control-plane deletion primitives do not establish either combined reset
+contract. No reset success is offered. The source audit records this custom
+transaction gap alongside whole-engine backup/relocation; it is not a claim
+that upstream cannot delete a VM.
+
+## Historical inventory before completion work
+
 Updated 2026-10-24 Pacific. Phase 1 is **in progress**; no milestone or phase exit
 is claimed. An unavailable UI branch records current implementation status, not
 an accepted feature exclusion. The full scope in the roadmap remains required.

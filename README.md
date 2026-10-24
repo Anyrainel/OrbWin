@@ -10,17 +10,33 @@ Rancher `rdd` build run locally. Management startup, an owned WSL guest, Linux
 container execution and a Redis/PostgreSQL/Compose/Buildx baseline have passed.
 Typed resource operations, Buildx/Compose, interactive exec, Kubernetes workloads
 and Windows Node Testcontainers have also passed scoped runtime proofs.
-**Phase 1 is not complete.** Full native UI acceptance, simultaneous-engine
-qualification, user-WSL integration, first-run/failure coverage and packaging remain open.
+**Phase 1 qualification is in progress.** Installed first-run, native developer
+flows, simultaneous-engine operation, selected Ubuntu integration, packaging,
+fault recovery and measured budgets now have recorded evidence. Physical host
+sleep/resume and final acceptance accounting remain open.
 The [2026-10-24 readiness reassessment](docs/verification/phase-1-readiness-2026-10-24.md)
 records fresh passing workload checks, a fixed Run-form mount defect, and the
 failed/open phase gates at that checkpoint. Implementation continued afterward.
 
 Implementation has continued beyond that assessment: see the
 [active Phase 1 completion record](docs/verification/phase-1-completion.md).
-CLI/Compose drive mounts now pass scoped runtime proofs; clean first-run setup,
-cancellation and resume also pass the adapter proof. Full phase acceptance and
-packaging remain in progress.
+The unsigned per-user NSIS installer includes the pinned backend, guest,
+Windows/Linux clients, helpers and third-party notices. Actual install,
+replacement, uninstall and reinstall retained the separate engine data.
+See [packaging](docs/architecture/packaging.md) and
+[current scope](docs/phase-1-coverage.md) for boundaries and evidence.
+
+Build the local installer after the backend/helper/tool steps below:
+
+```powershell
+npm run package:prepare
+npm run package:build
+```
+
+The output is `src-tauri/target/release/bundle/nsis/OrbWin_0.1.0_x64-setup.exe`.
+Before replacing an installed build, use Settings → Docker engine → Prepare for
+application update, then close OrbWin. This stops owned workloads and retains
+their data in `%LOCALAPPDATA%/OrbWinData`; application files are separate.
 
 ## Local development (Windows x64)
 

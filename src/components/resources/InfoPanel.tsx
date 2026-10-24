@@ -119,15 +119,23 @@ export function InfoPanel({
   containers?: Row[];
 }) {
   const id = target(page, row);
-  const [inspect, setInspect] = useState<Inspect>({ state: "pending" });
+  const [snapshot, setSnapshot] = useState<{
+    page: Page;
+    row: Row;
+    value: Inspect;
+  } | null>(null);
+  const inspect: Inspect =
+    snapshot?.page === page && snapshot.row === row
+      ? snapshot.value
+      : { state: "pending" };
   const [retry, setRetry] = useState(0);
-  // Read-only full inspect for structured sections. Re-read when the listed
-  // state changes; a failed read falls back to the list fields only.
-  const revision = `${id}:${text(row.State)}`;
+  // Inventory rows are immutable snapshots. Re-read on every new snapshot:
+  // attachments/configuration can change without changing a list's State.
+  // Tag results with their source row so a late old read can never look current.
   useEffect(() => {
     const abort = new AbortController();
     let output = "";
-    setInspect({ state: "pending" });
+    setSnapshot({ page, row, value: { state: "pending" } });
     retryBusyRead(() => {
       output = "";
       return backend.run(
@@ -142,25 +150,33 @@ export function InfoPanel({
       .then((outcome) => {
         if (abort.signal.aborted) return;
         if (!outcome.success)
-          return setInspect({ state: "failed", message: outcome.message });
+          return setSnapshot({
+            page,
+            row,
+            value: { state: "failed", message: outcome.message },
+          });
         const parsed = JSON.parse(output);
         const data = Array.isArray(parsed) ? parsed[0] : parsed;
         if (!data || typeof data !== "object")
           throw new Error("The engine returned no inspect object.");
-        setInspect({ state: "ready", data });
+        setSnapshot({ page, row, value: { state: "ready", data } });
       })
       .catch((error) => {
         if (!abort.signal.aborted)
-          setInspect({
-            state: "failed",
-            message:
-              error instanceof SyntaxError
-                ? "Inspect output could not be parsed; it may have exceeded the output limit."
-                : String(error),
+          setSnapshot({
+            page,
+            row,
+            value: {
+              state: "failed",
+              message:
+                error instanceof SyntaxError
+                  ? "Inspect output could not be parsed; it may have exceeded the output limit."
+                  : String(error),
+            },
           });
       });
     return () => abort.abort();
-  }, [page, revision, retry]);
+  }, [page, id, row, retry]);
   const data = inspect.state === "ready" ? inspect.data : undefined;
   const portList = publishedPorts(row);
   const linkable = isRunning(row);
@@ -324,14 +340,21 @@ export function InfoPanel({
         />
         <Section
           title="Connected containers"
-          items={Object.values(
-            (get(data, "Containers") as Record<string, unknown>) ?? {},
-          ).map(
-            (entry): Item => [
-              String(get(entry, "Name")),
-              get(entry, "IPv4Address") || "No address assigned",
-            ],
-          )}
+          items={
+            data &&
+            !Object.keys(
+              (get(data, "Containers") as Record<string, unknown>) ?? {},
+            ).length
+              ? [["Attachments", "No connected containers."]]
+              : Object.values(
+                  (get(data, "Containers") as Record<string, unknown>) ?? {},
+                ).map(
+                  (entry): Item => [
+                    String(get(entry, "Name")),
+                    get(entry, "IPv4Address") || "No address assigned",
+                  ],
+                )
+          }
         />
         <Pairs title="Labels" pairs={Object.entries(labels(row))} />
       </>

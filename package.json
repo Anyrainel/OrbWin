@@ -16,6 +16,8 @@
     "backend:bundle": "node scripts/build-backend.mjs --with-distro",
     "session:build": "node scripts/build-session.mjs",
     "credentials:build": "node scripts/build-credentials.mjs",
+    "package:prepare": "node scripts/stage-package.mjs",
+    "package:build": "tauri build --config src-tauri/tauri.package.conf.json --bundles nsis",
     "backend:proof": "node scripts/prove-control-plane.mjs",
     "backend:guest-proof": "node scripts/prove-guest.mjs",
     "qualify:workloads": "node scripts/qualify-workloads.mjs",

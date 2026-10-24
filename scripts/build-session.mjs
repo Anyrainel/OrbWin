@@ -12,6 +12,7 @@ const sourceNames = [
   "main.go",
   "kube.go",
   "publication.go",
+  "files.go",
   "go.mod",
   "go.sum",
 ];

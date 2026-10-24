@@ -95,9 +95,14 @@ function EngineLifecycleControls({
               </button>
             )}
             {connected && !restart && (
-              <button className="button" onClick={lifecycle.requestStop}>
-                Stop engine…
-              </button>
+              <>
+                <button className="button" onClick={lifecycle.requestReconnect}>
+                  Reconnect backend…
+                </button>
+                <button className="button" onClick={lifecycle.requestStop}>
+                  Stop engine…
+                </button>
+              </>
             )}
             {restart && (
               <button
@@ -150,6 +155,7 @@ export function Settings({
   const settings = currentSettings(settingsRead);
   const kubernetes = kubernetesState(settings);
   const connected = engineState(status) === "running";
+  const lifecycle = useEngineLifecycle();
   const [wsl, setWsl] = useState<backend.Diagnostic[] | null>(null);
   const [wslError, setWslError] = useState("");
   const [wslBusy, setWslBusy] = useState(false);
@@ -312,6 +318,26 @@ export function Settings({
               by a start through the backend.
             </p>
             <EngineLifecycleControls status={status} restart />
+            <h2>Application replacement</h2>
+            <p>
+              Before installing another OrbWin build or uninstalling, prepare
+              the application to release its files. This stops OrbWin workloads
+              and retains their data. Close the window after preparation
+              completes.
+            </p>
+            <button
+              className="button"
+              disabled={
+                lifecycle.action !== null ||
+                (!connected && !canStartEngine(status))
+              }
+              onClick={lifecycle.requestPrepareUpdate}
+            >
+              Prepare for application update…
+            </button>
+            {lifecycle.result?.action === "prepareUpdate" && (
+              <p role="status">{lifecycle.result.message}</p>
+            )}
             <h2>Raw configuration</h2>
             <p>Read the backend App resource as JSON without changing it.</p>
             <EngineControls lifecycle={false} />
@@ -345,11 +371,9 @@ export function Settings({
               <Row term="kubeconfig">
                 OrbWin uses its own mirrored kubeconfig from the owned backend
                 home for every cluster view and command. It does not switch your
-                current kubectl context. In this development build the backend
-                runs with the owned home as its profile, so the
-                rancher-desktop-orbwin context is merged there, not into your
-                own ~/.kube/config; this is not yet qualified for an installed
-                build.
+                current kubectl context. The backend runs with the owned home as
+                its profile, so the rancher-desktop-orbwin context is merged
+                there, not into your own ~/.kube/config.
               </Row>
               <Row term="Service access">
                 Port forwards opened from Pods and Services listen on localhost
@@ -413,6 +437,14 @@ export function Settings({
               for VPN, managed-device and conflict behavior before OrbWin
               changes them for you (project decisions P09, P10).
             </p>
+            <h2>Proxy and managed networks</h2>
+            <p className="notice">
+              This release is qualified on direct networking. The selected
+              backend has no application proxy setting. OrbWin does not change
+              Windows proxy, VPN or WSL network settings. Private proxies and
+              VPN transitions require separate qualification; changing Docker
+              client proxy values alone does not configure engine image pulls.
+            </p>
           </>
         )}
         {tab === "storage" && (
@@ -438,9 +470,11 @@ export function Settings({
               </Row>
             </dl>
             <p className="notice">
-              CPU and memory editing is unavailable until WSL resource scope is
-              qualified (BL-006). The requested values above were not observed
-              to limit the WSL environment. No global WSL settings are changed.
+              WSL 2 uses a shared virtual-machine resource pool on this host.
+              These requested values do not provide per-engine limits in the
+              qualified configuration (BL-006). Windows WSL allocation changes
+              can affect every distribution and engine; OrbWin leaves those
+              global settings unchanged.
             </p>
             <h2>WSL</h2>
             <p>

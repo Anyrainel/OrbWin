@@ -54,9 +54,34 @@ pub(crate) fn tools_dir() -> PathBuf {
     }
 }
 pub(crate) fn state_dir() -> Result<PathBuf, String> {
-    std::env::var_os("LOCALAPPDATA")
-        .map(|path| PathBuf::from(path).join("OrbWin"))
-        .ok_or("Windows did not provide LocalAppData for this user.".into())
+    let local = std::env::var_os("LOCALAPPDATA")
+        .ok_or("Windows did not provide LocalAppData for this user.")?;
+    let root = PathBuf::from(local)
+        .canonicalize()
+        .map_err(|_| "Cannot resolve LocalAppData")?;
+    let state = root.join("OrbWinData");
+    let resolved = if state.exists() {
+        state
+            .canonicalize()
+            .map_err(|_| "Cannot resolve the engine state directory")?
+    } else {
+        state.clone()
+    };
+    let executable =
+        std::env::current_exe().map_err(|_| "Cannot resolve the application location")?;
+    let installation = executable
+        .parent()
+        .ok_or("Application directory is missing")?
+        .canonicalize()
+        .map_err(|_| "Cannot resolve the application directory")?;
+    separate_state(&installation, &resolved)?;
+    Ok(state)
+}
+fn separate_state(installation: &std::path::Path, state: &std::path::Path) -> Result<(), String> {
+    if installation.starts_with(state) || state.starts_with(installation) {
+        return Err("The application installation overlaps OrbWinData. Reinstall OrbWin in a separate folder before preparing its engine. Existing data was retained.".into());
+    }
+    Ok(())
 }
 pub(crate) fn identity_path() -> Result<PathBuf, String> {
     #[cfg(debug_assertions)]
@@ -363,6 +388,30 @@ pub(crate) fn private_auth_defaults(value: &mut serde_json::Value) -> Result<boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn installed_resources_and_persistent_state_must_be_separate() {
+        for (installation, state) in [
+            ("C:/Local/OrbWin", "C:/Local/OrbWinData"),
+            ("C:/Programs/OrbWin", "C:/Local/OrbWinData"),
+        ] {
+            separate_state(
+                std::path::Path::new(installation),
+                std::path::Path::new(state),
+            )
+            .unwrap();
+        }
+        for (installation, state) in [
+            ("C:/Local/OrbWinData", "C:/Local/OrbWinData"),
+            ("C:/Local", "C:/Local/OrbWinData"),
+            ("C:/Local/OrbWinData/app", "C:/Local/OrbWinData"),
+        ] {
+            assert!(separate_state(
+                std::path::Path::new(installation),
+                std::path::Path::new(state)
+            )
+            .is_err());
+        }
+    }
     #[test]
     fn anonymous_client_does_not_inherit_helpers_or_erase_private_auth() {
         let mut empty = serde_json::json!({"unknown": 9007199254740993u64});

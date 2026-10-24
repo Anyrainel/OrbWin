@@ -275,3 +275,24 @@
   stroke: var(--border-strong);
   vector-effect: non-scaling-stroke;
 }
+.files-panel .action-row {
+  flex-wrap: wrap;
+  align-items: end;
+}
+.files-panel input {
+  min-width: 220px;
+  max-width: 100%;
+}
+.file-preview {
+  max-height: 55vh;
+  max-width: 100%;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.files-panel td {
+  overflow-wrap: anywhere;
+}
