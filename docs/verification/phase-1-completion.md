@@ -277,3 +277,59 @@ fails. Successful command output no longer claims a refresh is still underway.
 The frontend build and 36 Node tests pass after these changes. The earlier
 hand-written netcat HTTP fixture answered simple clients but reset Chrome requests;
 the maintained Nginx fixture supplied the browser acceptance check.
+
+Kubernetes completion now adds a read-only management ConfigMap catalog and
+native exact-release selection. Patch 0009 resolves the installer release from
+that same pinned catalog (including `+k3s3` entries) and enforces forward patch
+or one-minor transitions in App admission. A version change requires readiness
+and settlement at the existing generation; repeating the same version remains
+available for recovery. No downgrade, skipped minor, clearing an established
+version or reset is offered. The architecture note records interruption and
+cancellation semantics. Enable/disable confirmations now explicitly explain
+that applying restarts the guest and interrupts Docker workloads too.
+
+All nine patches replay to their locked hashes. Controller/catalog Go tests,
+38 Node tests, frontend build, Clippy and 26 ordinary Rust tests pass (eight
+runtime tests remain opt-in). Binary `7e93d27234d87ab93c2d198d36899ac8699d8acc4c2670ab812e43c0bb7d8334`
+passed the existing owned-guest upgrade proof (`1c561929…`), including service
+and mount suites, with the original daemon identity retained. Native enablement
+reached KubernetesReady/Settled at 05:15:10 Pacific. Current cluster, retained-PVC
+version-upgrade and refreshed coexistence qualification remain in progress;
+the old eight-patch record does not qualify the new binary.
+
+Native version apply completed at 05:20:05 Pacific, from desired 1.34.6 to
+observed server `v1.35.3+k3s1`. The scoped upgrade fixture retained its PVC UID,
+PV name and a unique file written once before the upgrade. A server-admission
+dry-run rejected the downgrade and left the App generation/version unchanged.
+The ordinary native cluster adapter proof (`cluster-1792844143960`) also passed
+apply/readiness/inspection/logs, wrong-UID deletion refusal and exact cleanup.
+
+Log inspection exposed concurrent provisioning: Lima's direct WSL `boot.sh`
+invocation retried without DNS in the original namespace, while the existing
+systemd invocation successfully installed the release in the engine namespace.
+Patch 0010 guards every stateful product script. The direct path waits for that
+unit; only the namespace owned by network-namespace.service may mutate services.
+Behavior tests execute the generated shell guard with controlled namespace/unit
+observations, covering success, failure, deadline and an unknown private namespace.
+The full ten-patch clean replay is `patch-replay-26d9ff07…`; controller, bridge and
+host-switch race tests pass.
+
+Binary `e3892a1f2bc994837d1f6285c2b0a85df7e76f3926bca70b80422c293225f064`
+passed the owned upgrade proof `7839c0d4…`, retaining the original daemon and
+the same cluster fixture's PVC/PV/sentinel. Requalification records the exact
+successful prior-to-current backend proof chain rather than overwriting identity.
+The direct boot log now reports systemd completion and skips duplicate scripts;
+the unit is exited/success and no installer curl remains. Build metadata now
+reflects the effective replaced Kubernetes modules: kubectl client 1.36.4, with
+successful full version output against server 1.35.3. The original metadata
+parse failure stays in the fixture's prior-failure record.
+
+The native forward readiness/error check then found BL-015 (`socat not found`).
+Do not treat the preceding listener-only readiness as HTTP acceptance. The
+failed link was removed, error output remained inspectable, and the pod survived.
+Signed guest-dependency installation is currently a scoped proof; bundled repair
+and native forward/log/terminal acceptance remain open. Separately, storage
+cleanup now cancels its current client on navigation and releases progress even
+if its following refresh fails. Read-only detail/catalog reads have bounded
+contention retries with cancellation; identity/transport failures are not retried.
+Frontend build, 41 Node tests and Clippy pass for this checkpoint.

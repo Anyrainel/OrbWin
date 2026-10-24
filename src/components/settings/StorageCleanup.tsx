@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as backend from "../../backend";
 import { DiskUsage } from "./DiskUsage";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
@@ -93,6 +93,7 @@ export function StorageCleanup({
     Partial<Record<CleanupKind, Result[]>>
   >({});
   const controller = useRef<AbortController | null>(null);
+  useEffect(() => () => controller.current?.abort(), []);
   const candidates = useMemo<Record<CleanupKind, Candidate[]>>(
     () => ({
       containers: stoppedContainers(inventory?.containers ?? []),
@@ -156,17 +157,23 @@ export function StorageCleanup({
           if (item.ok) delete next[`${kind}:${item.target}`];
         return next;
       });
-      await onMutation();
-      setProgress(null);
+      let refreshError = "";
+      try {
+        await onMutation();
+      } catch (error) {
+        refreshError = ` State refresh failed: ${String(error)}. Refresh before another cleanup.`;
+      } finally {
+        setProgress(null);
+      }
       const removed = outcome.filter((item) => item.ok).length;
       const failed = outcome.length - removed;
       const skipped = items.length - outcome.length;
       notify(
-        failed ? "error" : removed ? "success" : "info",
+        failed || refreshError ? "error" : removed ? "success" : "info",
         `${removed} of ${items.length} ${kind} removed` +
           (failed ? `, ${failed} rejected or failed` : "") +
           (skipped ? `, ${skipped} not attempted after cancel` : "") +
-          ". See Storage settings for details.",
+          `. See Storage settings for details.${refreshError}`,
       );
     }
   }

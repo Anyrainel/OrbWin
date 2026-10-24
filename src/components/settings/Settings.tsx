@@ -8,6 +8,7 @@ import { useElapsed, useEngineLifecycle } from "../shell/EngineLifecycle";
 import type { ThemePreference } from "../shell/theme";
 import { applyState, condition, kubernetesState } from "./app-settings-model";
 import { StorageCleanup } from "./StorageCleanup";
+import { KubernetesVersions } from "./KubernetesVersions";
 import { formatSize } from "./storage-model";
 import { currentSettings, type AppSettingsRead } from "./useAppSettings";
 
@@ -297,8 +298,8 @@ export function Settings({
                 </p>
               </Row>
               <Row term="Coexistence">
-                Docker Desktop and Rancher Desktop keep their own endpoints.
-                Use an explicit endpoint when choosing which engine an external
+                Docker Desktop and Rancher Desktop keep their own endpoints. Use
+                an explicit endpoint when choosing which engine an external
                 client should use. OrbWin does not switch your global defaults.
               </Row>
             </dl>
@@ -337,7 +338,6 @@ export function Settings({
               )}
               <Row term="Version">
                 {settings?.kubernetesVersion ?? "Backend default"}
-                {" · version selection is not available yet"}
               </Row>
               <Row term="kubeconfig">
                 OrbWin uses its own mirrored kubeconfig from the owned backend
@@ -368,6 +368,10 @@ export function Settings({
                     ? "enable"
                     : "disable"
               }
+            />
+            <KubernetesVersions
+              settings={settings}
+              verified={settingsRead.kind === "ready"}
             />
             <ConfigurationState
               read={settingsRead}

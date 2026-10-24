@@ -1,0 +1,204 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_controller.go b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+index 4936cb863..2dd87aa37 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_controller.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_controller.go
+@@ -31,6 +31,7 @@ import (
+ 
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/apis/app/v1alpha1"
+ 	limav1alpha1 "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/apis/lima/v1alpha1"
++	k3sversionscontrollers "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/controllers/app/k3sversions/controllers"
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/controllers/app/predicates"
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/controllers/base"
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
+@@ -164,6 +165,18 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 	}
+ 	// the spec drives them directly. Lima falls back to its own default when a
+ 	// key is absent, which covers the unset case (cpus 0, memory nil).
++	kubernetesRelease := ""
++	if spec.Kubernetes.Enabled {
++		versions, err := k3sversionscontrollers.GetVersions()
++		if err != nil {
++			return "", fmt.Errorf("read Kubernetes release catalog: %w", err)
++		}
++		var supported bool
++		kubernetesRelease, supported = versions.Versions[spec.Kubernetes.Version]
++		if !supported {
++			return "", fmt.Errorf("Kubernetes version %q has no supported release", spec.Kubernetes.Version)
++		}
++	}
+ 	lines := []string{ownedWindowsTemplate(baseTemplate)}
+ 	if cpus := spec.VirtualMachine.CPUs; cpus > 0 {
+ 		lines = append(lines, fmt.Sprintf("cpus: %d", cpus))
+@@ -187,6 +200,7 @@ func applySpecToTemplate(baseTemplate string, spec v1alpha1.AppSpec, kubernetesP
+ 		fmt.Sprintf("  GUEST_LOG_DIR: %q", guestLogDir()),
+ 		fmt.Sprintf("  KUBERNETES_ENABLED: %v", spec.Kubernetes.Enabled),
+ 		fmt.Sprintf("  KUBERNETES_VERSION: %s", spec.Kubernetes.Version),
++		fmt.Sprintf("  KUBERNETES_RELEASE: %q", kubernetesRelease),
+ 		fmt.Sprintf("  KUBERNETES_PORT: %d", kubernetesPort),
+ 		"",
+ 	)
+diff --git a/rdd/pkg/controllers/app/app/controllers/app_webhook.go b/rdd/pkg/controllers/app/app/controllers/app_webhook.go
+index e65908994..8ff056f9b 100644
+--- a/rdd/pkg/controllers/app/app/controllers/app_webhook.go
++++ b/rdd/pkg/controllers/app/app/controllers/app_webhook.go
+@@ -9,7 +9,11 @@ import (
+ 	"errors"
+ 	"fmt"
+ 
++	"github.com/coreos/go-semver/semver"
++
++	apimeta "k8s.io/apimachinery/pkg/api/meta"
+ 	"k8s.io/apimachinery/pkg/api/resource"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+ 	ctrlwebhookadmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+ 
+ 	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/apis/app/v1alpha1"
+@@ -41,8 +45,41 @@ func (v *AppValidator) ValidateCreate(_ context.Context, obj *v1alpha1.App) (ctr
+ }
+ 
+ // ValidateUpdate validates an updated App resource.
+-func (v *AppValidator) ValidateUpdate(_ context.Context, _, newObj *v1alpha1.App) (ctrlwebhookadmission.Warnings, error) {
+-	return v.validate(newObj)
++func (v *AppValidator) ValidateUpdate(_ context.Context, oldObj, newObj *v1alpha1.App) (ctrlwebhookadmission.Warnings, error) {
++	if warnings, err := v.validate(newObj); err != nil {
++		return warnings, err
++	}
++	return nil, validateKubernetesTransition(oldObj, newObj)
++}
++
++// The App and its observed generation remain the authority. Never advance
++// through several desired versions before the existing cluster actually settles.
++// Repeating the same version is allowed, including after client cancellation.
++func validateKubernetesTransition(oldObj, newObj *v1alpha1.App) error {
++	if oldObj == nil || oldObj.Spec.Kubernetes.Version == "" || oldObj.Spec.Kubernetes.Version == newObj.Spec.Kubernetes.Version {
++		return nil
++	}
++	previous, err := semver.NewVersion(oldObj.Spec.Kubernetes.Version)
++	if err != nil {
++		return fmt.Errorf("the previous Kubernetes version cannot be verified: %w", err)
++	}
++	next, err := semver.NewVersion(newObj.Spec.Kubernetes.Version)
++	if err != nil {
++		return fmt.Errorf("a previously selected Kubernetes version cannot be cleared or replaced with an invalid version")
++	}
++	if next.LessThan(*previous) || next.Major != previous.Major || next.Minor > previous.Minor+1 {
++		return fmt.Errorf("Kubernetes version changes require a forward patch or one minor upgrade; downgrades and skipped minor versions are unsupported")
++	}
++	if !oldObj.Spec.Running || !oldObj.Spec.Kubernetes.Enabled || !newObj.Spec.Kubernetes.Enabled {
++		return fmt.Errorf("enable the current Kubernetes cluster and wait for readiness before changing its version")
++	}
++	for _, kind := range []string{v1alpha1.AppConditionSettled, v1alpha1.AppConditionKubernetesReady} {
++		condition := apimeta.FindStatusCondition(oldObj.Status.Conditions, kind)
++		if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != oldObj.Generation {
++			return fmt.Errorf("wait for the current Kubernetes cluster to be ready and settled before changing its version")
++		}
++	}
++	return nil
+ }
+ 
+ // ValidateDelete is a no-op; App deletion is governed by the cleanup finalizer.
+diff --git a/rdd/pkg/controllers/app/app/controllers/kubernetes_version_test.go b/rdd/pkg/controllers/app/app/controllers/kubernetes_version_test.go
+new file mode 100644
+index 000000000..d88514fbb
+--- /dev/null
++++ b/rdd/pkg/controllers/app/app/controllers/kubernetes_version_test.go
+@@ -0,0 +1,86 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: exact catalog releases and data-preserving transitions.
++package controllers
++
++import (
++	"strings"
++	"testing"
++
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/apis/app/v1alpha1"
++	k3sversionscontrollers "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/controllers/app/k3sversions/controllers"
++)
++
++func TestKubernetesVersionTransitions(t *testing.T) {
++	ready := &v1alpha1.App{}
++	ready.Generation = 8
++	ready.Spec.Running = true
++	ready.Spec.Kubernetes = v1alpha1.KubernetesSpec{Enabled: true, Version: "1.33.9"}
++	for _, kind := range []string{v1alpha1.AppConditionSettled, v1alpha1.AppConditionKubernetesReady} {
++		ready.Status.Conditions = append(ready.Status.Conditions, metav1.Condition{Type: kind, Status: metav1.ConditionTrue, ObservedGeneration: 8})
++	}
++	for _, tc := range []struct {
++		name, version string
++		change        func(*v1alpha1.App, *v1alpha1.App)
++		allowed       bool
++	}{
++		{name: "repeat", version: "1.33.9", allowed: true},
++		{name: "patch", version: "1.33.10", allowed: true},
++		{name: "minor", version: "1.34.6", allowed: true},
++		{name: "downgrade", version: "1.33.8"},
++		{name: "skip", version: "1.35.3"},
++		{name: "major", version: "2.0.0"},
++		{name: "clear", version: ""},
++		{name: "old invalid", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Spec.Kubernetes.Version = "unknown" }},
++		{name: "stale settled", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Status.Conditions[0].ObservedGeneration = 7 }},
++		{name: "not ready", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Status.Conditions[1].Status = metav1.ConditionFalse }},
++		{name: "no readiness", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Status.Conditions = nil }},
++		{name: "disabled", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Spec.Kubernetes.Enabled = false }},
++		{name: "disabling", version: "1.34.6", change: func(_, next *v1alpha1.App) { next.Spec.Kubernetes.Enabled = false }},
++		{name: "stopped", version: "1.34.6", change: func(old, _ *v1alpha1.App) { old.Spec.Running = false }},
++		{name: "same version recovery while unready", version: "1.33.9", allowed: true, change: func(old, _ *v1alpha1.App) { old.Status.Conditions = nil }},
++		{name: "initial selection", version: "1.34.6", allowed: true, change: func(old, _ *v1alpha1.App) { old.Spec.Kubernetes.Version = ""; old.Status.Conditions = nil }},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			old, next := ready.DeepCopy(), ready.DeepCopy()
++			next.Spec.Kubernetes.Version = tc.version
++			if tc.change != nil {
++				tc.change(old, next)
++			}
++			err := validateKubernetesTransition(old, next)
++			if (err == nil) != tc.allowed {
++				t.Fatalf("allowed=%v, error=%v", tc.allowed, err)
++			}
++		})
++	}
++}
++
++func TestTemplateUsesExactCatalogKubernetesRelease(t *testing.T) {
++	versions, err := k3sversionscontrollers.GetVersions()
++	if err != nil {
++		t.Fatal(err)
++	}
++	var unusual string
++	for bare, release := range versions.Versions {
++		if !strings.HasSuffix(release, "+k3s1") {
++			unusual = bare
++			break
++		}
++	}
++	if unusual == "" {
++		t.Fatal("catalog no longer has a non-k3s1 release; update this regression fixture")
++	}
++	spec := v1alpha1.AppSpec{Kubernetes: v1alpha1.KubernetesSpec{Enabled: true, Version: unusual}}
++	got, err := applySpecToTemplate("", spec, 7443)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !strings.Contains(got, `KUBERNETES_RELEASE: "`+versions.Versions[unusual]+`"`) {
++		t.Fatalf("exact catalog release missing: %s", got)
++	}
++	spec.Kubernetes.Version = "999.0.0"
++	if _, err := applySpecToTemplate("", spec, 7443); err == nil {
++		t.Fatal("unsupported release produced an install template")
++	}
++}
+diff --git a/rdd/pkg/controllers/app/app/lima-template.yaml b/rdd/pkg/controllers/app/app/lima-template.yaml
+index c6b46849f..5a6f66e14 100644
+--- a/rdd/pkg/controllers/app/app/lima-template.yaml
++++ b/rdd/pkg/controllers/app/app/lima-template.yaml
+@@ -162,7 +162,7 @@ provision:
+     esac
+ 
+     if [[ $PARAM_KUBERNETES_ENABLED == "true" ]]; then
+-        export INSTALL_K3S_VERSION="v${PARAM_KUBERNETES_VERSION}+k3s1"
++        export INSTALL_K3S_VERSION="$PARAM_KUBERNETES_RELEASE"
+         INSTALLED_VERSION=""
+         # awk must read to EOF; `{print; exit}` closes the pipe while k3s
+         # is still writing, and the SIGPIPE propagates via pipefail + errexit.

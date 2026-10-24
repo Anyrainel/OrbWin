@@ -189,6 +189,14 @@ pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
             "patches/rdd/0008-windows-port-publication.patch",
             include_bytes!("../../patches/rdd/0008-windows-port-publication.patch"),
         ),
+        (
+            "patches/rdd/0009-kubernetes-version-selection.patch",
+            include_bytes!("../../patches/rdd/0009-kubernetes-version-selection.patch"),
+        ),
+        (
+            "patches/rdd/0010-single-provisioning-owner.patch",
+            include_bytes!("../../patches/rdd/0010-single-provisioning-owner.patch"),
+        ),
     ];
     let actual = manifest["patches"]
         .as_array()

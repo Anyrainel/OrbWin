@@ -8,6 +8,13 @@ that a subsequently implemented flow is absent.
 
 ## 2026-10-24 implementation updates
 
+- BL-015: native Kubernetes forwarding exposed a missing guest `socat` runtime
+  dependency. The local listener opens but forwarding the first request fails.
+  The UI retains the concrete error and removes the dead link. Signed openSUSE
+  Leap 16.0 socat/libwrap RPMs passed signature and dependency checks and were
+  installed only in the owned guest for a dependency proof; reproducible bundled
+  provisioning and the complete native forwarding journey remain in progress.
+
 - BL-003: pinned runtime clients are bundled; native first-run cancel/setup/resume
   passed on a fresh sequential proof guest. Installed-product checks remain open.
 - BL-005: general Windows Docker CLI/Compose bind translation now passes C:/F:
@@ -40,6 +47,26 @@ that a subsequently implemented flow is absent.
   three-engine proof passed on binary `29073605…`; see the active completion
   record for exact evidence IDs. This closes these tested cases. Failed evidence
   remains retained; broader compatibility and Phase 1 gates remain separate.
+
+## BL-015 — Kubernetes forwarding lacks the guest socat dependency
+
+- Flow: native pod/service localhost forwarding with the pinned Rancher backend,
+  openSUSE guest 0.2.11 and Kubernetes 1.35.3; observed on `e3892a1f…`.
+- Reproducer: forward port 80 of the scoped Nginx pod, then request its local
+  URL. kubectl first reports `Forwarding from 127.0.0.1`, then reports
+  `unable to do port forwarding: socat not found` and exits on a connection.
+- Impact/adaptation: the listener's readiness does not establish the complete
+  stream works. The UI reports exit, retains bounded connection output and
+  removes the link; the workload remains running. This is not a qualified flow.
+- Dependency record: the base image lacks socat and libwrap. The official
+  Leap 16.0 signed RPMs passed `rpm --checksig` and an offline dependency test.
+  Manual installation in the owned guest is a proof step, not the product fix.
+- Owner/target: OrbWin guest packaging/provisioning, Phase 1. No upstream issue
+  has been filed. Track the narrow adaptation and source/license provenance.
+- Acceptance: fresh and existing guests obtain hash-pinned dependencies without
+  a guest-network package download. Native pod/service forwards must carry HTTP
+  traffic, survive navigation, report interruption and stop without deleting
+  workloads; preserve scoped regression evidence.
 
 ## BL-013 — Existing Docker Desktop cannot reach engine readiness
 

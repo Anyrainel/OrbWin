@@ -495,7 +495,10 @@ async fn owned_cluster_workflow() {
     let result: Result<(), String> = async {
         if !was_enabled {
             harness
-                .pass(Request::ConfigureCluster { enabled: true })
+                .pass(Request::ConfigureCluster {
+                    enabled: true,
+                    version: None,
+                })
                 .await?;
         }
         harness
@@ -664,7 +667,10 @@ async fn owned_cluster_workflow() {
     }
     if !was_enabled {
         if let Err(e) = harness
-            .pass(Request::ConfigureCluster { enabled: false })
+            .pass(Request::ConfigureCluster {
+                enabled: false,
+                version: None,
+            })
             .await
         {
             cleanup_errors.push(e);

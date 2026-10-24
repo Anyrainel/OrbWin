@@ -1,5 +1,6 @@
 import { isValidElement, useEffect, useState, type ReactNode } from "react";
 import * as backend from "../../backend";
+import { retryBusyRead } from "../../model/read-retry";
 import { LocalPortLink } from "../LocalPortLink";
 import {
   imageUsers,
@@ -127,15 +128,17 @@ export function InfoPanel({
     const abort = new AbortController();
     let output = "";
     setInspect({ state: "pending" });
-    backend
-      .run(
+    retryBusyRead(() => {
+      output = "";
+      return backend.run(
         crypto.randomUUID(),
         { kind: "inspect", resource: kinds[page], target: id },
         (chunk) => {
           output += chunk;
         },
         abort.signal,
-      )
+      );
+    }, abort.signal)
       .then((outcome) => {
         if (abort.signal.aborted) return;
         if (!outcome.success)

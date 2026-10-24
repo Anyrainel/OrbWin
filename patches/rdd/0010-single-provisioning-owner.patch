@@ -1,0 +1,182 @@
+diff --git a/rdd/pkg/controllers/app/app/controllers/guest_bridge.go b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+index ae72279d4..6f1edbe1d 100644
+--- a/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
++++ b/rdd/pkg/controllers/app/app/controllers/guest_bridge.go
+@@ -26,7 +26,38 @@ func ownedWindowsTemplate(base string) string {
+ 	if goruntime.GOOS != "windows" || (instance.Suffix() != "orbwin" && instance.Suffix() != "orbwin-proof") {
+ 		return base
+ 	}
+-	return ignoreLimaNetworkPorts(base)
++	return guardOwnedProvisioning(ignoreLimaNetworkPorts(base))
++}
++
++// Lima's WSL boot command and the guest systemd unit both run boot.sh. Only
++// systemd has the configured engine network namespace. The direct boot path
++// must observe that existing unit, never race its stateful provision scripts.
++// Waiting in the first script also keeps Lima's boot-done marker honest.
++func guardOwnedProvisioning(base string) string {
++	const guard = `if [[ "$(readlink /proc/self/ns/net)" == "$(readlink /proc/1/ns/net)" ]]; then
++    echo "OrbWin: waiting for provisioning in lima-init.service"
++    for ((orbwin_wait=0; orbwin_wait<900; orbwin_wait++)); do
++        orbwin_unit_state=$(systemctl show lima-init.service --property=SubState --value)
++        orbwin_unit_result=$(systemctl show lima-init.service --property=Result --value)
++        if [[ "$orbwin_unit_state" == "exited" && "$orbwin_unit_result" == "success" ]]; then
++            echo "OrbWin: systemd provisioning completed; skipping duplicate script"
++            exit 0
++        fi
++        if [[ "$orbwin_unit_state" == "failed" ]]; then
++            echo "OrbWin: systemd provisioning failed: $orbwin_unit_result" >&2
++            exit 1
++        fi
++        sleep 1
++    done
++    echo "OrbWin: systemd provisioning did not finish within 900 seconds" >&2
++    exit 1
++fi
++orbwin_namespace_pid=$(systemctl show network-namespace.service --property=MainPID --value)
++if [[ ! "$orbwin_namespace_pid" =~ ^[1-9][0-9]*$ ]] || [[ "$(readlink /proc/self/ns/net)" != "$(readlink "/proc/$orbwin_namespace_pid/ns/net")" ]]; then
++    echo "OrbWin: provisioning is outside the owned network namespace" >&2
++    exit 1
++fi`
++	return strings.ReplaceAll(base, "    # ORBWIN_PROVISION_CONTEXT", "    "+strings.ReplaceAll(guard, "\n", "\n    "))
+ }
+ 
+ func ignoreLimaNetworkPorts(base string) string {
+diff --git a/rdd/pkg/controllers/app/app/controllers/provision_context_test.go b/rdd/pkg/controllers/app/app/controllers/provision_context_test.go
+new file mode 100644
+index 000000000..41fd62b31
+--- /dev/null
++++ b/rdd/pkg/controllers/app/app/controllers/provision_context_test.go
+@@ -0,0 +1,104 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: the existing systemd unit owns stateful provisioning.
++package controllers
++
++import (
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"testing"
++
++	"sigs.k8s.io/yaml"
++)
++
++func provisionTestBash(t *testing.T) string {
++	t.Helper()
++	if runtime.GOOS == "windows" {
++		git, err := exec.LookPath("git")
++		if err != nil {
++			t.Skip("Git Bash unavailable")
++		}
++		path := filepath.Join(filepath.Dir(git), "..", "bin", "bash.exe")
++		if _, err := os.Stat(path); err != nil {
++			t.Skip("Git Bash unavailable")
++		}
++		return path
++	}
++	path, err := exec.LookPath("bash")
++	if err != nil {
++		t.Skip("bash unavailable")
++	}
++	return path
++}
++
++func TestOwnedProvisioningContext(t *testing.T) {
++	const marker = "# ORBWIN_PROVISION_CONTEXT"
++	for _, tc := range []struct {
++		name, current, state, result string
++		allowed, success             bool
++	}{
++		{"authoritative namespace", "engine", "running", "success", true, true},
++		{"unrecognized private namespace", "foreign", "running", "success", false, false},
++		{"duplicate waits for success", "init", "exited", "success", false, true},
++		{"failed owner propagates", "init", "failed", "exit-code", false, false},
++		{"running owner cannot claim success", "init", "running", "success", false, false},
++		{"non-success exit cannot claim success", "init", "exited", "exit-code", false, false},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			// Function stubs isolate namespace/unit observations. Execute the actual
++			// generated guard; no host systemctl, sleeps or guest mutation runs.
++			prefix := fmt.Sprintf(`readlink() { case "$1" in /proc/self/ns/net) echo %s;; /proc/42/ns/net) echo engine;; *) echo init;; esac; }
++systemctl() { case "$3" in --property=SubState) echo %s;; --property=Result) echo %s;; --property=MainPID) echo 42;; esac; }
++sleep() { :; }
++`, tc.current, tc.state, tc.result)
++			guard := guardOwnedProvisioning("    " + marker + "\necho MUTATION\n")
++			// Preserve timeout control flow without spending 900 real polls in a
++			// unit test; the production deadline remains in the generated template.
++			guard = strings.ReplaceAll(guard, "orbwin_wait<900", "orbwin_wait<2")
++			cmd := exec.Command(provisionTestBash(t), "--noprofile", "--norc", "-s")
++			cmd.Stdin = strings.NewReader("set -eu\n" + prefix + guard)
++			for _, value := range os.Environ() {
++				if !strings.HasPrefix(value, "BASH_ENV=") {
++					cmd.Env = append(cmd.Env, value)
++				}
++			}
++			out, err := cmd.CombinedOutput()
++			if (err == nil) != tc.success || strings.Contains(string(out), "MUTATION") != tc.allowed {
++				t.Fatalf("result=%v output=%s", err, out)
++			}
++		})
++	}
++}
++
++func TestEveryStatefulProvisionHasContextGuard(t *testing.T) {
++	base, err := os.ReadFile("../lima-template.yaml")
++	if err != nil {
++		t.Fatal(err)
++	}
++	var doc struct{ Provision []struct{ Script string } }
++	if err := yaml.Unmarshal([]byte(guardOwnedProvisioning(string(base))), &doc); err != nil {
++		t.Fatal(err)
++	}
++	count := 0
++	for _, item := range doc.Provision {
++		if item.Script == "" {
++			continue
++		}
++		count++
++		guard := strings.Index(item.Script, `readlink /proc/self/ns/net`)
++		if guard < 0 || strings.Contains(item.Script, "# ORBWIN_PROVISION_CONTEXT") {
++			t.Fatal("stateful script lacks namespace guard")
++		}
++		for _, mutation := range []string{"systemctl stop", "systemd-run", "STAGED="} {
++			if at := strings.Index(item.Script, mutation); at >= 0 && at < guard {
++				t.Fatal("mutation precedes namespace guard")
++			}
++		}
++	}
++	if count != 3 {
++		t.Fatalf("review changed provision surface: %d scripts", count)
++	}
++}
+diff --git a/rdd/pkg/controllers/app/app/lima-template.yaml b/rdd/pkg/controllers/app/app/lima-template.yaml
+index 5a6f66e14..8f51ccb32 100644
+--- a/rdd/pkg/controllers/app/app/lima-template.yaml
++++ b/rdd/pkg/controllers/app/app/lima-template.yaml
+@@ -43,6 +43,7 @@ provision:
+   script: |
+     #!/bin/bash
+     set -o errexit -o nounset -o pipefail
++    # ORBWIN_PROVISION_CONTEXT
+     case "$PARAM_HOST_DOCKER_SOCKET" in
+       *docker-rancher-desktop-orbwin-proof) SHARE=/mnt/wsl/orbwin-proof; PROFILE=.rdorbwin-proof ;;
+       *docker-rancher-desktop-orbwin) SHARE=/mnt/wsl/orbwin; PROFILE=.rdorbwin ;;
+@@ -120,6 +121,7 @@ provision:
+     #!/bin/bash
+ 
+     set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
+ 
+     if [[ -z $PARAM_GUEST_LOG_DIR ]]; then
+         exit 0
+@@ -138,6 +140,7 @@ provision:
+     #!/bin/bash
+ 
+     set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
+ 
+     # Restart rancher-desktop.target on exit, even if a step below fails. The
+     # container engine belongs to this target but does not depend on

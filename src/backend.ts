@@ -64,7 +64,8 @@ export type Operation =
     }
   | { kind: "engine"; running: boolean }
   | { kind: "readSettings" }
-  | { kind: "configureCluster"; enabled: boolean }
+  | { kind: "readClusterVersions" }
+  | { kind: "configureCluster"; enabled: boolean; version?: string }
   | {
       kind: "cluster";
       action: "list" | "inspect" | "logs";

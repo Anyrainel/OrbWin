@@ -11,6 +11,7 @@ import {
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { kubernetesBuildVersion } from "./kubernetes-build-version.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const lockSource = readFileSync(resolve(root, "upstream.lock.json"));
 const lock = JSON.parse(lockSource);
@@ -153,7 +154,26 @@ if (withDistro) {
     resolve(source, "pkg/embedded/distro.tar.xz"),
   );
 }
-const ldflags = `-s -w -X ${packageName}.Version=v0.1.0-orbwin-dev -X ${packageName}.GitCommit=${lock.commit}`;
+const kubernetesComponents = ["k8s.io/component-base", "k8s.io/client-go"].map(
+  (module) =>
+    kubernetesBuildVersion(
+      JSON.parse(
+        execFileSync(go, ["list", "-m", "-json", module], {
+          cwd: source,
+          encoding: "utf8",
+        }),
+      ),
+    ),
+);
+const kubernetesFlags = kubernetesComponents
+  .map((component) => {
+    const namespace =
+      component.module +
+      (component.module.endsWith("client-go") ? "/pkg/version" : "/version");
+    return `-X ${namespace}.gitVersion=${component.version} -X ${namespace}.gitMajor=${component.major} -X ${namespace}.gitMinor=${component.minor} -X ${namespace}.gitCommit= -X ${namespace}.gitTreeState=archive`;
+  })
+  .join(" ");
+const ldflags = `-s -w -X ${packageName}.Version=v0.1.0-orbwin-dev -X ${packageName}.GitCommit=${lock.commit} ${kubernetesFlags}`;
 run(
   [
     "build",
@@ -191,6 +211,7 @@ writeFileSync(
     {
       sourceCommit: lock.commit,
       go: lock.go.version,
+      kubernetesComponents,
       distroEmbedded: withDistro,
       purpose: withDistro
         ? "Guest-capable development artifact; runtime coexistence remains unqualified."

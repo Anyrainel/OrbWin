@@ -218,8 +218,8 @@ export function ClusterControls({
                 title: `${enabled ? "Enable" : "Disable"} Kubernetes?`,
                 request: { kind: "configureCluster", enabled },
                 description: enabled
-                  ? "Sets up the optional workload cluster in the owned OrbWin guest. This can download cluster components and take several minutes. Docker workflows remain independent of the cluster."
-                  : "Stops the OrbWin workload cluster and interrupts its Kubernetes workloads. Other engines and global Kubernetes configuration are not changed.",
+                  ? "Sets up the optional workload cluster in the owned OrbWin guest. Applying restarts that guest and interrupts its Docker and Kubernetes workloads; persistent data is retained. Downloads can take several minutes. Cancelling stops this client, but an accepted backend change can continue applying."
+                  : "Disables the OrbWin workload cluster. Applying restarts the owned guest and interrupts its Docker and Kubernetes workloads; persistent data is retained. Other engines and global Kubernetes configuration are not changed. Cancelling stops this client, but an accepted backend change can continue applying.",
               })
             }
           >

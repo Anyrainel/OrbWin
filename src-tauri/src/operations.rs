@@ -75,8 +75,11 @@ pub enum Request {
         running: bool,
     },
     ReadSettings,
+    ReadClusterVersions,
     ConfigureCluster {
         enabled: bool,
+        #[serde(default)]
+        version: Option<String>,
     },
     Cluster {
         action: ClusterAction,
@@ -268,6 +271,9 @@ fn command_values(command: &[String]) -> Result<(), String> {
     Ok(())
 }
 impl Request {
+    fn is_management_read(&self) -> bool {
+        matches!(self, Self::ReadSettings | Self::ReadClusterVersions)
+    }
     fn is_cluster(&self) -> bool {
         matches!(
             self,
@@ -433,13 +439,40 @@ impl Request {
                     "--request-timeout=10s".into(),
                 ]
             }
-            Self::ConfigureCluster { enabled } => {
-                seconds = 900;
+            Self::ReadClusterVersions => {
+                mutation = false;
                 vec![
+                    "kubectl".into(),
+                    "get".into(),
+                    "configmap/k3s-versions".into(),
+                    "--namespace=rancher-desktop".into(),
+                    "--output=json".into(),
+                    "--request-timeout=10s".into(),
+                ]
+            }
+            Self::ConfigureCluster { enabled, version } => {
+                seconds = 900;
+                let mut args = vec![
                     "set".into(),
                     format!("kubernetes.enabled={enabled}"),
                     "--timeout=840s".into(),
-                ]
+                ];
+                if let Some(version) = version {
+                    let parts: Vec<_> = version.split('.').collect();
+                    if parts.len() != 3
+                        || parts.iter().any(|part| {
+                            part.is_empty()
+                                || part.len() > 4
+                                || !part.bytes().all(|c| c.is_ascii_digit())
+                        })
+                    {
+                        return Err(
+                            "Select a concrete Kubernetes version from the backend catalog.".into(),
+                        );
+                    }
+                    args.insert(2, format!("kubernetes.version={version}"));
+                }
+                args
             }
             Self::Cluster {
                 action,
@@ -922,8 +955,9 @@ pub async fn run(
     }
     let management = matches!(
         request,
-        Request::Engine { .. } | Request::ReadSettings | Request::ConfigureCluster { .. }
-    ) || request.is_cluster();
+        Request::Engine { .. } | Request::ConfigureCluster { .. }
+    ) || request.is_management_read()
+        || request.is_cluster();
     let stopping = matches!(request, Request::Engine { running: false });
     let binary = if management {
         target.rdd().await?
@@ -963,7 +997,7 @@ pub async fn run(
                 .arg("--kubeconfig")
                 .arg(config)
                 .args(&plan.args[1..]);
-        } else if matches!(request, Request::ReadSettings) {
+        } else if request.is_management_read() {
             // `rdd ctl` would auto-start the management service. A read must
             // instead use the existing owned API config and fail if offline.
             command
@@ -983,7 +1017,7 @@ pub async fn run(
             .arg("--host")
             .arg(engine::ENDPOINT);
     }
-    if !request.is_cluster() && !matches!(request, Request::ReadSettings) {
+    if !request.is_cluster() && !request.is_management_read() {
         command.args(&plan.args);
     }
     command
@@ -1022,7 +1056,7 @@ pub async fn run(
         interrupted,
         reason,
     } = client_result;
-    let identity = if stopping || matches!(request, Request::ReadSettings) {
+    let identity = if stopping || request.is_management_read() {
         Ok(serde_json::Value::Null)
     } else {
         engine::check(&target).await
@@ -1059,7 +1093,10 @@ pub async fn run(
     } else if exit_code == Some(0) {
         "Command completed.".into()
     } else {
-        format!("Engine client exited with code {exit_code:?}. Review output and refresh state before retrying.")
+        let code = exit_code
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        format!("Engine client exited with code {code}. Review output and refresh state before retrying.")
     };
     Ok(Outcome {
         exit_code,
@@ -1281,6 +1318,28 @@ mod tests {
         let read = Request::ReadSettings.plan().unwrap();
         assert_eq!(read.args[0], "kubectl");
         assert!(!read.mutation);
+        let catalog = Request::ReadClusterVersions;
+        assert!(catalog.is_management_read());
+        assert!(!catalog.is_cluster());
+        let read = catalog.plan().unwrap();
+        assert!(!read.mutation);
+        assert!(read.args.contains(&"configmap/k3s-versions".into()));
+        assert!(read.args.contains(&"--namespace=rancher-desktop".into()));
+        for version in ["latest", "1.34.6;command", "1.34", "-1.34.6", "1.34.6\n"] {
+            assert!(Request::ConfigureCluster {
+                enabled: true,
+                version: Some(version.into())
+            }
+            .plan()
+            .is_err());
+        }
+        let plan = Request::ConfigureCluster {
+            enabled: true,
+            version: Some("1.35.3".into()),
+        }
+        .plan()
+        .unwrap();
+        assert!(plan.args.contains(&"kubernetes.version=1.35.3".into()));
     }
     #[test]
     fn streaming_output_has_a_shared_budget_and_announces_truncation_once() {
