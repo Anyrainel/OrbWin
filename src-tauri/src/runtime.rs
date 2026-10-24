@@ -144,6 +144,51 @@ pub(crate) fn docker() -> Result<PathBuf, String> {
     Ok(path)
 }
 
+pub(crate) fn credentials() -> Result<PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(backend_dir().join("credentials-manifest.json"))
+            .map_err(|_| "The bundled credential helper manifest is unavailable")?,
+    )
+    .map_err(|_| "The credential helper manifest is invalid")?;
+    for (name, source) in [
+        (
+            "main.go",
+            include_bytes!("../../backend-tools/credentials/main.go").as_slice(),
+        ),
+        (
+            "vault_windows.go",
+            include_bytes!("../../backend-tools/credentials/vault_windows.go").as_slice(),
+        ),
+        (
+            "go.mod",
+            include_bytes!("../../backend-tools/credentials/go.mod").as_slice(),
+        ),
+        (
+            "go.sum",
+            include_bytes!("../../backend-tools/credentials/go.sum").as_slice(),
+        ),
+    ] {
+        if manifest["sources"][name] != format!("{:x}", Sha256::digest(source)) {
+            return Err("The credential helper differs from this application. Rebuild or repair the bundle before using credentials.".into());
+        }
+    }
+    let path = backend_dir().join("docker-credential-orbwin.exe");
+    if hash_file(&path, 16 << 20)? != manifest["binarySha256"] {
+        return Err("The bundled credential helper checksum differs.".into());
+    }
+    Ok(path)
+}
+pub(crate) fn client_path() -> Result<std::ffi::OsString, String> {
+    credentials()?;
+    let mut paths = vec![backend_dir()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths)
+        .map_err(|_| "Cannot construct the private Docker client PATH".into())
+}
+
 pub(crate) fn backend() -> Result<(PathBuf, serde_json::Value), String> {
     let manifest: serde_json::Value = serde_json::from_slice(
         &std::fs::read(backend_dir().join("build-manifest.json"))

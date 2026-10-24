@@ -227,6 +227,7 @@ async fn setup_at(
         .await
         .map_err(|e| e.to_string())??;
     let docker = runtime::docker()?;
+    runtime::credentials()?;
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
     process::read_command(
         &PathBuf::from(system).join("System32/wsl.exe"),

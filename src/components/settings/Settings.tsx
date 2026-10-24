@@ -9,12 +9,14 @@ import type { ThemePreference } from "../shell/theme";
 import { applyState, condition, kubernetesState } from "./app-settings-model";
 import { StorageCleanup } from "./StorageCleanup";
 import { KubernetesVersions } from "./KubernetesVersions";
+import { Registries } from "./Registries";
 import { formatSize } from "./storage-model";
 import { currentSettings, type AppSettingsRead } from "./useAppSettings";
 
 export const settingsTabs = [
   { id: "general", label: "General" },
   { id: "docker", label: "Docker engine" },
+  { id: "registries", label: "Registries" },
   { id: "kubernetes", label: "Kubernetes" },
   { id: "network", label: "Network" },
   { id: "storage", label: "Storage" },
@@ -267,6 +269,7 @@ export function Settings({
             />
           </>
         )}
+        {tab === "registries" && <Registries />}
         {tab === "docker" && (
           <>
             <h2>Docker engine</h2>

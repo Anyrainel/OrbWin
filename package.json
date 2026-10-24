@@ -15,6 +15,7 @@
     "backend:build": "node scripts/build-backend.mjs",
     "backend:bundle": "node scripts/build-backend.mjs --with-distro",
     "session:build": "node scripts/build-session.mjs",
+    "credentials:build": "node scripts/build-credentials.mjs",
     "backend:proof": "node scripts/prove-control-plane.mjs",
     "backend:guest-proof": "node scripts/prove-guest.mjs",
     "qualify:workloads": "node scripts/qualify-workloads.mjs",

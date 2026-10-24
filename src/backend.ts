@@ -40,6 +40,9 @@ export type ClusterResource =
   | "persistentVolumeClaims";
 export type Operation =
   | { kind: "setup" }
+  | { kind: "registryList" }
+  | { kind: "registryLogin"; server: string; username: string; secret: string }
+  | { kind: "registryForget"; server: string }
   | { kind: "diskUsage" }
   | {
       kind: "buildHistory";

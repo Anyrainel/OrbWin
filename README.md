@@ -35,6 +35,7 @@ npm run upstream:prepare
 npm test
 npm run upstream:test
 npm run session:build
+npm run credentials:build
 npm run tools:stage-runtime
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml

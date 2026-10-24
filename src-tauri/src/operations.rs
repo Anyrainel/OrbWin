@@ -39,6 +39,15 @@ impl Drop for Lease<'_> {
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Request {
     Setup,
+    RegistryList,
+    RegistryLogin {
+        server: String,
+        username: String,
+        secret: crate::registry::Secret,
+    },
+    RegistryForget {
+        server: String,
+    },
     DiskUsage,
     BuildHistory {
         action: BuildHistoryAction,
@@ -291,6 +300,22 @@ impl Request {
         let mut seconds = 120;
         let mut input = None;
         let args: Vec<String> = match self {
+            Self::RegistryList => {
+                mutation = false;
+                vec![]
+            }
+            Self::RegistryLogin {
+                server,
+                username,
+                secret,
+            } => {
+                crate::registry::validate_login(server, username, secret)?;
+                vec![]
+            }
+            Self::RegistryForget { server } => {
+                crate::registry::validate_stored_server(server)?;
+                vec![]
+            }
             Self::DiskUsage => {
                 mutation = false;
                 vec!["system".into(), "df".into(), "--format=json".into()]
@@ -946,6 +971,12 @@ pub async fn run(
     if matches!(request, Request::Setup) {
         return crate::installation::setup(&output, &mut cancelled).await;
     }
+    if matches!(
+        request,
+        Request::RegistryList | Request::RegistryLogin { .. } | Request::RegistryForget { .. }
+    ) {
+        return crate::registry::run(&request, &output, &mut cancelled).await;
+    }
     let target = engine::target()?;
     if matches!(request, Request::Build { .. } | Request::Compose { .. }) {
         crate::runtime::configure_client(&target.config)?;
@@ -1012,6 +1043,7 @@ pub async fn run(
         }
     } else {
         command
+            .env("PATH", crate::runtime::client_path()?)
             .arg("--config")
             .arg(&target.config)
             .arg("--host")
@@ -1122,6 +1154,16 @@ pub(crate) async fn client(
     seconds: u64,
 ) -> Result<ClientResult, String> {
     run_client(command, input, output, cancelled, seconds, false).await
+}
+
+pub(crate) async fn client_tree(
+    command: Command,
+    input: Option<&[u8]>,
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+    seconds: u64,
+) -> Result<ClientResult, String> {
+    run_client(command, input, output, cancelled, seconds, true).await
 }
 
 async fn run_client(

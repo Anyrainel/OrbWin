@@ -427,3 +427,41 @@ The current twelve-patch binary also passed refreshed three-engine coexistence
 `7176ed68…`, each including concurrency, intentional failure, cancellation and
 Ryuk cleanup. Other daemon identities, sentinel data and global client configs
 were preserved. Installed/native setup and remaining phase-wide gates stay open.
+
+### Registry credentials and native private-image flows — 2026-10-24
+
+The native Registries tab now uses a checksum-bound Windows credential helper
+under OrbWin-specific encoded keys and ownership attributes. Docker performs
+authentication; secrets use stdin and login output is discarded. No global
+credential helper or Docker config is changed. The selected upstream runtime's
+credential-helper SDK 0.9.12/wincred 1.2.3 passes scoped Windows vault tests; the
+initial older-library write failure remains recorded in the architecture note.
+Private per-registry helper routing preserves unrelated config and refuses
+existing foreign helpers/file credentials. Setup verifies the helper before
+guest mutation. Transient credential clients and descendants use the existing
+kill-on-close client job; backend workloads remain independent.
+
+Fixture `orbwin-registry-4ea39801` used an explicitly disposable public test
+password and a pinned authenticated Registry 3 image. Native rejected login,
+successful login, password clearing, saved-list persistence through native
+process rebuilds, authenticated pull and Buildx private-base build passed.
+BuildKit reported credential exchange; the resulting image executed its unique
+marker. Pull verification compares the registry's manifest digest, rather than
+confusing the pre-push multi-platform index ID with the pushed platform manifest.
+The parented native folder picker also selected the real build context.
+
+Native Ubuntu project connection synchronized only helper routing metadata;
+the ordinary non-root user's Linux Docker CLI pulled the exact private manifest
+through Windows interop without changing its global Docker config. Windows
+interop is required and failures remain explicit. A paused fixture made native
+login stall; Cancel cleared the password, reported uncertain storage outcome
+and retained the previous saved entry. Native Forget reached the empty state;
+the next private pull failed authentication while the registry stayed running.
+Exact fixture container, volume, tags and vault entry were then cleaned. Global
+Windows Docker/kubeconfig hashes remained unchanged. Registry state/evidence is
+retained under `artifacts/qualification/orbwin-registry-4ea39801/state.json`.
+
+Forty-two Node tests, frontend production build, thirty ordinary Rust tests and
+Clippy pass. Go ordinary, race and explicit synthetic Windows vault tests pass.
+This closes the registry implementation checkpoint; installed-product and
+remaining phase-wide gates still apply.

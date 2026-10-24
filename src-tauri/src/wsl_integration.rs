@@ -225,8 +225,15 @@ pub(crate) async fn wsl_project(
         .await
         .map_err(|e| e.to_string())??;
     let config = target.home().join(".rdorbwin/wsl-docker");
-    let command = format!("env -u DOCKER_CONTEXT -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u BUILDKIT_HOST BUILDX_BUILDER=default BUILDX_CONFIG={} {} --config {} --host unix:///mnt/wsl/orbwin/docker.sock", quote(&linux_path(&config.join("buildx"))?), quote(&format!("{directory}/docker")), quote(&linux_path(&config)?));
+    let helper = runtime::credentials()?;
+    let helper_directory = linux_path(
+        helper
+            .parent()
+            .ok_or("Credential helper directory is missing")?,
+    )?;
+    let command = format!("env -u DOCKER_CONTEXT -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH -u BUILDKIT_HOST PATH={}:\"$PATH\" BUILDX_BUILDER=default BUILDX_CONFIG={} {} --config {} --host unix:///mnt/wsl/orbwin/docker.sock", quote(&helper_directory), quote(&linux_path(&config.join("buildx"))?), quote(&format!("{directory}/docker")), quote(&linux_path(&config)?));
     if action == "connect" {
+        let _credential_lock = crate::registry::config_lock(target.home())?;
         std::fs::create_dir_all(&config).map_err(|e| e.to_string())?;
         let file = config.join("config.json");
         let mut value = if file.exists() {
@@ -251,6 +258,7 @@ pub(crate) async fn wsl_project(
         }
         value["cliPluginsExtraDirs"] = serde_json::json!([directory]);
         runtime::private_auth_defaults(&mut value)?;
+        crate::registry::sync_wsl(target.home(), &mut value)?;
         runtime::write_json(&file, &value)?;
         let docker = format!("{directory}/docker");
         let config = linux_path(&config)?;

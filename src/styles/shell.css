@@ -485,6 +485,44 @@ kbd {
 .settings-panel .properties p {
   margin-top: 6px;
 }
+.registry-form {
+  max-width: 480px;
+  margin: 18px 0;
+}
+.registry-form fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.registry-form label {
+  display: grid;
+  gap: 5px;
+}
+.registry-form input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-strong);
+}
+.registry-form button {
+  justify-self: start;
+}
+.registry-table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.registry-table th,
+.registry-table td {
+  padding: 8px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+}
 .segmented {
   display: inline-flex;
   padding: 2px;
