@@ -60,3 +60,14 @@ adds version-bound release-note and issue evidence, with implementation requirem
 for logs, Compose, deletion, terminals and builds. Treat those requirements as
 original OrbWin adaptations. They supplement the screenshot baseline without
 claiming exact current OrbStack prompts, defaults or runtime parity.
+
+## Logo
+
+The official OrbWin mark is a magenta sphere cut by a window cross on a plum
+tile, with the top-right pane lit. Source of truth is `assets/orbwin.svg`
+(full-color tile) and `assets/orbwin-mono.svg` (single-color, `currentColor`,
+for tray or monochrome uses). `python scripts/generate-icons.py` regenerates the
+SVGs and the Tauri icons in `src-tauri/icons`. Geometry: gap 14, pane corner
+radius 12, orb radius 88 in a 256 grid. Do not recolor the lit pane or add
+macOS-style glossy effects. No tray icon or in-app logo is wired yet; the
+design system keeps the sidebar free of a branding block.
