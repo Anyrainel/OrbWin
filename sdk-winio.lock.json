@@ -1,0 +1,1125 @@
+{
+  "schema": 1,
+  "role": "sdk-lan-windows-amd64-close-only",
+  "module": "github.com/Microsoft/go-winio",
+  "version": "v0.6.2",
+  "main": "orbwin.local/session",
+  "sourceReceiptSHA256": "b7ff527b184b5018489b93fcfcefe803f71e875d2168caf24b7bcec1c62b2ca2",
+  "reviewPeerSHA256": "fdef8aed176308008fdec4cde73ff53133f42a65ccb6843c872a125f68c2b9d4",
+  "upstreamZipSHA256": "cd007bdb877a578efde2780bf5dd2f57dd557b5b08c3614597b820d0369ebb0f",
+  "upstreamH1": "h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=",
+  "baseline": [
+    {
+      "path": ".gitattributes",
+      "bytes": 18,
+      "sha256": "f70d755466b101646b043fe3c62c4f8a39eae827c1a2a303a2d39ccd93f534f8"
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "bytes": 372,
+      "sha256": "621abd3a573bcad457457f7f5ce975fcd85d07976ad8428b1a874744c73038e6"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "bytes": 4070,
+      "sha256": "0ad087f8b248eb21d9ce79d7e736f4ed913409f5f0c49a7bcbe458b954027428"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 73,
+      "sha256": "c6834ab5bda92e20e92e52599c953cd9d87a2fd54482d1ce27f73f53f8b9eb99"
+    },
+    {
+      "path": ".golangci.yml",
+      "bytes": 4244,
+      "sha256": "fb3283acd7d9cf2693f0b57cae358fdecf38cb6339724ceadaf7a8282cbb968b"
+    },
+    {
+      "path": "CODEOWNERS",
+      "bytes": 29,
+      "sha256": "7eae48a0d88a108696b3e01ff22db3707b9e3e007e60ef5ee5e5004e064acdc4"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1077,
+      "sha256": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3771,
+      "sha256": "2c75d84c7a5562dd42edde622663d25a3a4c52c3962693e975cb7a47823f12f2"
+    },
+    {
+      "path": "SECURITY.md",
+      "bytes": 2757,
+      "sha256": "89c4e4b9ba7ec705482e2de05135d0626d33bf8c2c66119c65d7a306dd83459c"
+    },
+    {
+      "path": "backup.go",
+      "bytes": 8330,
+      "sha256": "fb4bf45f065b9df3f2e631dc02c3f63c8f8226f6428263754f9b545f9c08145d"
+    },
+    {
+      "path": "backup_test.go",
+      "bytes": 4374,
+      "sha256": "211458bae628efad797fed51baf4286688c28a726c366bf78cd5817f0ced2cdc"
+    },
+    {
+      "path": "backuptar/doc.go",
+      "bytes": 86,
+      "sha256": "0befc1b2b177b9513a3a061f4fadbed5802c374e55fdb2e471a0b7664edcf9d7"
+    },
+    {
+      "path": "backuptar/strconv.go",
+      "bytes": 2074,
+      "sha256": "8ab2a749de43913cea5126e06a13fdfa8a2f4efb3ae77243956fafcd8be084a0"
+    },
+    {
+      "path": "backuptar/tar.go",
+      "bytes": 16005,
+      "sha256": "111e11d7fbddb94d7a4912c2f8cac4a330c8faca859600dfdaa9bd6baa331b78"
+    },
+    {
+      "path": "backuptar/tar_test.go",
+      "bytes": 6466,
+      "sha256": "67b8684a268306e0c5be146fdf1013a15862c79270ec31318d1327cd9a565dca"
+    },
+    {
+      "path": "doc.go",
+      "bytes": 1076,
+      "sha256": "bbff26e43752114ed1d30d0881252e2507b4701eb57c90911b9812f716b296a6"
+    },
+    {
+      "path": "ea.go",
+      "bytes": 3178,
+      "sha256": "5ec91bf49a97ceb82c4b482c6c27f3ebb5b0222d353a61bf3c3da1ab449cafef"
+    },
+    {
+      "path": "ea_test.go",
+      "bytes": 2178,
+      "sha256": "9ac2ca7e0fb22313c5b0fdac6b03b9109d636991670ee0be0ee261cd498eefc3"
+    },
+    {
+      "path": "file.go",
+      "bytes": 8132,
+      "sha256": "ddb8d81357fb9c5c1a8cf9f1de7490437df227785ee9ab82d3d94d06143b19c4"
+    },
+    {
+      "path": "fileinfo.go",
+      "bytes": 3619,
+      "sha256": "e340c256c7fdb16ab468869fa19eec7b2eb60ce250883f05ce5745d757e6a44b"
+    },
+    {
+      "path": "fileinfo_test.go",
+      "bytes": 5397,
+      "sha256": "e50a5d01a67cf1a2a66fba70f7a055e898eca94c0d0d9e69b2a804f5af4a3045"
+    },
+    {
+      "path": "go.mod",
+      "bytes": 194,
+      "sha256": "47fb19990ebb31954f3aa784ff45f4c93a9e86ac3e1297d7ca87c614aeffe2cb"
+    },
+    {
+      "path": "go.sum",
+      "bytes": 1906,
+      "sha256": "6e338e038630afa37a9e8421eb3781c2959dfb8f694deb4c57952adcb1b1d43f"
+    },
+    {
+      "path": "hvsock.go",
+      "bytes": 15948,
+      "sha256": "3ba48092ae63078cc4dd6b80ec1634e4b2387512d089e7ac3396b08fae944149"
+    },
+    {
+      "path": "hvsock_go118_test.go",
+      "bytes": 2795,
+      "sha256": "dc0c867f7ab2e55508ee7b49356f1d99de5d3e09c8ccb0a79eaf7f7f4becdcc1"
+    },
+    {
+      "path": "hvsock_test.go",
+      "bytes": 15953,
+      "sha256": "5f7af5128920e85f29e5ca8acd2f27a534412953e44df734f5a9254fe8574d0d"
+    },
+    {
+      "path": "internal/computestorage/computestorage.go",
+      "bytes": 1805,
+      "sha256": "1f71ca0ff072076961cd88e0aebefd36bd8d7c94cb2e0b493e0f40f034767a5c"
+    },
+    {
+      "path": "internal/computestorage/doc.go",
+      "bytes": 23,
+      "sha256": "ac272334f695e27c7608af0eec394bbb52fddcee8437a56cea9d47e109b507d9"
+    },
+    {
+      "path": "internal/computestorage/zsyscall_windows.go",
+      "bytes": 1689,
+      "sha256": "a4efa62fc2b6a81d803e5ad7fe27012b9db792da34752788d0dcd4a6e4710177"
+    },
+    {
+      "path": "internal/fs/doc.go",
+      "bytes": 68,
+      "sha256": "6d6e9d543eae61907c27df4bbc6182acf7f7eb4defa50b6139683248d834ccae"
+    },
+    {
+      "path": "internal/fs/fs.go",
+      "bytes": 10077,
+      "sha256": "8456657c2af56e74dc883098dde10b5664350c8e16809184a043355833697ca3"
+    },
+    {
+      "path": "internal/fs/fs_test.go",
+      "bytes": 889,
+      "sha256": "de3edd90d8055317e77364204c638f2f38c96aae91440a4afff8586e1b1722dc"
+    },
+    {
+      "path": "internal/fs/security.go",
+      "bytes": 469,
+      "sha256": "b1ca02f39241d5408a3a175c40bf175422bcdf6e66ed5475f94143eb60fdea9e"
+    },
+    {
+      "path": "internal/fs/zsyscall_windows.go",
+      "bytes": 1754,
+      "sha256": "26fafc5b78c87e29f28e1b7a53e1be81c831de523a63d945c2fb37744b528beb"
+    },
+    {
+      "path": "internal/interop/doc.go",
+      "bytes": 16,
+      "sha256": "c1c32adb9d2805b467500ca6168fffa8b5cd1dc8c7e389f1157b7899af4fc211"
+    },
+    {
+      "path": "internal/interop/interop.go",
+      "bytes": 609,
+      "sha256": "1f3b8c008804b2d49a57af0db93dd580d9fbff6ba051febee479678649fc2e8e"
+    },
+    {
+      "path": "internal/interop/zsyscall_windows.go",
+      "bytes": 994,
+      "sha256": "62d9f114fa2212598af85a0f4bff42dbcc6caeb176b204a8d916a4b4b1e2c04a"
+    },
+    {
+      "path": "internal/socket/rawaddr.go",
+      "bytes": 723,
+      "sha256": "e13442befc1e27e369fb0595e6020d01650840067807d6642e18315dc62598c4"
+    },
+    {
+      "path": "internal/socket/socket.go",
+      "bytes": 4952,
+      "sha256": "db99562cd8aca1fc615e8b64bccff0b5f7de8a9c3023d3f48c9fb11f6fcc75ff"
+    },
+    {
+      "path": "internal/socket/zsyscall_windows.go",
+      "bytes": 1662,
+      "sha256": "9ac5d7cac43efd831cc1a08b9e6e8063692d333ac10012c0275868e5bb848d8f"
+    },
+    {
+      "path": "internal/stringbuffer/wstring.go",
+      "bytes": 3471,
+      "sha256": "69b1ff2f7a8aba43800a6c92e9b478ba6ab2e18a28e0362c8c837174246e8307"
+    },
+    {
+      "path": "internal/stringbuffer/wstring_test.go",
+      "bytes": 992,
+      "sha256": "dfa3b78939913c2a04bdc8b7adbd5b9cf445ff7773f91b22bcd049fbf70a1fe9"
+    },
+    {
+      "path": "pipe.go",
+      "bytes": 16501,
+      "sha256": "5d44e412369336bc4d888a7032d1c2c87f6295c8ca3457563d56dd669eed6b1a"
+    },
+    {
+      "path": "pipe_test.go",
+      "bytes": 12156,
+      "sha256": "ef4cf5f421275b82a70056e105ecea2482fb2470f49f0349588bf08dbdc18c6a"
+    },
+    {
+      "path": "pkg/bindfilter/bind_filter.go",
+      "bytes": 9849,
+      "sha256": "04ae2a8c3b8ee1e56a0b3ac5378310f48319f0792a244cd176d77c2c6890a15e"
+    },
+    {
+      "path": "pkg/bindfilter/bind_filter_test.go",
+      "bytes": 7588,
+      "sha256": "0c9346ee3969f6a277764f20d1dad529844cb92188728f6fc4e07488b600bd6a"
+    },
+    {
+      "path": "pkg/bindfilter/zsyscall_windows.go",
+      "bytes": 3170,
+      "sha256": "cd604eabe34211459b3933781cf04e12e74b058989824bada4e70004511c21bb"
+    },
+    {
+      "path": "pkg/etw/doc.go",
+      "bytes": 481,
+      "sha256": "fe7dede46c8bfb11f28e2ac9a4dc7a3ecdc04aff64429bd86e33fcbdacb6d12b"
+    },
+    {
+      "path": "pkg/etw/eventdata.go",
+      "bytes": 2134,
+      "sha256": "52406ad59fb5e31e519913afc742d5dfb1cf4a7e040dfc97f70d248292e849c1"
+    },
+    {
+      "path": "pkg/etw/eventdatadescriptor.go",
+      "bytes": 622,
+      "sha256": "8ed8a15c86778c563f845bda3d67eb5f73a1791314bfa41bce2bb4ad8ace3de7"
+    },
+    {
+      "path": "pkg/etw/eventdescriptor.go",
+      "bytes": 2982,
+      "sha256": "c08c726880908d17517cb4e82f44834c41a31117e23bb153eb5e7589ba8bcfb3"
+    },
+    {
+      "path": "pkg/etw/eventmetadata.go",
+      "bytes": 5930,
+      "sha256": "932c9bd9cfa0358bff3642ad81b8a6b80a0073010d7f24d8c59fd7aeb38a5026"
+    },
+    {
+      "path": "pkg/etw/eventopt.go",
+      "bytes": 2087,
+      "sha256": "adae0a1d27d77b4a7e9c7abb88c7a09c5a2d92408f782260dede38bfc451e3dc"
+    },
+    {
+      "path": "pkg/etw/fieldopt.go",
+      "bytes": 15068,
+      "sha256": "6586560cfd8985b35415c7115843fea02c8d074fd22e299473b9db8b31601936"
+    },
+    {
+      "path": "pkg/etw/level_string.go",
+      "bytes": 730,
+      "sha256": "88136abf35ba1cdf7268be674ec09eb87010bbad55bef87da356f3a378b45d0f"
+    },
+    {
+      "path": "pkg/etw/newprovider.go",
+      "bytes": 2412,
+      "sha256": "0b222a5466f576a4acd7e4a3c781bd56e635b00f5c264f3ff3475cd518e59f00"
+    },
+    {
+      "path": "pkg/etw/newprovider_unsupported.go",
+      "bytes": 250,
+      "sha256": "13d2c27dad61cdfd1c6d516ace3432ecb76100738df7a162af684723a9fd10e4"
+    },
+    {
+      "path": "pkg/etw/opcode_string.go",
+      "bytes": 703,
+      "sha256": "e9963726e6ff334b818229b2a3711e5a8ee80917fac9d646538714407309c601"
+    },
+    {
+      "path": "pkg/etw/provider.go",
+      "bytes": 9300,
+      "sha256": "652ba206dedbaa995a5cc92a6266f826e9bb671b31a7020f27097eb586a8448e"
+    },
+    {
+      "path": "pkg/etw/provider_test.go",
+      "bytes": 903,
+      "sha256": "ece6ffdc76805deaa0dcc17440c0d55ebc69ecf37fd452fe98e0d49092a3cc0c"
+    },
+    {
+      "path": "pkg/etw/providerglobal.go",
+      "bytes": 1088,
+      "sha256": "13321136d90ee8ae6dfa156ea0f4d6153b05801b988ba98f04fcd33f84a47e8c"
+    },
+    {
+      "path": "pkg/etw/ptr64_32.go",
+      "bytes": 411,
+      "sha256": "44301ed53a5ce79b0906d5659f8dae92854c4a8a26df1bbc62e0ac5482bdde16"
+    },
+    {
+      "path": "pkg/etw/ptr64_64.go",
+      "bytes": 407,
+      "sha256": "c1034c288b16248948233a886c3a7d7bf5a32d05aed55eda225a44d9d35f1e79"
+    },
+    {
+      "path": "pkg/etw/sample/main_other.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "pkg/etw/sample/main_windows.go",
+      "bytes": 2348,
+      "sha256": "a230df6f71caab2db7fde7801a3c8d0a3883bd482bd4c2ab2c6f3a7dbbc12414"
+    },
+    {
+      "path": "pkg/etw/syscall.go",
+      "bytes": 1432,
+      "sha256": "a7c1cbf0ab4c8b973c3bdff2d59f854e5d81a06a16df755d47a709b8cfac3cc8"
+    },
+    {
+      "path": "pkg/etw/wrapper_32.go",
+      "bytes": 2144,
+      "sha256": "8588a9c1184f145c0dab8d88204d7ce2fb0455bf1d141d27b1a1c6bc36cc0d19"
+    },
+    {
+      "path": "pkg/etw/wrapper_64.go",
+      "bytes": 1526,
+      "sha256": "105eb4bcc7db57f89916357b01a3f4d34e7b22e89f2a9a143ab700795103e4a9"
+    },
+    {
+      "path": "pkg/etw/zsyscall_windows.go",
+      "bytes": 3820,
+      "sha256": "6885d6cf658b4e76fecde3c0b1360aff5c174662e2cfc5015de0691b1b6fbf78"
+    },
+    {
+      "path": "pkg/etwlogrus/HookTest.wprp",
+      "bytes": 653,
+      "sha256": "112e54bfafef1163363357c9666c685c045529c8412498151ffb20e026ef5241"
+    },
+    {
+      "path": "pkg/etwlogrus/hook.go",
+      "bytes": 4607,
+      "sha256": "443bf6190980aef908aaf8ea91f397a0c00bf365786e4e52d0931855d686d1ea"
+    },
+    {
+      "path": "pkg/etwlogrus/hook_test.go",
+      "bytes": 3112,
+      "sha256": "7c44a420b24e815494cde2b1be8da09b50e30accfa36803251d9e01e542ee0ab"
+    },
+    {
+      "path": "pkg/etwlogrus/opts.go",
+      "bytes": 1286,
+      "sha256": "89efa9f30f142bc77944c90582cf722611e6651531e5198f61208c8cc72c4ec7"
+    },
+    {
+      "path": "pkg/fs/doc.go",
+      "bytes": 68,
+      "sha256": "6d6e9d543eae61907c27df4bbc6182acf7f7eb4defa50b6139683248d834ccae"
+    },
+    {
+      "path": "pkg/fs/fs_windows.go",
+      "bytes": 899,
+      "sha256": "06380d18422502325c8791cbe994c108a50fc2f7f0ace0e4755453b9976df738"
+    },
+    {
+      "path": "pkg/fs/fs_windows_test.go",
+      "bytes": 1128,
+      "sha256": "3fa665542f96549af381fefc0655791ac4f5868ad94b43705f49b42d52f75764"
+    },
+    {
+      "path": "pkg/fs/resolve.go",
+      "bytes": 6287,
+      "sha256": "0e535767390e771f9e2cd614e345657cc7c3d82f554048b6600383643d81246d"
+    },
+    {
+      "path": "pkg/fs/resolve_test.go",
+      "bytes": 7562,
+      "sha256": "04cd7683aa15e95d0510f81f076238b3401f0d61b216fc5b69b0e8b6b042fbd2"
+    },
+    {
+      "path": "pkg/guid/guid.go",
+      "bytes": 6198,
+      "sha256": "69fbf469679fe0819f992263ea220959feca5eec3d6e40f59b2b39b36f33af28"
+    },
+    {
+      "path": "pkg/guid/guid_nonwindows.go",
+      "bytes": 444,
+      "sha256": "570589802b959e65c59b408c143c1ea35491bc9509c5806a68d9659ce66e547e"
+    },
+    {
+      "path": "pkg/guid/guid_test.go",
+      "bytes": 7210,
+      "sha256": "f40e06bab3bcd28881b510bac7b668c3058f6e5e3623d884a03a6eca811af170"
+    },
+    {
+      "path": "pkg/guid/guid_windows.go",
+      "bytes": 420,
+      "sha256": "9d4f43a40befa7402549107055f1a91c85f3e5fd9053018390496bde6f3352f6"
+    },
+    {
+      "path": "pkg/guid/variant_string.go",
+      "bytes": 747,
+      "sha256": "984a8a6f103f7c645f0e33a1014307fb02c00246e75d5531e6cbaddfc7bbea3d"
+    },
+    {
+      "path": "pkg/process/process.go",
+      "bytes": 2910,
+      "sha256": "27f1bcce2d7c25dffe487a277dbe03b40af29f5847fa67446df12277f4df73c0"
+    },
+    {
+      "path": "pkg/process/syscall.go",
+      "bytes": 640,
+      "sha256": "bb19420734e09f2b00627a67ec61995d9279fd1e90bcf88b20a5dc3cc04b4e06"
+    },
+    {
+      "path": "pkg/process/zsyscall_windows.go",
+      "bytes": 1923,
+      "sha256": "7efdf0fbae0e189dadc59f2ba2dede07b6916837a864b55dcc66315b4225adf6"
+    },
+    {
+      "path": "pkg/security/grantvmgroupaccess.go",
+      "bytes": 5019,
+      "sha256": "fd2208342e13012f35244f4fc561abbf3dec4ed0728f006f2e617c6c7657e45e"
+    },
+    {
+      "path": "pkg/security/grantvmgroupaccess_test.go",
+      "bytes": 2988,
+      "sha256": "9b153ad76d0748810aa8364e9ff4161cb9f4f43edafd02d16cba2743e71fc054"
+    },
+    {
+      "path": "pkg/security/syscall_windows.go",
+      "bytes": 686,
+      "sha256": "bac63861806bcfcb60f3176b7f5f3c69b6b852ec49d38d8603bff148dca2f488"
+    },
+    {
+      "path": "pkg/security/zsyscall_windows.go",
+      "bytes": 2228,
+      "sha256": "fda44abf9576e532efe00dce08d1313e94fa12ca3bb4c67066175f2995baf9e5"
+    },
+    {
+      "path": "privilege.go",
+      "bytes": 5565,
+      "sha256": "fb74f315a3cef08a1a3c70a5f274febfa06a41d7c0a8f81391a1350935d92a54"
+    },
+    {
+      "path": "privileges_test.go",
+      "bytes": 474,
+      "sha256": "8955ac6afef2f2610c5c13d23a3665ac1d9815716433946dfe83611791ab0f75"
+    },
+    {
+      "path": "reparse.go",
+      "bytes": 3525,
+      "sha256": "c47d406f093a5bf56039b9a6b38657d4980330efc818eabd49312bc1ac79671d"
+    },
+    {
+      "path": "sd.go",
+      "bytes": 4368,
+      "sha256": "8ccf67366981c973df4ab8f157fb0078e3ade866ba20c7b2720731586002b71c"
+    },
+    {
+      "path": "sd_test.go",
+      "bytes": 1252,
+      "sha256": "edccfc2e7e013d48bc26556856bd2da49f4218b99456dfc53ef13a36efb726bb"
+    },
+    {
+      "path": "syscall.go",
+      "bytes": 140,
+      "sha256": "2cd98c7436049e33e2c2005c167fe6598de01dbbcbff76bbcfa5145d831e1c2d"
+    },
+    {
+      "path": "tools/etw-provider-gen/main_others.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "tools/etw-provider-gen/main_windows.go",
+      "bytes": 583,
+      "sha256": "d8f2c6026d58eb8593ec6cb9eb57489af96456450791c038c6b221a8d9303886"
+    },
+    {
+      "path": "tools/mkwinsyscall/doc.go",
+      "bytes": 2055,
+      "sha256": "4d61e37045802cfe0a06c9696a4eb02cf4b1044cab99df1daa60d3d3f77675ae"
+    },
+    {
+      "path": "tools/mkwinsyscall/mkwinsyscall.go",
+      "bytes": 24489,
+      "sha256": "01d3a059762ebde97983b9534739d18695d4c314dd753f4f406007bf5e96a226"
+    },
+    {
+      "path": "tools/tools.go",
+      "bytes": 528,
+      "sha256": "9ec217f5d5bcf5de3315de112df6d7d46dac8839714e573aa38333b7c259805e"
+    },
+    {
+      "path": "vhd/vhd.go",
+      "bytes": 13313,
+      "sha256": "f564b1636194d695626a9af403cab45f7efe2b997b6c21894b62ff372dc8d148"
+    },
+    {
+      "path": "vhd/zvhd_windows.go",
+      "bytes": 4685,
+      "sha256": "733f6f3467c5c175f76508b4ea24d82a18e2ee9ce9da1b8e7816cee85c01508d"
+    },
+    {
+      "path": "wim/decompress.go",
+      "bytes": 2663,
+      "sha256": "2a1e4868516f2daaf884e52a2eb1351d1157ef8016e00f4168e284cb2814b050"
+    },
+    {
+      "path": "wim/lzx/lzx.go",
+      "bytes": 14404,
+      "sha256": "d751fcacb2228ede93f58abed4947d4d816395b75475a45b342a3feaddba5eb5"
+    },
+    {
+      "path": "wim/validate/main_other.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "wim/validate/main_windows.go",
+      "bytes": 731,
+      "sha256": "55dfa7e2ac816ef2e93f43b899969db4f52f99e3083f4d126847b73ba5efc805"
+    },
+    {
+      "path": "wim/wim.go",
+      "bytes": 22368,
+      "sha256": "c21c9d3a2262e7b92ead22b4816f170113a6aea7126e5d59e06fcc54361154cb"
+    },
+    {
+      "path": "zsyscall_windows.go",
+      "bytes": 14895,
+      "sha256": "de1a5f7a6742fba0ad7ab66708ea3b4cfa2e35cae9df3a08383c6b1ee962fb2a"
+    }
+  ],
+  "patched": [
+    {
+      "path": ".gitattributes",
+      "bytes": 18,
+      "sha256": "f70d755466b101646b043fe3c62c4f8a39eae827c1a2a303a2d39ccd93f534f8"
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "bytes": 372,
+      "sha256": "621abd3a573bcad457457f7f5ce975fcd85d07976ad8428b1a874744c73038e6"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "bytes": 4070,
+      "sha256": "0ad087f8b248eb21d9ce79d7e736f4ed913409f5f0c49a7bcbe458b954027428"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 73,
+      "sha256": "c6834ab5bda92e20e92e52599c953cd9d87a2fd54482d1ce27f73f53f8b9eb99"
+    },
+    {
+      "path": ".golangci.yml",
+      "bytes": 4244,
+      "sha256": "fb3283acd7d9cf2693f0b57cae358fdecf38cb6339724ceadaf7a8282cbb968b"
+    },
+    {
+      "path": "CODEOWNERS",
+      "bytes": 29,
+      "sha256": "7eae48a0d88a108696b3e01ff22db3707b9e3e007e60ef5ee5e5004e064acdc4"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1077,
+      "sha256": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3771,
+      "sha256": "2c75d84c7a5562dd42edde622663d25a3a4c52c3962693e975cb7a47823f12f2"
+    },
+    {
+      "path": "SECURITY.md",
+      "bytes": 2757,
+      "sha256": "89c4e4b9ba7ec705482e2de05135d0626d33bf8c2c66119c65d7a306dd83459c"
+    },
+    {
+      "path": "backup.go",
+      "bytes": 8330,
+      "sha256": "fb4bf45f065b9df3f2e631dc02c3f63c8f8226f6428263754f9b545f9c08145d"
+    },
+    {
+      "path": "backup_test.go",
+      "bytes": 4374,
+      "sha256": "211458bae628efad797fed51baf4286688c28a726c366bf78cd5817f0ced2cdc"
+    },
+    {
+      "path": "backuptar/doc.go",
+      "bytes": 86,
+      "sha256": "0befc1b2b177b9513a3a061f4fadbed5802c374e55fdb2e471a0b7664edcf9d7"
+    },
+    {
+      "path": "backuptar/strconv.go",
+      "bytes": 2074,
+      "sha256": "8ab2a749de43913cea5126e06a13fdfa8a2f4efb3ae77243956fafcd8be084a0"
+    },
+    {
+      "path": "backuptar/tar.go",
+      "bytes": 16005,
+      "sha256": "111e11d7fbddb94d7a4912c2f8cac4a330c8faca859600dfdaa9bd6baa331b78"
+    },
+    {
+      "path": "backuptar/tar_test.go",
+      "bytes": 6466,
+      "sha256": "67b8684a268306e0c5be146fdf1013a15862c79270ec31318d1327cd9a565dca"
+    },
+    {
+      "path": "doc.go",
+      "bytes": 1076,
+      "sha256": "bbff26e43752114ed1d30d0881252e2507b4701eb57c90911b9812f716b296a6"
+    },
+    {
+      "path": "ea.go",
+      "bytes": 3178,
+      "sha256": "5ec91bf49a97ceb82c4b482c6c27f3ebb5b0222d353a61bf3c3da1ab449cafef"
+    },
+    {
+      "path": "ea_test.go",
+      "bytes": 2178,
+      "sha256": "9ac2ca7e0fb22313c5b0fdac6b03b9109d636991670ee0be0ee261cd498eefc3"
+    },
+    {
+      "path": "file.go",
+      "bytes": 9755,
+      "sha256": "c7cf7ede52cb97ff5f7bc2844e8774b572f2fc8b65e81f455ff5ddccf05a02db"
+    },
+    {
+      "path": "file_original_close_state.go",
+      "bytes": 1720,
+      "sha256": "681307d0ca8a119e3faf4d781e47fc3b3fde8e92a7da2a6fd9fbce542d21d059"
+    },
+    {
+      "path": "file_original_close_state_test.go",
+      "bytes": 5988,
+      "sha256": "93a0edde33d45ffc336d15c59522b660bb68a2aaf8d7bccbf8b0b6531ac2d7e0"
+    },
+    {
+      "path": "fileinfo.go",
+      "bytes": 3619,
+      "sha256": "e340c256c7fdb16ab468869fa19eec7b2eb60ce250883f05ce5745d757e6a44b"
+    },
+    {
+      "path": "fileinfo_test.go",
+      "bytes": 5397,
+      "sha256": "e50a5d01a67cf1a2a66fba70f7a055e898eca94c0d0d9e69b2a804f5af4a3045"
+    },
+    {
+      "path": "go.mod",
+      "bytes": 194,
+      "sha256": "47fb19990ebb31954f3aa784ff45f4c93a9e86ac3e1297d7ca87c614aeffe2cb"
+    },
+    {
+      "path": "go.sum",
+      "bytes": 1906,
+      "sha256": "6e338e038630afa37a9e8421eb3781c2959dfb8f694deb4c57952adcb1b1d43f"
+    },
+    {
+      "path": "hvsock.go",
+      "bytes": 15948,
+      "sha256": "3ba48092ae63078cc4dd6b80ec1634e4b2387512d089e7ac3396b08fae944149"
+    },
+    {
+      "path": "hvsock_go118_test.go",
+      "bytes": 2795,
+      "sha256": "dc0c867f7ab2e55508ee7b49356f1d99de5d3e09c8ccb0a79eaf7f7f4becdcc1"
+    },
+    {
+      "path": "hvsock_test.go",
+      "bytes": 15953,
+      "sha256": "5f7af5128920e85f29e5ca8acd2f27a534412953e44df734f5a9254fe8574d0d"
+    },
+    {
+      "path": "internal/computestorage/computestorage.go",
+      "bytes": 1805,
+      "sha256": "1f71ca0ff072076961cd88e0aebefd36bd8d7c94cb2e0b493e0f40f034767a5c"
+    },
+    {
+      "path": "internal/computestorage/doc.go",
+      "bytes": 23,
+      "sha256": "ac272334f695e27c7608af0eec394bbb52fddcee8437a56cea9d47e109b507d9"
+    },
+    {
+      "path": "internal/computestorage/zsyscall_windows.go",
+      "bytes": 1689,
+      "sha256": "a4efa62fc2b6a81d803e5ad7fe27012b9db792da34752788d0dcd4a6e4710177"
+    },
+    {
+      "path": "internal/fs/doc.go",
+      "bytes": 68,
+      "sha256": "6d6e9d543eae61907c27df4bbc6182acf7f7eb4defa50b6139683248d834ccae"
+    },
+    {
+      "path": "internal/fs/fs.go",
+      "bytes": 10077,
+      "sha256": "8456657c2af56e74dc883098dde10b5664350c8e16809184a043355833697ca3"
+    },
+    {
+      "path": "internal/fs/fs_test.go",
+      "bytes": 889,
+      "sha256": "de3edd90d8055317e77364204c638f2f38c96aae91440a4afff8586e1b1722dc"
+    },
+    {
+      "path": "internal/fs/security.go",
+      "bytes": 469,
+      "sha256": "b1ca02f39241d5408a3a175c40bf175422bcdf6e66ed5475f94143eb60fdea9e"
+    },
+    {
+      "path": "internal/fs/zsyscall_windows.go",
+      "bytes": 1754,
+      "sha256": "26fafc5b78c87e29f28e1b7a53e1be81c831de523a63d945c2fb37744b528beb"
+    },
+    {
+      "path": "internal/interop/doc.go",
+      "bytes": 16,
+      "sha256": "c1c32adb9d2805b467500ca6168fffa8b5cd1dc8c7e389f1157b7899af4fc211"
+    },
+    {
+      "path": "internal/interop/interop.go",
+      "bytes": 609,
+      "sha256": "1f3b8c008804b2d49a57af0db93dd580d9fbff6ba051febee479678649fc2e8e"
+    },
+    {
+      "path": "internal/interop/zsyscall_windows.go",
+      "bytes": 994,
+      "sha256": "62d9f114fa2212598af85a0f4bff42dbcc6caeb176b204a8d916a4b4b1e2c04a"
+    },
+    {
+      "path": "internal/socket/rawaddr.go",
+      "bytes": 723,
+      "sha256": "e13442befc1e27e369fb0595e6020d01650840067807d6642e18315dc62598c4"
+    },
+    {
+      "path": "internal/socket/socket.go",
+      "bytes": 4952,
+      "sha256": "db99562cd8aca1fc615e8b64bccff0b5f7de8a9c3023d3f48c9fb11f6fcc75ff"
+    },
+    {
+      "path": "internal/socket/zsyscall_windows.go",
+      "bytes": 1662,
+      "sha256": "9ac5d7cac43efd831cc1a08b9e6e8063692d333ac10012c0275868e5bb848d8f"
+    },
+    {
+      "path": "internal/stringbuffer/wstring.go",
+      "bytes": 3471,
+      "sha256": "69b1ff2f7a8aba43800a6c92e9b478ba6ab2e18a28e0362c8c837174246e8307"
+    },
+    {
+      "path": "internal/stringbuffer/wstring_test.go",
+      "bytes": 992,
+      "sha256": "dfa3b78939913c2a04bdc8b7adbd5b9cf445ff7773f91b22bcd049fbf70a1fe9"
+    },
+    {
+      "path": "pipe.go",
+      "bytes": 16501,
+      "sha256": "5d44e412369336bc4d888a7032d1c2c87f6295c8ca3457563d56dd669eed6b1a"
+    },
+    {
+      "path": "pipe_test.go",
+      "bytes": 12156,
+      "sha256": "ef4cf5f421275b82a70056e105ecea2482fb2470f49f0349588bf08dbdc18c6a"
+    },
+    {
+      "path": "pkg/bindfilter/bind_filter.go",
+      "bytes": 9849,
+      "sha256": "04ae2a8c3b8ee1e56a0b3ac5378310f48319f0792a244cd176d77c2c6890a15e"
+    },
+    {
+      "path": "pkg/bindfilter/bind_filter_test.go",
+      "bytes": 7588,
+      "sha256": "0c9346ee3969f6a277764f20d1dad529844cb92188728f6fc4e07488b600bd6a"
+    },
+    {
+      "path": "pkg/bindfilter/zsyscall_windows.go",
+      "bytes": 3170,
+      "sha256": "cd604eabe34211459b3933781cf04e12e74b058989824bada4e70004511c21bb"
+    },
+    {
+      "path": "pkg/etw/doc.go",
+      "bytes": 481,
+      "sha256": "fe7dede46c8bfb11f28e2ac9a4dc7a3ecdc04aff64429bd86e33fcbdacb6d12b"
+    },
+    {
+      "path": "pkg/etw/eventdata.go",
+      "bytes": 2134,
+      "sha256": "52406ad59fb5e31e519913afc742d5dfb1cf4a7e040dfc97f70d248292e849c1"
+    },
+    {
+      "path": "pkg/etw/eventdatadescriptor.go",
+      "bytes": 622,
+      "sha256": "8ed8a15c86778c563f845bda3d67eb5f73a1791314bfa41bce2bb4ad8ace3de7"
+    },
+    {
+      "path": "pkg/etw/eventdescriptor.go",
+      "bytes": 2982,
+      "sha256": "c08c726880908d17517cb4e82f44834c41a31117e23bb153eb5e7589ba8bcfb3"
+    },
+    {
+      "path": "pkg/etw/eventmetadata.go",
+      "bytes": 5930,
+      "sha256": "932c9bd9cfa0358bff3642ad81b8a6b80a0073010d7f24d8c59fd7aeb38a5026"
+    },
+    {
+      "path": "pkg/etw/eventopt.go",
+      "bytes": 2087,
+      "sha256": "adae0a1d27d77b4a7e9c7abb88c7a09c5a2d92408f782260dede38bfc451e3dc"
+    },
+    {
+      "path": "pkg/etw/fieldopt.go",
+      "bytes": 15068,
+      "sha256": "6586560cfd8985b35415c7115843fea02c8d074fd22e299473b9db8b31601936"
+    },
+    {
+      "path": "pkg/etw/level_string.go",
+      "bytes": 730,
+      "sha256": "88136abf35ba1cdf7268be674ec09eb87010bbad55bef87da356f3a378b45d0f"
+    },
+    {
+      "path": "pkg/etw/newprovider.go",
+      "bytes": 2412,
+      "sha256": "0b222a5466f576a4acd7e4a3c781bd56e635b00f5c264f3ff3475cd518e59f00"
+    },
+    {
+      "path": "pkg/etw/newprovider_unsupported.go",
+      "bytes": 250,
+      "sha256": "13d2c27dad61cdfd1c6d516ace3432ecb76100738df7a162af684723a9fd10e4"
+    },
+    {
+      "path": "pkg/etw/opcode_string.go",
+      "bytes": 703,
+      "sha256": "e9963726e6ff334b818229b2a3711e5a8ee80917fac9d646538714407309c601"
+    },
+    {
+      "path": "pkg/etw/provider.go",
+      "bytes": 9300,
+      "sha256": "652ba206dedbaa995a5cc92a6266f826e9bb671b31a7020f27097eb586a8448e"
+    },
+    {
+      "path": "pkg/etw/provider_test.go",
+      "bytes": 903,
+      "sha256": "ece6ffdc76805deaa0dcc17440c0d55ebc69ecf37fd452fe98e0d49092a3cc0c"
+    },
+    {
+      "path": "pkg/etw/providerglobal.go",
+      "bytes": 1088,
+      "sha256": "13321136d90ee8ae6dfa156ea0f4d6153b05801b988ba98f04fcd33f84a47e8c"
+    },
+    {
+      "path": "pkg/etw/ptr64_32.go",
+      "bytes": 411,
+      "sha256": "44301ed53a5ce79b0906d5659f8dae92854c4a8a26df1bbc62e0ac5482bdde16"
+    },
+    {
+      "path": "pkg/etw/ptr64_64.go",
+      "bytes": 407,
+      "sha256": "c1034c288b16248948233a886c3a7d7bf5a32d05aed55eda225a44d9d35f1e79"
+    },
+    {
+      "path": "pkg/etw/sample/main_other.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "pkg/etw/sample/main_windows.go",
+      "bytes": 2348,
+      "sha256": "a230df6f71caab2db7fde7801a3c8d0a3883bd482bd4c2ab2c6f3a7dbbc12414"
+    },
+    {
+      "path": "pkg/etw/syscall.go",
+      "bytes": 1432,
+      "sha256": "a7c1cbf0ab4c8b973c3bdff2d59f854e5d81a06a16df755d47a709b8cfac3cc8"
+    },
+    {
+      "path": "pkg/etw/wrapper_32.go",
+      "bytes": 2144,
+      "sha256": "8588a9c1184f145c0dab8d88204d7ce2fb0455bf1d141d27b1a1c6bc36cc0d19"
+    },
+    {
+      "path": "pkg/etw/wrapper_64.go",
+      "bytes": 1526,
+      "sha256": "105eb4bcc7db57f89916357b01a3f4d34e7b22e89f2a9a143ab700795103e4a9"
+    },
+    {
+      "path": "pkg/etw/zsyscall_windows.go",
+      "bytes": 3820,
+      "sha256": "6885d6cf658b4e76fecde3c0b1360aff5c174662e2cfc5015de0691b1b6fbf78"
+    },
+    {
+      "path": "pkg/etwlogrus/HookTest.wprp",
+      "bytes": 653,
+      "sha256": "112e54bfafef1163363357c9666c685c045529c8412498151ffb20e026ef5241"
+    },
+    {
+      "path": "pkg/etwlogrus/hook.go",
+      "bytes": 4607,
+      "sha256": "443bf6190980aef908aaf8ea91f397a0c00bf365786e4e52d0931855d686d1ea"
+    },
+    {
+      "path": "pkg/etwlogrus/hook_test.go",
+      "bytes": 3112,
+      "sha256": "7c44a420b24e815494cde2b1be8da09b50e30accfa36803251d9e01e542ee0ab"
+    },
+    {
+      "path": "pkg/etwlogrus/opts.go",
+      "bytes": 1286,
+      "sha256": "89efa9f30f142bc77944c90582cf722611e6651531e5198f61208c8cc72c4ec7"
+    },
+    {
+      "path": "pkg/fs/doc.go",
+      "bytes": 68,
+      "sha256": "6d6e9d543eae61907c27df4bbc6182acf7f7eb4defa50b6139683248d834ccae"
+    },
+    {
+      "path": "pkg/fs/fs_windows.go",
+      "bytes": 899,
+      "sha256": "06380d18422502325c8791cbe994c108a50fc2f7f0ace0e4755453b9976df738"
+    },
+    {
+      "path": "pkg/fs/fs_windows_test.go",
+      "bytes": 1128,
+      "sha256": "3fa665542f96549af381fefc0655791ac4f5868ad94b43705f49b42d52f75764"
+    },
+    {
+      "path": "pkg/fs/resolve.go",
+      "bytes": 6287,
+      "sha256": "0e535767390e771f9e2cd614e345657cc7c3d82f554048b6600383643d81246d"
+    },
+    {
+      "path": "pkg/fs/resolve_test.go",
+      "bytes": 7562,
+      "sha256": "04cd7683aa15e95d0510f81f076238b3401f0d61b216fc5b69b0e8b6b042fbd2"
+    },
+    {
+      "path": "pkg/guid/guid.go",
+      "bytes": 6198,
+      "sha256": "69fbf469679fe0819f992263ea220959feca5eec3d6e40f59b2b39b36f33af28"
+    },
+    {
+      "path": "pkg/guid/guid_nonwindows.go",
+      "bytes": 444,
+      "sha256": "570589802b959e65c59b408c143c1ea35491bc9509c5806a68d9659ce66e547e"
+    },
+    {
+      "path": "pkg/guid/guid_test.go",
+      "bytes": 7210,
+      "sha256": "f40e06bab3bcd28881b510bac7b668c3058f6e5e3623d884a03a6eca811af170"
+    },
+    {
+      "path": "pkg/guid/guid_windows.go",
+      "bytes": 420,
+      "sha256": "9d4f43a40befa7402549107055f1a91c85f3e5fd9053018390496bde6f3352f6"
+    },
+    {
+      "path": "pkg/guid/variant_string.go",
+      "bytes": 747,
+      "sha256": "984a8a6f103f7c645f0e33a1014307fb02c00246e75d5531e6cbaddfc7bbea3d"
+    },
+    {
+      "path": "pkg/process/process.go",
+      "bytes": 2910,
+      "sha256": "27f1bcce2d7c25dffe487a277dbe03b40af29f5847fa67446df12277f4df73c0"
+    },
+    {
+      "path": "pkg/process/syscall.go",
+      "bytes": 640,
+      "sha256": "bb19420734e09f2b00627a67ec61995d9279fd1e90bcf88b20a5dc3cc04b4e06"
+    },
+    {
+      "path": "pkg/process/zsyscall_windows.go",
+      "bytes": 1923,
+      "sha256": "7efdf0fbae0e189dadc59f2ba2dede07b6916837a864b55dcc66315b4225adf6"
+    },
+    {
+      "path": "pkg/security/grantvmgroupaccess.go",
+      "bytes": 5019,
+      "sha256": "fd2208342e13012f35244f4fc561abbf3dec4ed0728f006f2e617c6c7657e45e"
+    },
+    {
+      "path": "pkg/security/grantvmgroupaccess_test.go",
+      "bytes": 2988,
+      "sha256": "9b153ad76d0748810aa8364e9ff4161cb9f4f43edafd02d16cba2743e71fc054"
+    },
+    {
+      "path": "pkg/security/syscall_windows.go",
+      "bytes": 686,
+      "sha256": "bac63861806bcfcb60f3176b7f5f3c69b6b852ec49d38d8603bff148dca2f488"
+    },
+    {
+      "path": "pkg/security/zsyscall_windows.go",
+      "bytes": 2228,
+      "sha256": "fda44abf9576e532efe00dce08d1313e94fa12ca3bb4c67066175f2995baf9e5"
+    },
+    {
+      "path": "privilege.go",
+      "bytes": 5565,
+      "sha256": "fb74f315a3cef08a1a3c70a5f274febfa06a41d7c0a8f81391a1350935d92a54"
+    },
+    {
+      "path": "privileges_test.go",
+      "bytes": 474,
+      "sha256": "8955ac6afef2f2610c5c13d23a3665ac1d9815716433946dfe83611791ab0f75"
+    },
+    {
+      "path": "reparse.go",
+      "bytes": 3525,
+      "sha256": "c47d406f093a5bf56039b9a6b38657d4980330efc818eabd49312bc1ac79671d"
+    },
+    {
+      "path": "sd.go",
+      "bytes": 4368,
+      "sha256": "8ccf67366981c973df4ab8f157fb0078e3ade866ba20c7b2720731586002b71c"
+    },
+    {
+      "path": "sd_test.go",
+      "bytes": 1252,
+      "sha256": "edccfc2e7e013d48bc26556856bd2da49f4218b99456dfc53ef13a36efb726bb"
+    },
+    {
+      "path": "syscall.go",
+      "bytes": 140,
+      "sha256": "2cd98c7436049e33e2c2005c167fe6598de01dbbcbff76bbcfa5145d831e1c2d"
+    },
+    {
+      "path": "tools/etw-provider-gen/main_others.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "tools/etw-provider-gen/main_windows.go",
+      "bytes": 583,
+      "sha256": "d8f2c6026d58eb8593ec6cb9eb57489af96456450791c038c6b221a8d9303886"
+    },
+    {
+      "path": "tools/mkwinsyscall/doc.go",
+      "bytes": 2055,
+      "sha256": "4d61e37045802cfe0a06c9696a4eb02cf4b1044cab99df1daa60d3d3f77675ae"
+    },
+    {
+      "path": "tools/mkwinsyscall/mkwinsyscall.go",
+      "bytes": 24489,
+      "sha256": "01d3a059762ebde97983b9534739d18695d4c314dd753f4f406007bf5e96a226"
+    },
+    {
+      "path": "tools/tools.go",
+      "bytes": 528,
+      "sha256": "9ec217f5d5bcf5de3315de112df6d7d46dac8839714e573aa38333b7c259805e"
+    },
+    {
+      "path": "vhd/vhd.go",
+      "bytes": 13313,
+      "sha256": "f564b1636194d695626a9af403cab45f7efe2b997b6c21894b62ff372dc8d148"
+    },
+    {
+      "path": "vhd/zvhd_windows.go",
+      "bytes": 4685,
+      "sha256": "733f6f3467c5c175f76508b4ea24d82a18e2ee9ce9da1b8e7816cee85c01508d"
+    },
+    {
+      "path": "wim/decompress.go",
+      "bytes": 2663,
+      "sha256": "2a1e4868516f2daaf884e52a2eb1351d1157ef8016e00f4168e284cb2814b050"
+    },
+    {
+      "path": "wim/lzx/lzx.go",
+      "bytes": 14404,
+      "sha256": "d751fcacb2228ede93f58abed4947d4d816395b75475a45b342a3feaddba5eb5"
+    },
+    {
+      "path": "wim/validate/main_other.go",
+      "bytes": 69,
+      "sha256": "ec470236a6c64ee27eea7ad2b07cc4facf8509e43a2339d84c6ca5b2bb3a5748"
+    },
+    {
+      "path": "wim/validate/main_windows.go",
+      "bytes": 731,
+      "sha256": "55dfa7e2ac816ef2e93f43b899969db4f52f99e3083f4d126847b73ba5efc805"
+    },
+    {
+      "path": "wim/wim.go",
+      "bytes": 22368,
+      "sha256": "c21c9d3a2262e7b92ead22b4816f170113a6aea7126e5d59e06fcc54361154cb"
+    },
+    {
+      "path": "zsyscall_windows.go",
+      "bytes": 14895,
+      "sha256": "de1a5f7a6742fba0ad7ab66708ea3b4cfa2e35cae9df3a08383c6b1ee962fb2a"
+    }
+  ],
+  "patchSHA256": "f6cc57b0fbdad6fab76c56478327d7739234db79c22c6753cc7458072837ee67",
+  "recipeHashes": {
+    "sdk-winio-build-input.mjs": "3718c07bf83d06e4768c1fc20c73d1b0025d72197df1c168d8be7fca39b41aed",
+    "winio-build-input.mjs": "b0a437c6e40c78e6a1cf57001484b14603c18317fddaae644369d7ae7c4071c0",
+    "winio-build-input-fs.mjs": "14f8b6ac127210319035fcbb2aa604a9efb49e88c98db622221569fdabff2289",
+    "build-session.mjs": "06d642a853a65072edd881e42edb302435b401334ea5bde979ff5586c1414178",
+    "build-session-bundle.mjs": "fd32d923a789235cce74dd038490b9c1e22c3c0dd64c1baf5308bc7c62eb4dde",
+    "lan-bundle-provenance.mjs": "f8e35c4c5af9e4d1029e29228b63d9886d7c1b3e49ebcdf91b773023dbea9115",
+    "collect-notices.mjs": "e8064dc09871fd4e645066e86e0c18b21ead69fad8bdf572296158f47e143bc5"
+  }
+}

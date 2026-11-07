@@ -47,6 +47,13 @@
 .resource-item {
   position: relative;
 }
+.status-dot.paused {
+  background: var(--warning);
+}
+.paused-label {
+  color: var(--warning);
+  font-size: 11px;
+}
 .resource-item.stopped .row-copy,
 .resource-item.stopped .resource-symbol,
 .project-item.stopped .project-row strong {
@@ -293,6 +300,92 @@
   border: 1px solid var(--border);
   border-radius: 8px;
 }
+.image-import-controls {
+  padding: 0 8px 8px;
+}
+.image-import-controls label,
+.image-import-dialog label {
+  display: block;
+  margin: 8px 0;
+}
+.image-import-controls input,
+.image-import-dialog select {
+  max-width: 100%;
+}
+.operation-dialog.image-import-dialog {
+  width: min(920px, 92vw);
+}
+.operation-dialog.image-import-dialog label {
+  display: block;
+}
+.operation-dialog.image-import-dialog input:not([type="checkbox"]),
+.operation-dialog.image-import-dialog select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+}
+.migration-map-preview textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 180px;
+  margin-top: 6px;
+  resize: vertical;
+  font-family: Consolas, monospace;
+  white-space: pre;
+}
+.image-import-review,
+.image-import-history,
+.image-import-tags {
+  overflow-wrap: anywhere;
+}
+.image-import-history {
+  max-height: min(240px, 32vh);
+  overflow: auto;
+}
+.image-import-tags {
+  max-height: 35vh;
+  overflow: auto;
+}
+.image-import-tags fieldset {
+  border: 1px solid var(--border);
+  margin: 8px 0;
+  padding: 8px;
+}
 .files-panel td {
   overflow-wrap: anywhere;
+}
+.source-export-history {
+  max-height: min(360px, 40vh);
+  overflow: auto;
+}
+.operation-dialog.source-export-dialog {
+  width: min(1200px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  resize: both;
+  overflow: auto;
+}
+.source-export-history table {
+  min-width: 1040px;
+}
+.source-export-history table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.source-export-history th,
+.source-export-history td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.source-export-history th:nth-child(3),
+.source-export-history td:nth-child(3) {
+  min-width: 9rem;
+}
+.source-export-history th:nth-child(4),
+.source-export-history td:nth-child(4) {
+  min-width: 14rem;
 }

@@ -1,0 +1,566 @@
+{
+  "schemaVersion": 1,
+  "preparedDate": "2026-10-24",
+  "status": "planned-not-executed",
+  "plan": "mac-reference-capture-plan.md",
+  "environment": null,
+  "capabilityGates": [
+    {
+      "id": "G0",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "G1",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "G2",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "G3",
+      "status": "not-run",
+      "evidence": []
+    },
+    {
+      "id": "G4",
+      "status": "not-run",
+      "evidence": []
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "MAC-001",
+      "priority": "P0",
+      "journey": "First launch in disposable user/app state",
+      "captureRequirements": "Welcome/setup, permissions, download/provision progress, cancel/resume if offered, actual ready state. Preserve initial evidence before changing defaults.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-002",
+      "priority": "P0",
+      "journey": "Normal startup with retained data",
+      "captureRequirements": "Launch/reopen, partial readiness, resource appearance, CLI readiness, persistent markers.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-003",
+      "priority": "P0",
+      "journey": "Close UI while a fixture runs",
+      "captureRequirements": "Closure/reopen, backend and HTTP continuity, resource identity/start time.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-004",
+      "priority": "P0",
+      "journey": "Explicit owned engine stop/start/restart",
+      "captureRequirements": "Prompt, progress, client failure, recovery and data; distinguish each lifecycle scope.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-005",
+      "priority": "P0",
+      "journey": "Resource navigation and selection",
+      "captureRequirements": "Containers/images/volumes/networks/builds/cluster/machines, menus, tabs, search/no-match, selection, keyboard and minimum-size layout.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-006",
+      "priority": "P0",
+      "journey": "Standalone running/stopped containers",
+      "captureRequirements": "Create entry if any; name/ports/mounts/command controls; start/stop/restart/pause/resume availability and actual target state.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-007",
+      "priority": "P0",
+      "journey": "Fast-exit/unhealthy fixture",
+      "captureRequirements": "Status and exit/health details, errors and offered next actions; do not misclassify application exit as engine loss.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-008",
+      "priority": "P0",
+      "journey": "Single and multiple container selection",
+      "captureRequirements": "Actions/context menu/shortcut confirmations; mixed states, per-item partial results and retained volumes.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-009",
+      "priority": "P0",
+      "journey": "Two Compose stacks with distinct names",
+      "captureRequirements": "Group hierarchy, project versus service selection, service names, returned metadata, source-file entry points.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-010",
+      "priority": "P0",
+      "journey": "Compose lifecycle",
+      "captureRequirements": "Up/start/stop/restart/down controls, aggregate output, readiness/partial failures and remaining resources.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-011",
+      "priority": "P0",
+      "journey": "Compose ordered overrides/profiles",
+      "captureRequirements": "How configuration is discovered/reused, working directory, active profiles, services, reviewed source and repeat actions.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-012",
+      "priority": "P1",
+      "journey": "Moved/missing/invalid Compose files",
+      "captureRequirements": "Actual menus and error/deletion behavior; recovery when source files are restored or relocated.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-013",
+      "priority": "P0",
+      "journey": "Compose partial startup and cancellation",
+      "captureRequirements": "Missing image/unavailable port, failure attribution, cancel/retry and exact containers/networks/volume results.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-014",
+      "priority": "P0",
+      "journey": "Noisy UTF-8 logs",
+      "captureRequirements": "Follow/history, search/highlight/context/filter, wrap, service selection, copy/export and bounded-history behavior.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-015",
+      "priority": "P0",
+      "journey": "Ordinary container terminal",
+      "captureRequirements": "Open/reopen, input/resize/Ctrl+C/exit/disconnect, focus and editing shortcuts; missing shell and stopped target.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-016",
+      "priority": "P0",
+      "journey": "Debug Shell against shell-less/read-only targets",
+      "captureRequirements": "Entry, initial tools, target identity/privileges, install-tool flow if available, cancellation, target exit and package/data preservation.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-017",
+      "priority": "P1",
+      "journey": "Live resource statistics",
+      "captureRequirements": "Idle/load display, units, history, paused/stopped target and read failure; avoid latency conclusions from remote desktop.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-018",
+      "priority": "P0",
+      "journey": "Pull/tag/remove images",
+      "captureRequirements": "Progress/cancel, absent reference, authentication failure, multiple tags, in-use deletion and confirmations.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-019",
+      "priority": "P0",
+      "journey": "Successful/failed/cached builds",
+      "captureRequirements": "Submit entry, progress, cancel, retained history/steps/logs, local image use and cleanup.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-020",
+      "priority": "P1",
+      "journey": "Registry/private-base build fixture",
+      "captureRequirements": "Login entry if present, failed auth, retry/forget; only disposable credentials, no secret screenshots.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-021",
+      "priority": "P0",
+      "journey": "Container native files",
+      "captureRequirements": "Folder action, Finder/editor entry, running/stopped container, directory/text/binary/large/Unicode files, path continuity.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-022",
+      "priority": "P0",
+      "journey": "Edit/add/delete supported container files",
+      "captureRequirements": "Permission/read-only refusal, editor save/reload, external replacement/concurrent writer and actual filesystem results.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-023",
+      "priority": "P0",
+      "journey": "Standalone image files",
+      "captureRequirements": "Read-only browsing, image/tag replacement, permissions and denied write; note image-store limitations.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-024",
+      "priority": "P0",
+      "journey": "Standalone volume files",
+      "captureRequirements": "Attached/unattached volume entry, native editing, owner/mode/symlinks, actual data and helper/resource side effects.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-025",
+      "priority": "P0",
+      "journey": "Volume management",
+      "captureRequirements": "Create/attach/inspect/remove, in-use refusal, persistence across container recreation; exact delete consequences.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-026",
+      "priority": "P1",
+      "journey": "Storage usage/cleanup/export/restore entry points",
+      "captureRequirements": "Inventory actual offered capabilities; selected cleanup/refusal, consistency warnings, cancel and preservation of unselected data. Absence is not backup success.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-027",
+      "priority": "P0",
+      "journey": "Automatic container/Compose domains",
+      "captureRequirements": "Default names, open/copy/index entry, browser and CLI reachability; creation/recreation/stop/removal and stale links.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-028",
+      "priority": "P1",
+      "journey": "Multiple ports/custom domains/wildcards",
+      "captureRequirements": "Detection and explicit override, ambiguous listeners, name collisions, non-HTTP access and unavailable target.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-029",
+      "priority": "P0",
+      "journey": "First HTTPS access before trust",
+      "captureRequirements": "Setup prompt, denial/cancel, retry, certificate properties and actually trusted response. Keep clean initial trust state.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-030",
+      "priority": "P0",
+      "journey": "HTTPS from different clients",
+      "captureRequirements": "Browser, host CLI, supported containers and Linux machine; opt-out, read-only/missing CA store, restart and trust removal.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-031",
+      "priority": "P1",
+      "journey": "Native networking controls",
+      "captureRequirements": "Published-port conflict, host access, exposure scope and any configurable network boundary; compare routing with actual responses.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-032",
+      "priority": "P1",
+      "journey": "Remote-safe proxy/VPN/DNS transition",
+      "captureRequirements": "Observe configuration/status and bounded failure/recovery only with independent access restoration. If unsafe or unsupported, record blocked; never sever the only remote route.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-033",
+      "priority": "P0",
+      "journey": "Optional Kubernetes enable/disable",
+      "captureRequirements": "Setup/version/readiness, cancellation if available, disabled state and preserved data according to actual behavior.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-034",
+      "priority": "P0",
+      "journey": "Kubernetes resource journeys",
+      "captureRequirements": "Workload/service/namespace/claim views, inspect/YAML/events, logs/TTY and delete confirmations; collect errors too.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-035",
+      "priority": "P0",
+      "journey": "Kubernetes service access and local images",
+      "captureRequirements": "Service links/domains/Ingress/ports, namespace collisions, local-image workflow, persistent marker and unavailable service. Do not assume an Ingress controller.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-036",
+      "priority": "P0",
+      "journey": "Disposable Linux machine",
+      "captureRequirements": "Create distro/name controls, progress, shell/open/stop/restart/delete, default user and persistence. Windows equivalent uses supported user WSL integration.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-037",
+      "priority": "P0",
+      "journey": "Linux-machine files and developer tools",
+      "captureRequirements": "Two-way host sharing, native paths, editor/terminal/SSH entry, missing path/permission error and independence from Docker engine lifecycle.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-038",
+      "priority": "P1",
+      "journey": "CLI/SSH/agent integration",
+      "captureRequirements": "Discover actual commands, defaults/context selection, native executable invocation and credential/agent behavior; no user private keys or implicit forwarding.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-039",
+      "priority": "P0",
+      "journey": "Settings/apply/error",
+      "captureRequirements": "Available categories, draft/validation/apply/restart, cancellation, retained values and requested versus enforced resource controls.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-040",
+      "priority": "P1",
+      "journey": "Menu-bar/tray equivalent and login startup",
+      "captureRequirements": "Quick actions/status, opt-in startup, quit versus stop, shortcuts and stale/offline presentation; record Windows adaptation separately.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-041",
+      "priority": "P0",
+      "journey": "Docker Desktop migration, disposable source only",
+      "captureRequirements": "Source/version selection, discovery, data selection/space estimate, progress, cancel, conflicts, verification and source retained. Conditional on source installation/license/available time. No Rancher migration assumption.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-042",
+      "priority": "P1",
+      "journey": "Migration retry/failure/accounting",
+      "captureRequirements": "Interrupted transfer or unavailable source, safe retry and target cleanup; separate images/volumes/settings/credentials/cluster claims.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-043",
+      "priority": "P1",
+      "journey": "Docker-only and whole-app reset",
+      "captureRequirements": "First capture scope/prompt/cancel. Execution only against an explicitly disposable reference setup after other captures and export; inspect actual retained/deleted data.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-044",
+      "priority": "P1",
+      "journey": "Diagnostics/unavailable engine",
+      "captureRequirements": "Failure versus empty inventory, log/support export, error copy/retry and useful recovery guidance; bounded disposable faults only.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-045",
+      "priority": "P1",
+      "journey": "Restart/reopen persistence",
+      "captureRequirements": "Saved settings/layout/project choices, outstanding sessions/forwards, fixture data and actual engine identity after supported restart.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-046",
+      "priority": "P1",
+      "journey": "Cross-cutting appearance/accessibility",
+      "captureRequirements": "Dark/light, representative small/large windows, long names/large lists, focus return, keyboard navigation and permission dialogs. No pixel-equality requirement across OSes.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-047",
+      "priority": "P2",
+      "journey": "Update/uninstall/reinstall",
+      "captureRequirements": "Entry/prompt/cancel, data retention contract and supported source/target versions. Destructive execution last, after verified export and restored remote access plan.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    },
+    {
+      "id": "MAC-048",
+      "priority": "P2",
+      "journey": "Physical sleep/wake/Wi-Fi/power/device changes",
+      "captureRequirements": "Not certified by cloud rental, screenshots or a remote disconnect. Needs suitable physical hardware and instrumentation; keep distinct from ordinary app restart.",
+      "status": "planned",
+      "observations": [],
+      "artifactPaths": [],
+      "gaps": [],
+      "cleanupOutcome": null
+    }
+  ],
+  "discoveries": [],
+  "exportVerified": false
+}

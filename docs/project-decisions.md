@@ -236,3 +236,61 @@ against the exact pinned versions before implementation.
 - [REA](https://github.com/morluto/rea)
 - [REA Windows Ghidra scope](https://github.com/morluto/rea/blob/main/docs/windows-ghidra-p0.md)
 - [REA native investigation](https://github.com/morluto/rea/blob/main/docs/native-investigation.md)
+
+## Candidate bundle trust input (2026-11-07)
+
+For the Phase 2 different-build transition, use an explicit build-time
+operator-supplied stable Ed25519 signing key and an independently supplied public
+verifier. The candidate statement purpose is `orbwin-rdd-candidate-bundle-v1`;
+existing ephemeral LAN SDK signing remains separate. A missing trust configuration
+must fail closed. Do not learn a verifier from the candidate statement or renderer.
+Local qualification may later provision a protected qualification signer; this
+establishes local test trust only, not public release signing or distribution.
+The first implementation slice covers canonical statement validation and explicit
+build input/signing only. Native staging, old-owner issuance and activation require
+separate implementation and qualification under the existing ownership contract.
+
+
+### Phase 2 supported failure model and dependency disposition — 2026-11-07
+
+The supported outcome remains the complete included Phase 2 product journeys.
+D26 permits prompt, transparent failure and useful non-destructive manual recovery
+where automatic recovery is not practical. A pending-operation refusal preserves
+safety but does not itself complete recovery. Implement and qualify the concrete
+accepted recovery route; reconstruction of every lost original PI/stdio or automatic
+rebind after every possible process death is not an additional universal gate.
+No pending record, PID lookup, copied identity or EOF grants writer/checkpoint rights.
+
+Reuse the pinned Go standard library's documented normal-return Start/WithHandle/
+Wait and managed-stdio contracts for an explicitly bounded selected command profile,
+as already accepted for hostagent lineage. Guest command owners must exist before
+Start, retain the immutable actual returned Process, capture original process-handle
+evidence before the sole waiter, own inputs/stdio/workers, seal new births and retain
+uncertainty without timeout-kill/retry. Do not claim raw internal PI/thread/close
+custody from these APIs. The direct-native-PI-only proposal in native issuer PLAN
+7b6dc928 is not mandatory for this initial supported profile solely to prove hidden
+stdlib internals; use a direct adaptation when a concrete required failure contract
+cannot be met and document that need. This does not relax genuine native guest scope,
+source provenance, persistent-write ordering or actual process/IO settlement gates.
+Known broken dependency behavior (go-winio close/partial Dial) still requires its
+specific correction; ordinary standard-library dependencies are not automatically
+new rewrite projects.
+
+Downgrade protection concerns the exact supported product launch/installer paths.
+Normal serve/fixed hostagent PID barriers must be proved against selected older
+source/artifacts before guest mutation. Do not describe them as preventing a user
+from deliberately invoking arbitrary unpaired binaries, overriding pidfile paths,
+or issuing WSL commands. Those invocations neither grant new product authority nor
+permit touching another engine/user distribution. Keep unknown actual installed
+and historical MSI behavior as explicit qualification gaps; do not infer either
+support or a blocker merely from the presence of an old Delete API. Current reset/
+delete and all supported mutable entrypoints still require real ownership and the
+negative-state checks. No silent reset or scope cut is introduced.
+
+For the guard schema, canonical initial/reclaimed empty peer slots must be separated
+from a wholly missing-required pending record and partially removed old metadata.
+The current contract's blanket empty-slot refusal is inconsistent with two-slot
+reuse; correct its state table before implementation. Fixed bounded protocol-metadata
+reclamation may be considered only with exact old native IDs/SD/hash, a newer durable
+pair, positive reader closure and stop-first retention; it never covers user data.
+Native execution remains paused by the user throughout this disposition.

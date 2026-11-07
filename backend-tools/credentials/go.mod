@@ -7,4 +7,4 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.12
 )
 
-require golang.org/x/sys v0.20.0 // indirect
+require golang.org/x/sys v0.48.0 // indirect

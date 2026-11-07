@@ -4,13 +4,19 @@
 //! Cancellation is uncertain: authentication/storage may already have committed.
 use crate::{
     engine,
-    operations::{self, Outcome, Output, Request},
+    operations::{Lease, Outcome, Output, Request},
     runtime,
 };
 use serde::Deserialize;
-use std::{fmt, path::Path};
+use std::{
+    ffi::OsString,
+    fmt,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tauri::ipc::Channel;
-use tokio::{process::Command, sync::oneshot};
+use tokio::sync::oneshot;
 
 #[derive(Deserialize)]
 #[serde(transparent)]
@@ -76,35 +82,6 @@ pub(crate) fn validate_stored_server(server: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn route_helper_to(value: &mut serde_json::Value, key: &str, helper: &str) -> Result<(), String> {
-    let object = value
-        .as_object_mut()
-        .ok_or("Private Docker configuration must be an object")?;
-    if object
-        .get("auths")
-        .and_then(|v| v.get(key))
-        .is_some_and(|entry| {
-            ["auth", "identitytoken", "registrytoken"]
-                .iter()
-                .any(|field| entry[*field].as_str().is_some_and(|s| !s.is_empty()))
-        })
-    {
-        return Err("This private registry has existing file credentials. Use its current client or remove those credentials explicitly before changing its store.".into());
-    }
-    let helpers = object
-        .entry("credHelpers")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or("Private registry helper configuration is invalid")?;
-    if helpers.get(key).is_some_and(|value| value != helper) {
-        return Err("This private registry already uses another credential helper; its configuration was retained.".into());
-    }
-    helpers.insert(key.into(), serde_json::json!(helper));
-    Ok(())
-}
-fn route_helper(value: &mut serde_json::Value, key: &str) -> Result<(), String> {
-    route_helper_to(value, key, "orbwin")
-}
 pub(crate) fn config_lock(home: &Path) -> Result<std::fs::File, String> {
     let directory = home.join(".rdorbwin");
     std::fs::create_dir_all(&directory)
@@ -122,139 +99,236 @@ pub(crate) fn config_lock(home: &Path) -> Result<std::fs::File, String> {
             "Private credential settings are busy. Wait for the other operation and retry.".into()
         })
 }
-fn read_config(path: &Path) -> Result<serde_json::Value, String> {
-    use std::io::Read;
-    if !path.exists() {
-        return Ok(serde_json::json!({}));
-    }
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .map_err(|_| "Cannot read private credential settings")?
-        .take((1 << 20) + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read private credential settings")?;
-    if bytes.len() > 1 << 20 {
-        return Err("Private credential settings exceed 1 MiB; they were preserved.".into());
-    }
-    serde_json::from_slice(&bytes)
-        .map_err(|_| "Private credential settings are invalid; they were preserved.".into())
+// List/erase address only the owned Windows vault namespace. They do not need
+// a config snapshot and remain usable when the private config requires review.
+// Login stages WSL routing first, releases that legacy metadata lock, then
+// acquires the independent native master owner. These locks are never nested.
+const LIST_LIMIT: usize = 1 << 20;
+const HELPER_FAILURE: &str = "The Windows credential operation failed. Refresh saved entries before retrying; a credential mutation may already have completed.";
+
+#[derive(Default)]
+struct ListCapture {
+    bytes: Vec<u8>,
+    invalid: bool,
 }
-// Caller holds config_lock. Copy routing metadata only; WSL invokes the exact
-// bundled Windows helper through explicit PATH and normal WSL interop.
-pub(crate) fn sync_wsl(home: &Path, value: &mut serde_json::Value) -> Result<(), String> {
-    let windows = read_config(&home.join(".rdorbwin/docker/config.json"))?;
-    if let Some(helpers) = windows["credHelpers"].as_object() {
-        for (key, helper) in helpers {
-            if helper == "orbwin" {
-                validate_stored_server(key)?;
-                route_helper_to(value, key, "orbwin.exe")?;
-            }
+impl ListCapture {
+    fn append(&mut self, bytes: &[u8]) {
+        if self.invalid || bytes.len() > LIST_LIMIT.saturating_sub(self.bytes.len()) {
+            self.invalid = true;
+            return;
+        }
+        self.bytes.extend_from_slice(bytes);
+    }
+}
+
+fn list_metadata(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.len() > LIST_LIMIT {
+        return Err("Saved registry list exceeds its size limit.".into());
+    }
+    // Parsing errors can quote untrusted helper output: never return them.
+    let entries: std::collections::BTreeMap<String, String> = serde_json::from_slice(bytes)
+        .map_err(|_| "The saved registry list has an invalid shape.")?;
+    if entries.len() > 256 {
+        return Err("Saved registry list exceeds 256 entries.".into());
+    }
+    for (server, username) in &entries {
+        validate_stored_server(server)?;
+        // Match the held helper's stored username protocol. UI login has a
+        // stricter input rule, but CLI-created metadata can contain escaped
+        // controls and must still be visible/removable. JSON and React text
+        // rendering preserve these as data; NUL is rejected by the helper too.
+        if username.is_empty() || username.len() > 512 || username.contains('\0') {
+            return Err("The saved registry list contains an invalid username.".into());
         }
     }
-    Ok(())
+    serde_json::to_vec(&entries).map_err(|_| "Cannot prepare saved registry metadata.".into())
 }
-fn configure(config: &Path, key: &str) -> Result<(), String> {
-    let home = config
-        .parent()
-        .and_then(Path::parent)
-        .ok_or("Private profile path is invalid")?;
-    let _lock = config_lock(home)?;
-    runtime::configure_client(config)?;
-    let path = config.join("config.json");
-    let mut value = read_config(&path)?;
-    route_helper(&mut value, key)?;
-    let wsl = home.join(".rdorbwin/wsl-docker");
-    std::fs::create_dir_all(&wsl).map_err(|_| "Cannot prepare private WSL credential routing")?;
-    let mut linux = read_config(&wsl.join("config.json"))?;
-    route_helper_to(&mut linux, key, "orbwin.exe")?;
-    // No credentials have been sent. A partial metadata write is safe to retry;
-    // each client still targets the same owned helper and independent engine.
-    runtime::write_json(&wsl.join("config.json"), &linux)?;
-    runtime::write_json(&path, &value)
+
+// No subprocess discovery is needed by the vault helper. Its exact held image
+// owns protocol handling; ambient Docker/config selectors have no authority.
+fn helper_environment() -> Vec<(OsString, OsString)> {
+    std::env::vars_os()
+        .filter(|(key, _)| {
+            let key = key.to_string_lossy().to_ascii_uppercase();
+            !key.starts_with("DOCKER_")
+                && !key.starts_with("BUILDX_")
+                && key != "BUILDKIT_HOST"
+                && key != "ORBWIN_DOCKER_MANAGED_PLUGINS"
+        })
+        .collect()
+}
+
+async fn helper_command(
+    action: &str,
+    input: Option<Vec<u8>>,
+    mutation: bool,
+    cancelled: &mut oneshot::Receiver<()>,
+    lease: Option<Lease>,
+) -> Result<(crate::operations::ClientResult, ListCapture), String> {
+    let helper = tokio::task::spawn_blocking(runtime::credentials)
+        .await
+        .map_err(|_| "Credential helper admission did not complete.")??;
+    let captured = Arc::new(Mutex::new(ListCapture::default()));
+    let incoming = captured.clone();
+    let channel = Channel::new(move |body| {
+        let event: serde_json::Value = body.deserialize()?;
+        if !mutation && event["kind"] == "data" && event["stream"] == "stdout" {
+            let bytes: Vec<u8> = serde_json::from_value(event["bytes"].clone())?;
+            if let Ok(mut captured) = incoming.lock() {
+                captured.append(&bytes);
+            }
+        }
+        Ok(())
+    });
+    let result = crate::operation_worker::run(
+        helper,
+        vec![action.into()],
+        helper_environment(),
+        None,
+        input,
+        channel,
+        cancelled,
+        120,
+        lease,
+    )
+    .await
+    .map_err(|_| HELPER_FAILURE.to_owned())?;
+    let captured = Arc::try_unwrap(captured)
+        .map_err(|_| "Saved registry metadata remains borrowed.")?
+        .into_inner()
+        .map_err(|_| "Saved registry metadata is unavailable.")?;
+    Ok((result, captured))
+}
+
+// WSL connects copy only validated owned server names, outside their config lock.
+// No master config admission is needed to inspect the helper's owned namespace.
+pub(crate) async fn stored_registry_keys() -> Result<Vec<String>, String> {
+    let (_sender, mut cancelled) = oneshot::channel();
+    let (result, captured) = helper_command("list", None, false, &mut cancelled, None).await?;
+    if result.interrupted || result.exit_code != Some(0) {
+        return Err(HELPER_FAILURE.into());
+    }
+    if captured.invalid {
+        return Err("Saved registry list exceeds its size limit.".into());
+    }
+    let metadata = list_metadata(&captured.bytes)?;
+    let entries: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&metadata).map_err(|_| "Saved registry metadata is unavailable.")?;
+    Ok(entries.into_keys().collect())
 }
 
 pub(crate) async fn run(
     request: &Request,
     output: &Channel<Output>,
     cancelled: &mut oneshot::Receiver<()>,
+    lease: Lease,
 ) -> Result<Outcome, String> {
-    let target = engine::target()?;
-    let helper = tokio::task::spawn_blocking(runtime::credentials)
+    if let Request::RegistryLogin {
+        server,
+        username,
+        secret,
+    } = request
+    {
+        validate_login(server, username, secret)?;
+        let (server, key) = login_target(server)?;
+        let target = engine::target()?;
+        let helper = tokio::task::spawn_blocking(runtime::credentials)
+            .await
+            .map_err(|_| "Credential helper admission did not complete.")??;
+        let home = target.home().to_path_buf();
+        let route = key.clone();
+        let metadata_lease = lease.clone();
+        tokio::task::spawn_blocking(move || {
+            let _lease = metadata_lease;
+            crate::wsl_clients::route_registry_helper(&home, &route)
+        })
         .await
-        .map_err(|e| e.to_string())??;
-    if cancelled.try_recv().is_ok() {
-        return Err("Cancelled before dispatch. No credential operation was sent.".into());
+        .map_err(|_| "Private WSL credential routing did not complete.")??;
+        let docker = target.docker.clone();
+        let admission_lease = lease.clone();
+        let mut guard = tokio::task::spawn_blocking(move || {
+            let _lease = admission_lease;
+            crate::client_config::acquire(docker, helper)
+        })
+        .await
+        .map_err(|_| "Private credential configuration admission did not complete.")?
+        .map_err(|e| e.to_string())?;
+        let args = vec![
+            "--config".into(),
+            guard.path().as_os_str().to_owned(),
+            "--host".into(),
+            engine::ENDPOINT.into(),
+            "login".into(),
+            "--username".into(),
+            username.into(),
+            "--password-stdin".into(),
+            server.into(),
+        ];
+        let environment = engine::docker_environment_for_paths(
+            &target,
+            guard.path(),
+            &guard.path().join("buildx"),
+        )?;
+        let admission = guard
+            .begin_registry_writer(&[key], &args)
+            .map_err(|e| e.to_string())?;
+        let spec = crate::native_client::NativeSpec::new(
+            target.docker.clone(),
+            args,
+            environment,
+            None,
+            Some(admission),
+        );
+        let completion = crate::credential_writer::execute(
+            guard,
+            spec,
+            secret.0.as_bytes().to_vec(),
+            Duration::from_secs(120),
+            cancelled,
+            Some(lease),
+        )
+        .await?;
+        let success = completion.exit_code == 0;
+        return Ok(Outcome {
+            success, mutation: true, interrupted: false, exit_code: Some(completion.exit_code as i32),
+            message: if success {
+                "Registry authentication completed and credentials were saved in the OrbWin Windows store."
+            } else {
+                "Registry authentication or credential storage failed. Check the registry, credentials and network, then refresh saved entries. Existing credentials were not intentionally removed."
+            }.into(),
+        });
     }
-    let login = matches!(request, Request::RegistryLogin { .. });
-    let mutation = !matches!(request, Request::RegistryList);
-    let mut command = Command::new(if login { target.docker.clone() } else { helper });
-    let input = match request {
-        Request::RegistryLogin {
-            server,
-            username,
-            secret,
-        } => {
-            let (server, key) = login_target(server)?;
-            let config = target.config.clone();
-            tokio::task::spawn_blocking(move || configure(&config, &key))
-                .await
-                .map_err(|e| e.to_string())??;
-            command
-                .arg("--config")
-                .arg(&target.config)
-                .arg("--host")
-                .arg(engine::ENDPOINT)
-                .args(["login", "--username", username, "--password-stdin", &server]);
-            Some(secret.0.as_bytes())
-        }
+    let (action, input, mutation) = match request {
+        Request::RegistryList => ("list", None, false),
         Request::RegistryForget { server } => {
-            command.arg("erase");
-            Some(server.as_bytes())
-        }
-        Request::RegistryList => {
-            command.arg("list");
-            None
+            validate_stored_server(server)?;
+            ("erase", Some(server.as_bytes().to_vec()), true)
         }
         _ => return Err("Unsupported registry operation".into()),
     };
-    command
-        .env("PATH", runtime::client_path()?)
-        .env("DOCKER_CONFIG", &target.config)
-        .env("DOCKER_HOST", engine::ENDPOINT)
-        .env_remove("DOCKER_CONTEXT")
-        .env_remove("DOCKER_TLS_VERIFY")
-        .env_remove("DOCKER_CERT_PATH");
-    let discarded = Channel::new(|_| Ok(()));
-    let result = operations::client_tree(
-        command,
-        input,
-        if login { &discarded } else { output },
-        cancelled,
-        120,
-    )
-    .await?;
+    let (result, captured) =
+        helper_command(action, input, mutation, cancelled, Some(lease)).await?;
     let success = !result.interrupted && result.exit_code == Some(0);
-    let message = if success {
-        if login {
-            "Registry authentication completed and credentials were saved in the OrbWin Windows store."
-        } else if mutation {
-            "Saved OrbWin credentials were removed. Workloads were not stopped."
-        } else {
-            "Saved registry list read."
+    if success && !mutation {
+        if captured.invalid {
+            return Err("Saved registry list exceeds its size limit.".into());
         }
-    } else if result.interrupted {
-        "Credential command stopped. Authentication or storage may already have completed; refresh the saved registry list."
-    } else if login {
-        "Registry authentication or credential storage failed. Check the registry, credentials and network, then refresh saved entries. Existing credentials were not intentionally removed."
-    } else {
-        "The Windows credential operation failed. Refresh and inspect the selected entry before retrying."
-    };
+        let metadata = list_metadata(&captured.bytes)?;
+        output
+            .send(Output::Data {
+                stream: "stdout",
+                bytes: metadata,
+            })
+            .map_err(|_| "The output viewer disconnected")?;
+    }
     Ok(Outcome {
-        success,
-        mutation,
-        interrupted: result.interrupted,
-        exit_code: result.exit_code,
-        message: message.into(),
+        success, mutation, interrupted: result.interrupted, exit_code: result.exit_code,
+        message: if success {
+            if mutation { "Saved OrbWin credentials were removed. Workloads were not stopped." }
+            else { "Saved registry list read." }
+        } else if result.interrupted {
+            "Credential command stopped. Authentication or storage may already have completed; refresh the saved registry list."
+        } else { HELPER_FAILURE }.into(),
     })
 }
 
@@ -286,48 +360,66 @@ mod tests {
         assert!(validate_login("docker.io", "proof-user", &Secret("token\n".into())).is_err());
     }
     #[test]
-    fn private_helper_routes_preserve_other_settings_and_refuse_credential_hijacking() {
-        let mut config = serde_json::json!({"unknown":9007199254740993u64,"credsStore":"explicit","credHelpers":{"other.example":"other"},"auths":{"untouched.example":{"auth":"synthetic-existing"}}});
-        route_helper(&mut config, "registry.example").unwrap();
-        assert_eq!(config["unknown"], 9007199254740993u64);
-        assert_eq!(config["credsStore"], "explicit");
+    fn registry_metadata_is_bounded_and_rejects_non_metadata_shapes() {
         assert_eq!(
-            config["auths"]["untouched.example"]["auth"],
-            "synthetic-existing"
+            list_metadata(br#"{"registry.example":"user"}"#).unwrap(),
+            br#"{"registry.example":"user"}"#
         );
-        assert_eq!(config["credHelpers"]["other.example"], "other");
-        let before = config.clone();
-        assert!(route_helper(&mut config, "other.example").is_err());
-        assert!(route_helper(&mut config, "untouched.example").is_err());
-        assert_eq!(config, before);
+        for value in [
+            br#"{"registry.example":{"Secret":"untrusted"}}"#.as_slice(),
+            br#"{"registry.example":"user\u0000"}"#,
+            br#"{"registry.example":""}"#,
+            br#"{" registry.example":"user"}"#,
+            b"untrusted-child-output",
+        ] {
+            let error = list_metadata(value).unwrap_err();
+            assert!(!error.contains("untrusted"));
+        }
+        let mut captured = ListCapture::default();
+        captured.append(&vec![b'x'; LIST_LIMIT]);
+        assert!(!captured.invalid);
+        captured.append(b"x");
+        assert!(captured.invalid);
+        assert_eq!(captured.bytes.len(), LIST_LIMIT);
+        captured.append(b"discarded");
+        assert_eq!(captured.bytes.len(), LIST_LIMIT);
+        let many: std::collections::BTreeMap<_, _> = (0..257)
+            .map(|i| (format!("r{i}.example"), "user"))
+            .collect();
+        assert!(list_metadata(&serde_json::to_vec(&many).unwrap()).is_err());
+        assert_eq!(
+            list_metadata(br#"{"registry.example":"cli\nuser"}"#).unwrap(),
+            br#"{"registry.example":"cli\nuser"}"#
+        );
     }
+
     #[test]
-    fn wsl_routes_only_product_metadata_and_refuses_foreign_settings() {
-        let directory = std::env::temp_dir().join(format!(
-            "orbwin-registry-routing-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let config = directory.join(".rdorbwin/docker");
-        std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("config.json"),r#"{"credHelpers":{"owned.example":"orbwin","foreign.example":"foreign"},"auths":{"secret.example":{"auth":"synthetic-only"}}}"#).unwrap();
-        let _lock = config_lock(&directory).unwrap();
-        #[cfg(windows)]
-        assert!(config_lock(&directory).is_err());
-        let mut linux = serde_json::json!({"unknown":9007199254740993u64});
-        sync_wsl(&directory, &mut linux).unwrap();
+    fn helper_list_channel_releases_capture_after_owned_delivery() {
+        let captured = Arc::new(Mutex::new(ListCapture::default()));
+        let incoming = captured.clone();
+        let channel = Channel::new(move |body| {
+            let event: serde_json::Value = body.deserialize()?;
+            if event["kind"] == "data" && event["stream"] == "stdout" {
+                let bytes: Vec<u8> = serde_json::from_value(event["bytes"].clone())?;
+                incoming.lock().unwrap().append(&bytes);
+            }
+            Ok(())
+        });
+        channel
+            .send(Output::Data {
+                stream: "stdout",
+                bytes: br#"{"registry.example":"user"}"#.to_vec(),
+            })
+            .unwrap();
+        drop(channel);
+        let captured = Arc::try_unwrap(captured)
+            .ok()
+            .unwrap()
+            .into_inner()
+            .unwrap();
         assert_eq!(
-            linux,
-            serde_json::json!({"unknown":9007199254740993u64,"credHelpers":{"owned.example":"orbwin.exe"}})
+            list_metadata(&captured.bytes).unwrap(),
+            br#"{"registry.example":"user"}"#
         );
-        let mut foreign = serde_json::json!({"credHelpers":{"owned.example":"another"}});
-        let before = foreign.clone();
-        assert!(sync_wsl(&directory, &mut foreign).is_err());
-        assert_eq!(foreign, before);
-        drop(_lock);
-        std::fs::remove_dir_all(directory).unwrap();
     }
 }

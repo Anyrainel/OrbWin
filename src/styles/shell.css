@@ -244,6 +244,17 @@ kbd {
 .confirm-body p + p {
   margin-top: 10px;
 }
+
+.confirm-body code,
+.settings-trust-receipt code {
+  overflow-wrap: anywhere;
+}
+
+.settings-trust-receipt {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
 .confirm-list {
   margin: 12px 0 0;
   padding-left: 18px;
@@ -564,6 +575,11 @@ kbd {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+.settings-network-option {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
 .link-button {
   color: var(--focus);
   padding: 0;
@@ -612,6 +628,18 @@ kbd {
 .cleanup-progress progress {
   width: 160px;
   accent-color: var(--selected);
+}
+.host-capacity meter {
+  width: 100%;
+  height: 12px;
+  accent-color: var(--selected);
+}
+.host-capacity meter::-webkit-meter-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.host-capacity meter::-webkit-meter-optimum-value {
+  background: var(--selected);
 }
 .cleanup-section {
   margin-top: 12px;

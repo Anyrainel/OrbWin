@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { Copy, RefreshCw, Search, Server, Terminal, X } from "lucide-react";
 import * as backend from "../backend";
+import { useOperation, wslComposeSpec } from "./Operations";
 import { copyText } from "./cluster/api";
 import {
   openCommand,
@@ -287,6 +288,7 @@ export function Wsl() {
         </div>
       </div>
       <aside className="k8s-inspector" aria-label="Distribution details">
+        <ClientTools />
         {detail ? (
           <Detail key={detail.name} distro={detail} onRefresh={read} />
         ) : (
@@ -307,6 +309,78 @@ export function Wsl() {
         )}
       </aside>
     </div>
+  );
+}
+
+function ClientTools() {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState("");
+  const [failure, setFailure] = useState("");
+  const active = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  async function refresh() {
+    if (!isTauri() || active.current) return;
+    active.current = true;
+    setPending(true);
+    setMessage("");
+    setFailure("");
+    try {
+      const result = await backend.refreshWslClients();
+      if (!mounted.current) return;
+      setMessage(
+        result.changed
+          ? "WSL client tools refreshed."
+          : "WSL client tools are already current.",
+      );
+    } catch (reason) {
+      if (mounted.current)
+        setFailure(String(reason instanceof Error ? reason.message : reason));
+    } finally {
+      active.current = false;
+      if (mounted.current) setPending(false);
+    }
+  }
+  return (
+    <section
+      className="wsl-section"
+      aria-label="WSL client tools"
+      aria-busy={pending}
+    >
+      <h3>WSL client tools</h3>
+      <p className="capability-note">
+        Use this after updating OrbWin to refresh its private Docker plugin
+        directory. Project connections and registry settings are preserved.
+      </p>
+      <button
+        className="button"
+        disabled={pending || !isTauri()}
+        onClick={() => void refresh()}
+      >
+        <RefreshCw size={13} />{" "}
+        {pending ? "Refreshing client tools…" : "Refresh client tools"}
+      </button>
+      {pending && (
+        <p role="status" className="capability-note">
+          Finishing the local update. Once dispatched, it cannot be cancelled.
+        </p>
+      )}
+      {message && (
+        <p role="status" className="capability-note">
+          {message}
+        </p>
+      )}
+      {failure && (
+        <p role="alert" className="k8s-error-text">
+          {failure}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -444,7 +518,11 @@ function Detail({
           </p>
         )}
         {distro.role === "user" && distro.version === 2 && (
-          <ProjectConnection name={distro.name} onRefresh={onRefresh} />
+          <ProjectConnection
+            key={distro.name}
+            name={distro.name}
+            onRefresh={onRefresh}
+          />
         )}
         <p className="capability-note">
           Creating or cloning distributions and setting per-distribution
@@ -458,7 +536,8 @@ function Detail({
 }
 
 type ProjectStatus = {
-  export: { source: string; sharedSource: string } | null;
+  registration: string;
+  export: { source: string; sharedSource: string; signature: string } | null;
   connected: boolean;
   dockerCommand: string;
 };
@@ -469,9 +548,11 @@ function ProjectConnection({
   name: string;
   onRefresh: () => Promise<void>;
 }) {
+  const operation = useOperation();
   const [source, setSource] = useState("");
   const [status, setStatus] = useState<ProjectStatus | null>(null);
   const [stage, setStage] = useState("");
+  const [toolMessage, setToolMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mounted = useRef(true);
@@ -511,6 +592,32 @@ function ProjectConnection({
       if (mounted.current) setBusy(false);
     }
   }
+  async function openProject(tool: "explorer" | "code") {
+    const reviewed = status?.export;
+    if (!reviewed || busy) return;
+    setBusy(true);
+    setError("");
+    setToolMessage("");
+    setStage("Checking the selected project before opening it…");
+    try {
+      await invoke("open_wsl_project", {
+        name,
+        registration: status!.registration,
+        source: reviewed.source,
+        signature: reviewed.signature,
+        tool,
+      });
+      if (mounted.current)
+        setToolMessage(
+          `Requested ${tool === "code" ? "VS Code" : "Explorer"} for the inspected project. Check that application for completion or prompts.`,
+        );
+    } catch (reason) {
+      if (mounted.current)
+        setError(String(reason instanceof Error ? reason.message : reason));
+    } finally {
+      if (mounted.current) setBusy(false);
+    }
+  }
   return (
     <section className="wsl-section">
       <h3>Connect a Linux project</h3>
@@ -528,7 +635,11 @@ function ProjectConnection({
           placeholder="/home/you/project"
           value={source}
           disabled={busy || status?.connected}
-          onChange={(event) => setSource(event.target.value)}
+          onChange={(event) => {
+            setSource(event.target.value);
+            setStatus(null);
+            setToolMessage("");
+          }}
         />
       </label>
       <div className="action-row">
@@ -570,10 +681,98 @@ function ProjectConnection({
       )}
       {status?.export && (
         <>
+          <section>
+            <h4>Open this project</h4>
+            <p>
+              Opens the original Linux files; editor saves affect your project.
+              This may start the selected distribution. VS Code needs its WSL
+              extension; handle any extension or workspace prompts in the
+              editor.
+            </p>
+            <div className="action-row">
+              <button
+                className="button"
+                disabled={busy || !isTauri()}
+                onClick={() => void openProject("explorer")}
+              >
+                Open in Explorer
+              </button>
+              <button
+                className="button"
+                disabled={busy || !isTauri()}
+                onClick={() => void openProject("code")}
+              >
+                Open in VS Code
+              </button>
+            </div>
+            <p role="status">{toolMessage}</p>
+          </section>
+          {status.connected && (
+            <section>
+              <h4>Run in this project</h4>
+              <div className="action-row">
+                {(["validate", "up", "pull", "logs", "down"] as const).map(
+                  (action) => (
+                    <button
+                      key={action}
+                      className="button"
+                      disabled={busy}
+                      onClick={() =>
+                        operation(
+                          wslComposeSpec(name, status.export!.source, action, {
+                            connection: {
+                              registration: status.registration,
+                              source: status.export!.source,
+                              signature: status.export!.signature,
+                            },
+                          }),
+                        )
+                      }
+                    >
+                      Compose {action}…
+                    </button>
+                  ),
+                )}
+                <button
+                  className="button"
+                  disabled={busy}
+                  onClick={() =>
+                    operation({
+                      title: `Build in ${name}`,
+                      request: {
+                        kind: "wslBuild",
+                        distribution: name,
+                        connection: {
+                          registration: status.registration,
+                          source: status.export!.source,
+                          signature: status.export!.signature,
+                        },
+                        directory: "",
+                        tag: "",
+                      },
+                      fields: [
+                        {
+                          key: "directory",
+                          label:
+                            "Context directory (optional; selected project root by default)",
+                          optional: true,
+                          linux: true,
+                        },
+                        { key: "tag", label: "Image tag" },
+                      ],
+                      description: `Builds with the pinned Linux Docker client as the distribution's normal user, using an existing context inside ${status.export!.source}. Paths map automatically. Accepted build work may continue after cancellation. No shell defaults or global Docker context are changed.`,
+                    })
+                  }
+                >
+                  Build image…
+                </button>
+              </div>
+            </section>
+          )}
           <p>
-            Use this shared source for bind mounts, including Compose. A native
-            /home path belongs to this distribution and is not the engine's
-            path.
+            The project actions above map supported Linux paths automatically.
+            For an advanced raw Docker invocation, this is the explicit engine
+            bind source; native /home paths belong to the user distribution.
           </p>
           <CommandLine command={status.export.sharedSource} />
         </>

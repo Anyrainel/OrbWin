@@ -7,14 +7,15 @@ rust-version = "1.90"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
 rfd = "0.17"
-tokio = { version = "1", features = ["process", "time", "io-util", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["process", "time", "io-util", "macros", "rt-multi-thread", "sync", "net"] }
 
 [profile.release]
 panic = "abort"
@@ -24,4 +25,4 @@ strip = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Registry", "Win32_Security", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_RemoteDesktop", "Win32_System_SystemInformation", "Win32_System_Registry", "Win32_System_Pipes", "Win32_System_IO", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

@@ -3,6 +3,38 @@
 export type Row = Record<string, unknown>;
 export type Page = "containers" | "images" | "volumes" | "networks";
 
+// Snapshot replacement/cancel invalidates both success and failure before
+// parsing, even if a client completes late. No retry or engine mutation.
+export async function readResourceMetadata<T>(
+  run: (
+    output: (chunk: string, stream?: "stdout" | "stderr") => void,
+    signal: AbortSignal,
+  ) => Promise<{ success: boolean; message: string }>,
+  signal: AbortSignal,
+  isCurrent: () => boolean,
+  parse: (output: string) => T,
+): Promise<T | undefined> {
+  const current = () => !signal.aborted && isCurrent();
+  if (!current()) return;
+  let output = "",
+    diagnostic = "",
+    overflow = false;
+  try {
+    const outcome = await run((chunk, stream) => {
+      if (stream === "stderr") diagnostic = (diagnostic + chunk).slice(0, 8192);
+      else if (output.length + chunk.length > 1024 * 1024) overflow = true;
+      else output += chunk;
+    }, signal);
+    if (!current()) return;
+    if (!outcome.success) throw new Error(`${outcome.message} ${diagnostic}`);
+    if (overflow)
+      throw new Error("Resource metadata exceeded its display limit.");
+    return parse(output);
+  } catch (error) {
+    if (current()) throw error;
+  }
+}
+
 export function text(value: unknown) {
   return typeof value === "object"
     ? JSON.stringify(value)
@@ -44,18 +76,134 @@ export function labels(row: Row): Record<string, string> {
 export function project(row: Row) {
   return labels(row)["com.docker.compose.project"] || undefined;
 }
-// A Compose file is "known" only when the engine recorded exactly one absolute
-// Windows path; anything else falls back to per-container actions.
-export function composeFile(rows: Row[]) {
-  const files = new Set(
-    rows.map((row) => labels(row)["com.docker.compose.project.config_files"]),
-  );
-  if (files.size !== 1) return undefined;
-  const [file] = files;
-  return file && /^[A-Za-z]:\\[^,]*$/.test(file) ? file : undefined;
+// Labels are hints for an editable review, never permission to run a project.
+// Compose encodes config_files as an unescaped comma list: reject ambiguous
+// relative fragments, control characters, or inconsistent snapshots.
+export function composeInputs(projectName: string, rows: Row[]) {
+  const absolute = (value: string) =>
+    /^[A-Za-z]:[\\/]/.test(value) &&
+    !/[\r\n\0,=]/.test(value) &&
+    value.length <= 32767;
+  if (!rows.length || rows.some((row) => project(row) !== projectName)) return;
+  const snapshots = rows.map((row) => {
+    const data = labels(row);
+    return {
+      files: data["com.docker.compose.project.config_files"] ?? "",
+      directory: data["com.docker.compose.project.working_dir"] ?? "",
+      env: data["com.docker.compose.project.environment_file"] ?? "",
+    };
+  });
+  const first = snapshots[0];
+  if (snapshots.some((item) => JSON.stringify(item) !== JSON.stringify(first)))
+    return;
+  // Our Windows adapter canonicalizes paths before dispatch; Compose records
+  // the Win32 verbatim drive prefix. Strip only that prefix, never UNC/devices.
+  const drivePath = (value: string) =>
+    value.startsWith("\\\\?\\") ? value.slice(4) : value;
+  const files = first.files.split(",").map(drivePath);
+  const directory = drivePath(first.directory);
+  if (
+    files.length > 16 ||
+    !files.every(absolute) ||
+    !absolute(directory) ||
+    first.env
+  )
+    return;
+  return {
+    project: projectName,
+    file: files[0],
+    overrides: files.slice(1),
+    profiles: [] as string[],
+    directory,
+  };
 }
 export function isRunning(row: Row) {
   return String(row.State).toLowerCase() === "running";
+}
+export function isPaused(row: Row) {
+  return String(row.State).toLowerCase() === "paused";
+}
+
+export type WslComposeInputs = {
+  signature?: string;
+  distribution: string;
+  source: string;
+  file: string;
+  overrides: string[];
+  envFiles?: string[];
+  directory: string;
+  project: string;
+  profiles: string[];
+  services?: string[];
+};
+export function wslComposeInputs(
+  projectName: string,
+  rows: Row[],
+): WslComposeInputs | undefined {
+  if (!rows.length || rows.some((row) => project(row) !== projectName)) return;
+  const values = rows.map(
+    (row) => labels(row)["dev.orbwin.wsl.compose-inputs"],
+  );
+  if (
+    !values[0] ||
+    values[0].length > 32768 ||
+    values.some((value) => value !== values[0])
+  )
+    return;
+  try {
+    const item = JSON.parse(values[0]) as WslComposeInputs;
+    const text = (value: unknown): value is string =>
+      typeof value === "string" &&
+      value.length <= 4096 &&
+      !/[\r\n\0\\]/.test(value);
+    const list = (value: unknown, max: number) =>
+      Array.isArray(value) && value.length <= max && value.every(text);
+    if (
+      !text(item.distribution) ||
+      !item.distribution ||
+      !text(item.source) ||
+      !item.source.startsWith("/home/") ||
+      !text(item.file) ||
+      !item.file ||
+      !text(item.directory) ||
+      item.project !== projectName ||
+      !list(item.overrides, 15) ||
+      !list(item.envFiles ?? [], 16) ||
+      !list(item.profiles, 32) ||
+      (item.signature !== undefined &&
+        (typeof item.signature !== "string" ||
+          item.signature.length > 64 ||
+          !/^[0-9]+:[0-9]+$/.test(item.signature)))
+    )
+      return;
+    return {
+      distribution: item.distribution,
+      source: item.source,
+      file: item.file,
+      overrides: item.overrides,
+      ...(item.envFiles ? { envFiles: item.envFiles } : {}),
+      directory: item.directory,
+      project: projectName,
+      profiles: item.profiles,
+      ...(item.signature ? { signature: item.signature } : {}),
+    };
+  } catch {
+    return;
+  }
+}
+export function composeServiceInputs(row: Row) {
+  const data = labels(row);
+  const service = data["com.docker.compose.service"];
+  const projectName = project(row);
+  if (
+    !projectName ||
+    !service ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(service) ||
+    data["com.docker.compose.oneoff"]?.toLowerCase() === "true"
+  )
+    return;
+  const inputs = composeInputs(projectName, [row]);
+  return inputs ? { ...inputs, services: [service] } : undefined;
 }
 
 export function containerActionUnavailable(
@@ -168,11 +316,104 @@ export function publicationWarning(row: Row): string {
     : `Windows publication is unavailable for ${missing.map((port) => `${port.hostPort}/${port.protocol}`).join(", ")}. The container may be running. Refresh, inspect a conflicting service or choose another port; OrbWin will not stop another engine.`;
 }
 
-export type SortMode = "status" | "name";
-export function compareRows(page: Page, mode: SortMode) {
+export type SortMode = "status" | "name" | "size-desc" | "size-asc";
+// Docker's rounded decimal image size is not reclaimable disk space.
+export function imageSize(value: unknown): number | undefined {
+  if (typeof value === "number")
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  if (typeof value !== "string") return;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(B|kB|MB|GB|TB)$/);
+  if (!match) return;
+  const result =
+    Number(match[1]) * 1000 ** ["B", "kB", "MB", "GB", "TB"].indexOf(match[2]);
+  return Number.isFinite(result) && result <= Number.MAX_SAFE_INTEGER
+    ? result
+    : undefined;
+}
+export function platformBadge(os: unknown, architecture: unknown): string {
+  if (
+    typeof os !== "string" ||
+    typeof architecture !== "string" ||
+    !os ||
+    !architecture
+  )
+    return "Platform unverified";
+  return os === "linux" && architecture === "amd64"
+    ? "Native linux/amd64"
+    : `Unsupported ${os}/${architecture}`;
+}
+export function parseImagePlatform(output: string, id: string) {
+  if (output.length > 1024 * 1024)
+    throw new Error("Image metadata exceeded its display limit.");
+  const values = JSON.parse(output);
+  const image = Array.isArray(values) && values.length === 1 ? values[0] : null;
+  const field = (value: unknown) =>
+    typeof value === "string" && /^[a-z0-9][a-z0-9_.-]{0,63}$/.test(value);
+  if (
+    !image ||
+    image.Id !== id ||
+    !field(image.Os) ||
+    !field(image.Architecture)
+  )
+    throw new Error(
+      "Image metadata did not match the selected image or has an invalid platform.",
+    );
+  return { os: image.Os as string, architecture: image.Architecture as string };
+}
+export function parseContainerLimits(output: string, id: string) {
+  if (output.length > 1024 * 1024)
+    throw new Error("Container metadata exceeded its display limit.");
+  const values = JSON.parse(output);
+  const container =
+    Array.isArray(values) && values.length === 1 ? values[0] : null;
+  if (
+    !container ||
+    container.Id !== id ||
+    !container.HostConfig ||
+    typeof container.HostConfig !== "object" ||
+    Array.isArray(container.HostConfig)
+  )
+    throw new Error("Container metadata did not match the selected container.");
+  const number = (key: string) => {
+    const value = container.HostConfig[key];
+    if (value === undefined) return undefined;
+    if (
+      !Number.isSafeInteger(value) ||
+      value < (key === "MemorySwap" || key === "CpuQuota" ? -1 : 0)
+    )
+      throw new Error("Container resource counters are invalid.");
+    return value as number;
+  };
+  return {
+    nanoCpus: number("NanoCpus"),
+    cpuQuota: number("CpuQuota"),
+    cpuPeriod: number("CpuPeriod"),
+    memory: number("Memory"),
+    memorySwap: number("MemorySwap"),
+  };
+}
+export function compareRows(
+  page: Page,
+  mode: SortMode,
+  sizes: ReadonlyMap<string, number> = new Map(),
+) {
   return (a: Row, b: Row) => {
+    if (
+      (mode === "size-desc" || mode === "size-asc") &&
+      (page === "images" || page === "volumes")
+    ) {
+      const size = (row: Row) =>
+        page === "images" ? imageSize(row.Size) : sizes.get(String(row.Name));
+      const left = size(a),
+        right = size(b);
+      if (left === undefined && right !== undefined) return 1;
+      if (right === undefined && left !== undefined) return -1;
+      if (left !== undefined && right !== undefined && left !== right)
+        return mode === "size-desc" ? right - left : left - right;
+    }
     if (mode === "status" && page === "containers") {
-      const order = Number(isRunning(b)) - Number(isRunning(a));
+      const rank = (row: Row) => (isRunning(row) ? 2 : isPaused(row) ? 1 : 0);
+      const order = rank(b) - rank(a);
       if (order) return order;
     }
     return name(a).localeCompare(name(b), undefined, { numeric: true });
@@ -183,9 +424,15 @@ export type Entry =
   | { kind: "row"; row: Row }
   | { kind: "group"; project: string; rows: Row[] };
 // Compose groups come only from returned project labels. Groups sort among
-// standalone rows by the same rule, a group counting as running if any member is.
-export function entries(page: Page, rows: Row[], mode: SortMode): Entry[] {
-  const compare = compareRows(page, mode);
+// standalone rows by the same rule: running if any member runs, otherwise paused
+// if any member is paused. Paused never implies the container can execute work.
+export function entries(
+  page: Page,
+  rows: Row[],
+  mode: SortMode,
+  sizes?: ReadonlyMap<string, number>,
+): Entry[] {
+  const compare = compareRows(page, mode, sizes);
   const groups = new Map<string, Row[]>();
   const result: Entry[] = [];
   for (const row of rows) {
@@ -205,7 +452,11 @@ export function entries(page: Page, rows: Row[], mode: SortMode): Entry[] {
       ? entry.row
       : {
           Names: entry.project,
-          State: entry.rows.some(isRunning) ? "running" : "exited",
+          State: entry.rows.some(isRunning)
+            ? "running"
+            : entry.rows.some(isPaused)
+              ? "paused"
+              : "exited",
         };
   return result.sort((a, b) => compare(representative(a), representative(b)));
 }

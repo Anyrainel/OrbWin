@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as backend from "../../backend";
+import { useOperation } from "../Operations";
+import type { VolumeFileEdit } from "./VolumeFileEditor";
 type Entry = {
   name: string;
   kind: string;
@@ -7,19 +9,55 @@ type Entry = {
   mode: number;
   link?: string;
 };
-type Snapshot = { entries: Entry[]; complete: boolean; text?: string };
+type Snapshot = {
+  entries: Entry[];
+  complete: boolean;
+  text?: string;
+  sha256?: string;
+  editSource?: { volume?: string; path?: string; reason?: string };
+};
 
 // The native client reads Docker archives without extracting or running code.
 // Navigation aborts stale reads; only the current request may publish a result.
-export function FilesPanel({ target }: { target: string }) {
+export function FilesPanel({
+  target,
+  resource = "container",
+  onEditFile,
+}: {
+  target: string;
+  resource?: "container" | "image" | "volume";
+  onEditFile: (context: VolumeFileEdit, refreshPreview: () => void) => void;
+}) {
+  const operation = useOperation();
   const [path, setPath] = useState("/");
   const [location, setLocation] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [nativeBusy, setNativeBusy] = useState(false);
+  const [nativeMessage, setNativeMessage] = useState("");
   const pending = useRef<AbortController | null>(null);
-  useEffect(() => () => pending.current?.abort(), []);
+  const mounted = useRef(true);
+  const previewEpoch = useRef(0);
+  const requester = useRef({ target, resource });
+  if (
+    requester.current.target !== target ||
+    requester.current.resource !== resource
+  )
+    requester.current = { target, resource };
+  const editVolume =
+    resource === "volume" ? target : snapshot?.editSource?.volume;
+  const editPath =
+    resource === "volume" ? location : snapshot?.editSource?.path;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      pending.current?.abort();
+    };
+  }, []);
   async function read(selected: string, action: "list" | "read") {
+    previewEpoch.current++;
     pending.current?.abort();
     const abort = new AbortController();
     pending.current = abort;
@@ -32,7 +70,7 @@ export function FilesPanel({ target }: { target: string }) {
     try {
       const result = await backend.run(
         crypto.randomUUID(),
-        { kind: "files", target, path: selected, action },
+        { kind: "files", resource, target, path: selected, action },
         (chunk, stream) => {
           if (stream === "stderr")
             diagnostic = (diagnostic + chunk).slice(-8192);
@@ -57,13 +95,89 @@ export function FilesPanel({ target }: { target: string }) {
     }
   }
   const child = (name: string) => `${location.replace(/\/$/, "")}/${name}`;
+  async function openCopy(edit: boolean) {
+    setNativeBusy(true);
+    setNativeMessage("");
+    try {
+      const opened = await backend.openSelectedCopy(edit);
+      setNativeMessage(
+        opened
+          ? edit
+            ? "Opened the selected local copy in Notepad. Saving there does not upload changes to the engine."
+            : "Revealed the selected local file in Explorer."
+          : "File selection cancelled.",
+      );
+    } catch (reason) {
+      setNativeMessage(String(reason));
+    } finally {
+      setNativeBusy(false);
+    }
+  }
   return (
     <section className="files-panel">
-      <h3>Container files</h3>
+      <h3>
+        {resource === "container"
+          ? "Container"
+          : resource === "image"
+            ? "Image"
+            : "Volume"}{" "}
+        files
+      </h3>
       <p>
-        Read-only access through Docker. Works without a shell, including
-        stopped containers. Nothing is extracted onto Windows.
+        {resource === "container"
+          ? "Browse through Docker without a shell, including stopped containers. Browsing does not copy files onto Windows."
+          : "Browse through a disposable pinned Alpine tools container with no network. The selected image never starts; volume data is mounted read-only. The bundled tools image loads offline when needed. Browsing does not copy files onto Windows. Links are displayed but cannot be followed in this view."}
       </p>
+      <button
+        className="button"
+        disabled={busy}
+        onClick={() =>
+          operation({
+            title: "Copy file to Windows",
+            request: {
+              kind: "copyFile",
+              resource,
+              target,
+              path,
+              destination: "",
+            },
+            description: `Copies the regular file at ${path} into a new Windows file without changing the source. Binary files up to 4 GiB are supported; links, directories and special files refuse. This is a live read, not a consistent backup. An exclusive partial file is published only after completion and flush. Existing destinations are never overwritten. Interrupted copies can leave a clearly named partial file.`,
+            fields: [
+              { key: "path", label: "Absolute Linux file path" },
+              {
+                key: "destination",
+                label: "New Windows file destination",
+                save: true,
+              },
+            ],
+            defaults: { path },
+          })
+        }
+      >
+        Copy file to Windows…
+      </button>
+      <div className="action-row">
+        <button
+          className="button"
+          disabled={nativeBusy}
+          onClick={() => void openCopy(false)}
+        >
+          Reveal local copy…
+        </button>
+        <button
+          className="button"
+          disabled={nativeBusy}
+          onClick={() => void openCopy(true)}
+        >
+          Edit local text copy…
+        </button>
+      </div>
+      <p>
+        After copying, select the local file to reveal it in Explorer or open
+        UTF-8 text up to 256 KiB in Notepad. Local editor changes stay local.
+        Use Edit text with backup for a guarded volume save.
+      </p>
+      {nativeMessage && <p role="status">{nativeMessage}</p>}
       <form
         className="action-row"
         onSubmit={(event) => {
@@ -132,6 +246,45 @@ export function FilesPanel({ target }: { target: string }) {
             {!snapshot.complete &&
               " — Partial listing: reached the 8 MiB archive or 256-entry limit. Open a more specific directory."}
           </p>
+          {editVolume &&
+            editPath &&
+            snapshot.text !== undefined &&
+            snapshot.sha256 && (
+              <button
+                className="button"
+                disabled={busy}
+                onClick={() => {
+                  const context = {
+                    volume: editVolume,
+                    path: editPath,
+                    text: snapshot.text!,
+                    version: snapshot.sha256!,
+                  };
+                  const selected = location;
+                  const owner = requester.current;
+                  const epoch = previewEpoch.current;
+                  onEditFile(context, () => {
+                    // Only this original preview may refresh after the editor closes.
+                    if (
+                      mounted.current &&
+                      requester.current === owner &&
+                      previewEpoch.current === epoch
+                    )
+                      void read(selected, "read");
+                  });
+                }}
+              >
+                Edit text with backup…
+              </button>
+            )}
+          {resource === "container" &&
+            snapshot.text !== undefined &&
+            !editVolume && (
+              <p className="capability-note">
+                {snapshot.editSource?.reason ??
+                  "Preview does not provide a verified writable volume source. Browse the intended volume directly for maintenance."}
+              </p>
+            )}
           {snapshot.text !== undefined ? (
             <pre
               className="file-preview"
@@ -190,8 +343,8 @@ export function FilesPanel({ target }: { target: string }) {
       <p className="capability-note">
         Listings are bounded reads of a live filesystem, not a backup or
         consistent snapshot. Text previews are limited to 256 KiB. Binary,
-        oversized and special files report a clear limit. Use the explicitly
-        targeted Docker CLI for larger copies.
+        oversized and special files report a clear preview limit. Copy file to
+        Windows supports regular binary files up to 4 GiB.
       </p>
     </section>
   );

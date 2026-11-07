@@ -1,6 +1,17 @@
 # OrbWin development progress
 
-Updated 2026-10-24, America/Los_Angeles. **Phase 1; phase exit not met.**
+Updated 2026-10-24, America/Los_Angeles. **Phase 1 accepted in its stated local
+matrix; Phase 2 implementation started.** The
+[final Phase 1 assessment](verification/phase-1-final-assessment.md) supersedes
+the chronological open-status entries below. Phase 2's first milestone adds
+Compose override files, profiles, quiet validation, reviewed multi-file discovery
+and opt-in remembered inputs/working directories; see the
+[milestone record](verification/phase-2-compose-2026-10-24.md) and
+[module contract](architecture/compose-projects.md). Phase 2 is not complete.
+
+## Historical Phase 1 progress
+
+The following entries retain their original checkpoint status.
 This record separates actual implementation/results from remaining scope. It
 does not replace the development brief, decisions, roadmap or quality standard.
 

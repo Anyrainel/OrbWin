@@ -1,0 +1,14 @@
+services:
+  app:
+    image: alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+    command: [sh, -c, "echo app-only-log; trap 'exit 0' TERM; while :; do sleep 1 & wait $$!; done"]
+    stop_grace_period: 2s
+    volumes:
+      - data:/data
+  worker:
+    image: alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+    command: [sh, -c, "echo worker-only-log; trap 'exit 0' TERM; while :; do sleep 1 & wait $$!; done"]
+    stop_grace_period: 2s
+    profiles: [workers]
+volumes:
+  data:

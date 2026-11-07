@@ -8,9 +8,12 @@ src-tauri/target/
 docs/research/orbstack/support/
 *.log
 *.tsbuildinfo
+scripts/__pycache__/
 src-tauri/gen/
 src-tauri/icons/android/
 src-tauri/icons/ios/
 src-tauri/icons/*.icns
 src-tauri/icons/Square*.png
 src-tauri/icons/StoreLogo.png
+tests/workloads/debug-target/target
+tests/workloads/platform-probe/bin/

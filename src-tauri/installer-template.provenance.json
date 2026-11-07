@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "cliVersion": "2.12.4",
+  "commit": "993038c49185307dfc895ab7657d77ca0d5ed7c7",
+  "sourceUrl": "https://raw.githubusercontent.com/tauri-apps/tauri/993038c49185307dfc895ab7657d77ca0d5ed7c7/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi",
+  "upstream": {
+    "path": "installer-template.upstream.nsi",
+    "sha256": "d00089d3b1a2c4a30d7b6e098079100cb8f25e980f84d4515aca4597b95e967d"
+  },
+  "adapted": {
+    "path": "installer-template.nsi",
+    "sha256": "6fa293accfe30f24e42a20cc53a368dbefd8ceb81a98c99d36000a2c8aeecf9e"
+  },
+  "changes": [
+    "Normal version upgrade handoff also uses standard /UPDATE to retain stable-path sign-in preference",
+    "Invoke fixed transactional owned sign-in uninstall hook after confirmation/app-close and before executable deletion",
+    "Remove upstream unconditional product-name Run value deletion; no replacement NSIS registry manipulation"
+  ],
+  "licenses": [
+    {
+      "path": "installer-template-LICENSE_MIT",
+      "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d",
+      "sourceUrl": "https://raw.githubusercontent.com/tauri-apps/tauri/993038c49185307dfc895ab7657d77ca0d5ed7c7/LICENSE-MIT"
+    },
+    {
+      "path": "installer-template-LICENSE_APACHE-2.0",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "sourceUrl": "https://raw.githubusercontent.com/tauri-apps/tauri/993038c49185307dfc895ab7657d77ca0d5ed7c7/LICENSE-APACHE-2.0"
+    }
+  ],
+  "licenseExpression": "Apache-2.0 OR MIT"
+}

@@ -1,0 +1,3 @@
+// RT_MANIFEST, CREATEPROCESS_MANIFEST_RESOURCE_ID. Fixed language and amd64
+// target are supplied by the build recipe; this contains no executable code.
+1 24 "lan.manifest"

@@ -29,21 +29,50 @@ is 2560 bytes; larger tokens fail explicitly. Listing returns only registry name
 and usernames. Cancellation may occur after authentication or credential storage;
 refresh the actual credential list rather than claiming rollback.
 
-The private Docker config assigns the OrbWin helper per selected registry,
-preserving unrelated keys and explicit user helper choices. Product clients add
-only the verified bundled helper directory to their process PATH. No global PATH,
-Docker config, login or Credential Manager entry for another engine changes.
-Selected user-WSL clients can reuse this helper through explicit Windows interop;
+The native private Windows Docker master requires the owned `orbwin` credential
+store and rejects foreign helper routes. Current raw parsers preserve correctly
+typed inline auth values during writer recovery; they do not establish that
+existing private files contain no inline secrets or convert those values into
+vault entries. The proposed legacy import explicitly refuses known nonempty
+inline secret fields while preserving its source. Ordinary private admission and
+the remediation policy remain a qualification gap tracked by
+[BL-020](../backend-limitations.md#bl-020--legacy-orbwin-client-settings-need-explicit-private-import).
+Registry login acquires its exclusive config owner with the held Docker and
+credential-helper images. Its one-use writer admission binds the exact nine
+arguments, registry key, owned config path and scoped environment. The detached
+credential worker writes the secret only to stdin and discards bounded stdout
+and stderr. Natural root completion, joined IO and actual job retirement precede
+scoped raw config settlement through the owner-created replacement file. A zero
+CLI exit is the only successful login result. Interrupted execution retains the
+pending intent even after confirmed termination; cancellation cannot roll back an
+already completed authentication or vault mutation.
+
+The UI operation lease follows native execution rather than caller lifetime.
+Unknown creation or retirement ownership retains that lease. Positive retirement
+releases operation admission even if config settlement subsequently requires
+recovery; the config owner separately retains its pending state. Listing and
+forgetting invoke the held helper directly through the same atomic native client
+worker, without a Docker config snapshot, so private config review does not block
+inspection or removal of owned vault entries. Child diagnostics are discarded.
+List stdout is bounded to 1 MiB and validated as at most 256 registry/username
+pairs before publication. Forget cancellation or failure reports potentially
+completed storage mutation and requires refresh.
+
+Selected user-WSL clients reuse the helper through explicit Windows interop;
 only registry/helper routing metadata is copied, never secret values. The Linux
 client uses the `orbwin.exe` helper suffix and an explicit process PATH containing
 the verified Windows helper directory. WSL interop must be enabled; helper failure
-remains a client error and never falls back to another engine's credential store.
-Project connection synchronizes existing product routes; login stages the route
-in both private configs before sending credentials. A shared exclusive profile
-file handle serializes those writers across OrbWin processes. Partial metadata
-writes are safe to retry; no secret or successful login is claimed at that stage.
-Explicit edits made concurrently by an external Docker client are outside this
-lock; do not edit private config files while product settings are changing.
+remains a client error. Login stages WSL routing before native Windows master
+admission, releasing the legacy metadata lock first. Project connection obtains
+owned server keys from the actual held Windows helper before taking that legacy
+lock, rather than reading the retired Windows config path. Raw WSL metadata
+transactions preserve unrelated bytes and reject foreign selected routes. Partial
+metadata writes occur before secret dispatch and do not claim a successful login.
+
+This is source integration as of 2026-10-26. Inert native writer probes qualify
+only their recorded image/config/execution intersection. Actual Docker login,
+Windows vault behavior through this production adapter, WSL interop and composed
+cancellation/recovery flows still require dedicated end-to-end qualification.
 
 Use disposable credentials and a scoped local authenticated registry to qualify
 login, rejected authentication, authenticated pull/build, application restart,

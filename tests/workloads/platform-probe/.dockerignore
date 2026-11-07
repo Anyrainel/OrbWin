@@ -1,0 +1,6 @@
+*
+!bin/
+!bin/amd64/
+!bin/amd64/probe
+!bin/arm64/
+!bin/arm64/probe

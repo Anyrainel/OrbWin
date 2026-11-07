@@ -1,8 +1,8 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import * as backend from "../../backend";
 import { nodeTestcontainersEndpoint } from "../../model/client-targeting";
-import { ClusterControls, EngineControls } from "../Operations";
+import { ClusterControls, EngineControls, useOperation } from "../Operations";
 import { engineState, canStartEngine } from "../shell/engine-state";
 import { useElapsed, useEngineLifecycle } from "../shell/EngineLifecycle";
 import type { ThemePreference } from "../shell/theme";
@@ -10,6 +10,9 @@ import { applyState, condition, kubernetesState } from "./app-settings-model";
 import { StorageCleanup } from "./StorageCleanup";
 import { KubernetesVersions } from "./KubernetesVersions";
 import { Registries } from "./Registries";
+import { ClientGuidance } from "./ClientGuidance";
+import { LocalServices } from "./LocalServices";
+import { EngineProxy } from "./EngineProxy";
 import { formatSize } from "./storage-model";
 import { currentSettings, type AppSettingsRead } from "./useAppSettings";
 
@@ -31,6 +34,100 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
       <dt>{term}</dt>
       <dd>{children}</dd>
     </>
+  );
+}
+
+export function DesktopConvenience() {
+  const native = isTauri();
+  const [preferences, setPreferences] =
+    useState<backend.DesktopPreferences | null>(null);
+  const [pending, setPending] = useState<"read" | "write" | null>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const generation = useRef(0);
+  async function request(enabled?: boolean) {
+    if (!native || pending) return;
+    const current = ++generation.current;
+    setPending(enabled === undefined ? "read" : "write");
+    setError("");
+    setMessage("");
+    try {
+      const result =
+        enabled === undefined
+          ? await backend.desktopPreferences()
+          : await backend.desktopSetStartup(enabled);
+      if (current !== generation.current) return;
+      setPreferences(result);
+      if (enabled !== undefined)
+        setMessage(
+          result.enabled
+            ? "Sign-in launch is enabled for this copy of OrbWin."
+            : "Sign-in launch is disabled.",
+        );
+    } catch (error) {
+      if (current !== generation.current) return;
+      setPreferences(null);
+      setError(String(error));
+    } finally {
+      if (current === generation.current) setPending(null);
+    }
+  }
+  useEffect(() => {
+    if (native) void request();
+    return () => {
+      generation.current++;
+    };
+  }, [native]);
+  return (
+    <section aria-label="Tray and sign-in">
+      <h2>Tray and sign-in</h2>
+      <p className="settings-hint">
+        Open OrbWin or quit its UI from the Windows tray. Closing the window
+        exits the UI; the engine keeps its current state.
+      </p>
+      <label className="form-field compose-remember">
+        <span>
+          <input
+            type="checkbox"
+            checked={preferences?.enabled ?? false}
+            disabled={
+              !native ||
+              pending !== null ||
+              !preferences ||
+              (!preferences.trayAvailable && !preferences.enabled)
+            }
+            onChange={(event) => void request(event.target.checked)}
+          />
+          Run OrbWin in the tray at sign-in
+        </span>
+      </label>
+      <p className="settings-hint">
+        Opt-in for your Windows account and this application copy. It opens the
+        tray without starting, stopping or changing the engine. Manual launch
+        shows the window. Windows Startup Apps policy may prevent sign-in
+        launch.
+      </p>
+      {!native && (
+        <p>Sign-in preferences are unavailable in browser preview.</p>
+      )}
+      {pending && (
+        <p role="status">
+          {pending === "read"
+            ? "Reading sign-in preference…"
+            : "Waiting for Windows to finish the sign-in change. Its result will be reported here."}
+        </p>
+      )}
+      {message && <p role="status">{message}</p>}
+      {preferences?.trayIssue && <p role="status">{preferences.trayIssue}</p>}
+      {error && <p role="alert">{error}</p>}
+      <button
+        className="button"
+        disabled={!native || pending !== null}
+        onClick={() => void request()}
+      >
+        Read sign-in preference
+      </button>
+    </section>
   );
 }
 
@@ -159,6 +256,7 @@ export function Settings({
   const [wsl, setWsl] = useState<backend.Diagnostic[] | null>(null);
   const [wslError, setWslError] = useState("");
   const [wslBusy, setWslBusy] = useState(false);
+  const operation = useOperation();
   const index = settingsTabs.findIndex((item) => item.id === tab);
   function focusTab(next: number) {
     const target =
@@ -245,6 +343,7 @@ export function Settings({
               Applies to OrbWin content and its Windows title bar. Match Windows
               follows your system appearance.
             </p>
+            <DesktopConvenience />
             <h2>Engine</h2>
             <dl className="properties">
               <Row term="Status">
@@ -261,11 +360,8 @@ export function Settings({
               </Row>
               <Row term="Closing the window">
                 Closing OrbWin leaves the engine in its current state. Stop it
-                here or from the sidebar switch. There is no tray icon yet;
-                reopen OrbWin to manage the engine.
-              </Row>
-              <Row term="Start with Windows">
-                Not available yet. The engine starts only when you start it.
+                here or from the sidebar switch. The tray offers Open OrbWin and
+                Quit UI while the app is running.
               </Row>
             </dl>
             <EngineLifecycleControls status={status} />
@@ -296,6 +392,7 @@ export function Settings({
                   {`docker --host ${backend.endpoint} ps\n$env:DOCKER_HOST = "${backend.endpoint}"`}
                 </pre>
               </Row>
+              <ClientGuidance />
               <Row term="Testcontainers Node 12.2.1">
                 <code>{nodeTestcontainersEndpoint}</code>
                 <p>
@@ -413,7 +510,7 @@ export function Settings({
               <Row term="Default bind address">
                 Published TCP and UDP services are accessible from Windows at
                 127.0.0.1. A container port alone gets a dynamic localhost port.
-                LAN and IPv6 publication are not supported yet.
+                Opt-in LAN access is configured below. IPv6 publication is not supported.
               </Row>
               <Row term="Port conflicts">
                 OrbWin checks Windows ports before starting a container and
@@ -428,23 +525,8 @@ export function Settings({
                 published ports.
               </Row>
             </dl>
-            <h2>Domains and HTTPS</h2>
-            <p className="notice">
-              Automatic local domain names for containers and services, and
-              trusted local HTTPS, are planned for phase 2. They need a Windows
-              resolver integration and a local certificate authority, which
-              change system DNS and certificate trust. These must be prototyped
-              for VPN, managed-device and conflict behavior before OrbWin
-              changes them for you (project decisions P09, P10).
-            </p>
-            <h2>Proxy and managed networks</h2>
-            <p className="notice">
-              This release is qualified on direct networking. The selected
-              backend has no application proxy setting. OrbWin does not change
-              Windows proxy, VPN or WSL network settings. Private proxies and
-              VPN transitions require separate qualification; changing Docker
-              client proxy values alone does not configure engine image pulls.
-            </p>
+            <LocalServices />
+            <EngineProxy connected={status?.available === true} />
           </>
         )}
         {tab === "storage" && (
@@ -476,6 +558,26 @@ export function Settings({
               can affect every distribution and engine; OrbWin leaves those
               global settings unchanged.
             </p>
+            <h2>Disposable tools</h2>
+            <p>
+              Debug and standalone file tools normally remove themselves.
+              Recover abandoned tools after an interrupted client or
+              application. Active sessions and ordinary workloads are preserved.
+            </p>
+            <button
+              className="button"
+              disabled={!status?.available}
+              onClick={() =>
+                operation({
+                  title: "Recover abandoned tools",
+                  request: { kind: "recoverTools" },
+                  description:
+                    "Reconciles durable OrbWin helper intents on the verified engine. Removes only inactive disposable tools with matching ownership records. Active sessions, source data and ordinary workloads are retained. A create with an unknown outcome remains recorded for a later retry.",
+                })
+              }
+            >
+              Recover abandoned tools
+            </button>
             <h2>WSL</h2>
             <p>
               OrbWin runs its engine in its own WSL distribution. Your

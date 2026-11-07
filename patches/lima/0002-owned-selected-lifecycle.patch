@@ -1,0 +1,1358 @@
+--- /dev/null
++++ b/pkg/driver/wsl2/configured_lifecycle_windows_test.go
+@@ -0,0 +1,23 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package wsl2
++
++import (
++	"github.com/lima-vm/lima/v2/pkg/limatype"
++	"testing"
++)
++
++// Compile-only during native pause: importing this package runs the selected
++// upstream WSL registration initializer, even though this body is inert.
++func TestConfiguredLifecycleDoesNotMutatePrototype(t *testing.T) {
++	prototype := &LimaWslDriver{vSockPort: 42, virtioPort: "fixed"}
++	a, b := &limatype.Instance{SSHLocalPort: 100}, &limatype.Instance{SSHLocalPort: 200}
++	first, second := prototype.configuredFor(a), prototype.configuredFor(b)
++	first.startEntered = true
++	first.workers.seal()
++	if prototype.Instance != nil || prototype.startEntered || first == second || first.Instance != a || second.Instance != b || second.startEntered || second.workers.stopping || first.vSockPort != 42 || second.SSHLocalPort != 200 {
++		t.Fatal("prototype/live state copied")
++	}
++}
+--- /dev/null
++++ b/pkg/driver/wsl2/import_args_windows.go
+@@ -0,0 +1,23 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"path/filepath"
++
++	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
++)
++
++// wslImportArgs selects WSL 2 for this new distribution without changing the host default.
++func wslImportArgs(instanceDir, distroName string) []string {
++	return []string{
++		"wsl.exe",
++		"--import",
++		distroName,
++		instanceDir,
++		filepath.Join(instanceDir, filenames.BaseDiskLegacy),
++		"--version",
++		"2",
++	}
++}
+--- /dev/null
++++ b/pkg/driver/wsl2/import_args_windows_test.go
+@@ -0,0 +1,48 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"slices"
++	"testing"
++)
++
++func TestWSLImportArgs(t *testing.T) {
++	tests := []struct {
++		name        string
++		instanceDir string
++		distroName  string
++		want        []string
++	}{
++		{
++			name:        "owned distribution",
++			instanceDir: `C:\Users\test\.rdorbwin\lima\orbwin`,
++			distroName:  "lima-orbwin",
++			want: []string{
++				"wsl.exe", "--import", "lima-orbwin",
++				`C:\Users\test\.rdorbwin\lima\orbwin`,
++				`C:\Users\test\.rdorbwin\lima\orbwin\basedisk`,
++				"--version", "2",
++			},
++		},
++		{
++			name:        "spaces and Unicode remain single arguments",
++			instanceDir: `D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin`,
++			distroName:  "lima-orbwin-test",
++			want: []string{
++				"wsl.exe", "--import", "lima-orbwin-test",
++				`D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin`,
++				`D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin\basedisk`,
++				"--version", "2",
++			},
++		},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			if got := wslImportArgs(tt.instanceDir, tt.distroName); !slices.Equal(got, tt.want) {
++				t.Fatalf("WSL import arguments = %#v, want %#v", got, tt.want)
++			}
++		})
++	}
++}
+--- a/pkg/driver/wsl2/vm_windows.go
++++ b/pkg/driver/wsl2/vm_windows.go
+@@ -49,15 +49,9 @@
+ func initVM(ctx context.Context, instanceDir, distroName string) error {
+ 	baseDisk := filepath.Join(instanceDir, filenames.BaseDiskLegacy)
+ 	logrus.Infof("Importing distro from %#q to %#q", baseDisk, instanceDir)
+-	out, err := executil.RunUTF16leCommand([]string{
+-		"wsl.exe",
+-		"--import",
+-		distroName,
+-		instanceDir,
+-		baseDisk,
+-	}, executil.WithContext(ctx))
+-	if err != nil {
+-		return fmt.Errorf("failed to run `wsl.exe --import %s %s %s`: %w (out=%#q)",
++	out, err := executil.RunUTF16leCommand(wslImportArgs(instanceDir, distroName), executil.WithContext(ctx))
++	if err != nil {
++		return fmt.Errorf("failed to run `wsl.exe --import %s %s %s --version 2`: %w (out=%#q)",
+ 			distroName, instanceDir, baseDisk, err, out)
+ 	}
+ 	return nil
+@@ -81,7 +75,7 @@
+ var limaBoot string
+ 
+ // provisionVM starts Lima's boot process inside an already imported VM.
+-func provisionVM(ctx context.Context, instanceDir, instanceName, distroName string, errCh chan<- error) error {
++func provisionVM(ctx context.Context, instanceDir, instanceName, distroName string, errCh chan<- error, workers *driverWorkers) error {
+ 	ciDataPath := filepath.Join(instanceDir, filenames.CIDataISODir)
+ 	m := map[string]string{
+ 		"CIDataPath": ciDataPath,
+@@ -115,60 +109,21 @@
+ 		bootFileWSLPath,
+ 	).Output()
+ 	if err != nil {
+-		os.RemoveAll(limaBootFileWinPath)
+-		// this can return an error with an exit code, which causes it not to be logged
+-		// because main.handleExitCoder() traps it, so wrap the error
+-		return fmt.Errorf("failed to run wslpath command: %w", err)
++		// The closed original script role may have been replaced. Never recurse.
++		// Keep both conversion and checked cleanup errors for the driver keeper.
++		return cleanupDriverScriptFailure(limaBootFileWinPath,
++			fmt.Errorf("failed to run wslpath command: %w", err))
+ 	}
+ 	limaBootFileLinuxPath := strings.TrimSpace(string(limaBootFilePathOnLinuxB))
+-	go func() {
+-		cmd := exec.CommandContext(
+-			ctx,
+-			"wsl.exe",
+-			"-d",
+-			distroName,
+-			"bash",
+-			"-c",
+-			limaBootFileLinuxPath,
+-		)
+-		out, err := cmd.CombinedOutput()
+-		os.RemoveAll(limaBootFileWinPath)
+-		logrus.Debugf("%v: %#q", cmd.Args, string(out))
+-		if err != nil {
+-			errCh <- fmt.Errorf(
+-				"error running wslCommand that executes boot.sh (%v): %w, "+
+-					"check /var/log/lima-init.log for more details (out=%#q)", cmd.Args, err, string(out))
+-		}
+-
+-		<-ctx.Done()
+-		logrus.Info("Context closed, stopping vm")
+-		if status, err := getWslStatus(ctx, instanceName); err == nil &&
+-			status == limatype.StatusRunning {
+-			_ = stopVM(ctx, distroName)
+-		}
+-	}()
+-
+-	return err
++	cmd := exec.Command("wsl.exe", "-d", distroName, "bash", "-c", limaBootFileLinuxPath)
++	// Actual command is published by workers before its sole Run/Wait.
++	return workers.launch(cmd, false, errCh, limaBootFileWinPath)
+ }
+ 
+ // keepAlive runs a background process which in order to keep the WSL2 VM running in the background after launch.
+-func keepAlive(ctx context.Context, distroName string, errCh chan<- error) {
+-	keepAliveCmd := exec.CommandContext(
+-		ctx,
+-		"wsl.exe",
+-		"-d",
+-		distroName,
+-		"bash",
+-		"-c",
+-		"nohup sleep 2147483647d >/dev/null 2>&1",
+-	)
+-
+-	go func() {
+-		if err := keepAliveCmd.Run(); err != nil {
+-			errCh <- fmt.Errorf(
+-				"error running wsl keepAlive command: %w", err)
+-		}
+-	}()
++func keepAlive(distroName string, errCh chan<- error, workers *driverWorkers) error {
++	cmd := exec.Command("wsl.exe", "-d", distroName, "bash", "-c", "nohup sleep 2147483647d >/dev/null 2>&1")
++	return workers.launch(cmd, true, errCh, "")
+ }
+ 
+ // unregisterVM calls WSL to unregister a VM.
+--- /dev/null
++++ b/pkg/driver/wsl2/worker_lifecycle.go
+@@ -0,0 +1,213 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"os/exec"
++	"runtime"
++	"sync"
++	"time"
++)
++
++type driverCommand struct {
++	cmd        *exec.Cmd
++	output     bytes.Buffer
++	done       chan struct{}
++	result     error
++	beforeStop bool
++	scriptPath string
++	diagnostic string
++}
++type driverWorkers struct {
++	mu       sync.Mutex
++	commands []*driverCommand
++	stopping bool
++	unknown  bool
++}
++
++// Publish the actual command before its one Run/Wait and before go. Results are
++// owned even when no receiver remains on the optional notification channel.
++func (w *driverWorkers) launch(cmd *exec.Cmd, keepalive bool, reports chan<- error, scriptPath string) error {
++	w.mu.Lock()
++	if w.stopping || w.unknown || cmd == nil || cmd.Process != nil || cmd.Cancel != nil || cmd.WaitDelay != 0 {
++		w.mu.Unlock()
++		return errors.New("WSL command lifecycle refused")
++	}
++	r := &driverCommand{cmd: cmd, done: make(chan struct{}), scriptPath: scriptPath}
++	cmd.Stdout = &r.output
++	cmd.Stderr = &r.output
++	w.commands = append(w.commands, r)
++	w.mu.Unlock()
++	go func() {
++		locked := false
++		defer func() {
++			if recover() != nil {
++				if locked {
++					w.unknown = true
++					w.mu.Unlock()
++				} else {
++					w.mu.Lock()
++					w.unknown = true
++					w.mu.Unlock()
++				}
++				reportDriverError(reports, errors.New("WSL worker panic; original command retained"))
++				for {
++					time.Sleep(time.Minute)
++					runtime.KeepAlive(w)
++					runtime.KeepAlive(r)
++				}
++			}
++		}()
++		// Seal and ORIGINAL Start are serialized. Queued goroutines cannot activate
++		// the guest after Stop's no-new-birth boundary.
++		w.mu.Lock()
++		locked = true
++		if w.stopping || w.unknown {
++			unknown := w.unknown
++			locked = false
++			w.mu.Unlock()
++			if unknown {
++				w.retainWorker(r, errors.New("WSL command birth domain unavailable"), reports)
++			}
++			// Seal won before Start; no command was entered.
++			if err := r.removeScript(); err != nil {
++				w.retainWorker(r, err, reports)
++			}
++			w.mu.Lock()
++			close(r.done)
++			w.mu.Unlock()
++			return
++		}
++		// This exact prearmed route is before every native/stdio Start effect.
++		preBirthErr := cmd.Err
++		startErr := cmd.Start()
++		if startErr != nil && preBirthErr != nil && cmd.Process == nil {
++			locked = false
++			w.mu.Unlock()
++			if err := r.removeScript(); err != nil {
++				w.retainWorker(r, err, reports)
++			}
++			w.mu.Lock()
++			r.beforeStop = !w.stopping
++			r.result = startErr
++			close(r.done)
++			w.mu.Unlock()
++			reportDriverError(reports, startErr)
++			return
++		}
++		if startErr != nil {
++			w.unknown = true
++			locked = false
++			w.mu.Unlock()
++			reportDriverError(reports, startErr)
++			for {
++				time.Sleep(time.Minute)
++				runtime.KeepAlive(w)
++				runtime.KeepAlive(r)
++			}
++		}
++		locked = false
++		w.mu.Unlock()
++		err := cmd.Wait() // sole original waiter, after actual Start normal return
++		if cmd.ProcessState == nil {
++			w.retainWorker(r, errors.New("WSL command wait unavailable"), reports)
++		}
++		r.diagnostic = boundedDriverOutput(r.output.Bytes())
++		r.output = bytes.Buffer{}
++		cmd.Stdout, cmd.Stderr = nil, nil
++		if cleanupErr := r.removeScript(); cleanupErr != nil {
++			w.retainWorker(r, cleanupErr, reports)
++		}
++		w.mu.Lock()
++		r.beforeStop = !w.stopping
++		r.result = err
++		if keepalive && r.beforeStop && err == nil {
++			r.result = errors.New("WSL keepalive exited before stop")
++		}
++		result := r.result
++		close(r.done)
++		w.mu.Unlock()
++		if result != nil && r.beforeStop {
++			reportDriverError(reports, fmt.Errorf("WSL worker ended: %w", result))
++		}
++	}()
++
++	return nil
++}
++func reportDriverError(reports chan<- error, err error) {
++	if err != nil {
++		select {
++		case reports <- err:
++		default:
++		}
++	}
++}
++func (w *driverWorkers) seal() bool {
++	w.mu.Lock()
++	defer w.mu.Unlock()
++	w.stopping = true
++	return !w.unknown
++}
++
++func (w *driverWorkers) join(ctx context.Context) error {
++	w.mu.Lock()
++	commands := append([]*driverCommand(nil), w.commands...)
++	w.mu.Unlock()
++	var result error
++	for _, r := range commands {
++		select {
++		case <-r.done:
++		case <-ctx.Done():
++			return ctx.Err()
++		}
++		w.mu.Lock()
++		if r.beforeStop {
++			result = errors.Join(result, r.result)
++		}
++		w.mu.Unlock()
++	}
++	return result
++}
++
++// Only the exact generated provision role is removed after original settlement.
++func (r *driverCommand) removeScript() error {
++	if r.scriptPath == "" {
++		return nil
++	}
++	if err := os.Remove(r.scriptPath); err != nil {
++		return fmt.Errorf("remove settled WSL provision script: %w", err)
++	}
++	r.scriptPath = ""
++	return nil
++}
++func boundedDriverOutput(b []byte) string {
++	if len(b) > 4096 {
++		b = b[len(b)-4096:]
++	}
++	return string(b)
++}
++func (w *driverWorkers) retainWorker(r *driverCommand, err error, reports chan<- error) {
++	w.mu.Lock()
++	w.unknown = true
++	w.mu.Unlock()
++	reportDriverError(reports, err)
++	for {
++		time.Sleep(time.Minute)
++		runtime.KeepAlive(w)
++		runtime.KeepAlive(r)
++	}
++}
++
++// No new permission: settle only the exact closed script role after conversion
++// failed. An os.PathError retains its original path on failure; the caller's
++// existing partial-Start keeper retains the joined error and original driver.
++func cleanupDriverScriptFailure(path string, conversionErr error) error {
++	r := driverCommand{scriptPath: path}
++	return errors.Join(conversionErr, r.removeScript())
++}
+--- /dev/null
++++ b/pkg/driver/wsl2/worker_lifecycle_test.go
+@@ -0,0 +1,149 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"context"
++	"errors"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++func TestWorkerErrorReportNeverWaitsForReceiver(t *testing.T) {
++	reports := make(chan error, 2)
++	failure := errors.New("original result")
++	reportDriverError(reports, failure)
++	reportDriverError(reports, failure)
++	reportDriverError(reports, failure)
++	reportDriverError(nil, failure)
++	if len(reports) != 2 {
++		t.Fatal("bounded reports")
++	}
++}
++func TestWorkerJoinRequiresActualDone(t *testing.T) {
++	var w driverWorkers
++	r := &driverCommand{done: make(chan struct{}), result: errors.New("original failure"), beforeStop: true}
++	w.commands = append(w.commands, r)
++	w.seal()
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if !errors.Is(w.join(ctx), context.Canceled) {
++		t.Fatal("notification substituted for join")
++	}
++	close(r.done)
++	if !errors.Is(w.join(context.Background()), r.result) {
++		t.Fatal("original failure lost")
++	}
++	if err := w.launch(nil, false, nil, ""); err == nil {
++		t.Fatal("new admission after seal")
++	}
++}
++
++func TestOriginalPrearmedStartErrorIsReportedAndJoined(t *testing.T) {
++	original := errors.New("prearmed resolution failure")
++	script := filepath.Join(t.TempDir(), "source-script.sh")
++	if err := os.WriteFile(script, []byte("# source fixture only\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	cmd := &exec.Cmd{Path: "never-executed", Err: original}
++	var w driverWorkers
++	reports := make(chan error, 1)
++	if err := w.launch(cmd, false, reports, script); err != nil {
++		t.Fatal(err)
++	}
++	select {
++	case got := <-reports:
++		if got != original {
++			t.Fatalf("original error lost: %v", got)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("known prebirth error not reported")
++	}
++	if _, err := os.Stat(script); !errors.Is(err, os.ErrNotExist) {
++		t.Fatalf("owned source script not removed: %v", err)
++	}
++	if cmd.Process != nil {
++		t.Fatal("prearmed error created process")
++	}
++	w.seal()
++	if !errors.Is(w.join(context.Background()), original) {
++		t.Fatal("known prebirth did not settle")
++	}
++	if w.unknown {
++		t.Fatal("known prebirth fenced")
++	}
++}
++func TestSettledDiagnosticIsBounded(t *testing.T) {
++	text := strings.Repeat("a", 5000) + "tail"
++	got := boundedDriverOutput([]byte(text))
++	if len(got) != 4096 || !strings.HasSuffix(got, "tail") {
++		t.Fatal("diagnostic tail lost/bound exceeded")
++	}
++	var r driverCommand
++	if err := r.removeScript(); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestNonemptySourceDirectoryIsNotRecursivelyRemoved(t *testing.T) {
++	dir := filepath.Join(t.TempDir(), "script-role")
++	if err := os.Mkdir(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	child := filepath.Join(dir, "preserved-source.txt")
++	const text = "source fixture remains"
++	if err := os.WriteFile(child, []byte(text), 0600); err != nil {
++		t.Fatal(err)
++	}
++	r := driverCommand{scriptPath: dir}
++	if err := r.removeScript(); err == nil {
++		t.Fatal("nonempty directory removed")
++	}
++	if r.scriptPath != dir {
++		t.Fatal("failed cleanup lost original role")
++	}
++	data, err := os.ReadFile(child)
++	if err != nil || string(data) != text {
++		t.Fatalf("recursive cleanup affected source: %v", err)
++	}
++}
++
++func TestConversionFailurePreservesErrorAndNonemptySourceDirectory(t *testing.T) {
++	dir := filepath.Join(t.TempDir(), "conversion-script-role")
++	if err := os.Mkdir(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	child := filepath.Join(dir, "preserved-source.txt")
++	const text = "do not recursively remove source"
++	if err := os.WriteFile(child, []byte(text), 0600); err != nil {
++		t.Fatal(err)
++	}
++	original := errors.New("original conversion failure")
++	err := cleanupDriverScriptFailure(dir, original)
++	if !errors.Is(err, original) {
++		t.Fatal("original conversion failure lost")
++	}
++	var pathErr *os.PathError
++	if !errors.As(err, &pathErr) || pathErr.Path != dir {
++		t.Fatal("cleanup failure/original role not retained")
++	}
++	data, readErr := os.ReadFile(child)
++	if readErr != nil || string(data) != text {
++		t.Fatalf("recursive cleanup affected source: %v", readErr)
++	}
++	script := filepath.Join(t.TempDir(), "closed-source-script")
++	if err := os.WriteFile(script, []byte("# source fixture\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := cleanupDriverScriptFailure(script, original); !errors.Is(err, original) {
++		t.Fatal("successful cleanup lost conversion refusal")
++	}
++	if _, err := os.Stat(script); !errors.Is(err, os.ErrNotExist) {
++		t.Fatal("closed script not removed")
++	}
++}
+--- a/pkg/driver/wsl2/wsl_driver_windows.go
++++ b/pkg/driver/wsl2/wsl_driver_windows.go
+@@ -10,6 +10,9 @@
+ 	"fmt"
+ 	"net"
+ 	"regexp"
++	"runtime"
++	"sync"
++	"time"
+ 
+ 	"github.com/Microsoft/go-winio"
+ 	"github.com/Microsoft/go-winio/pkg/guid"
+@@ -52,9 +55,15 @@
+ type LimaWslDriver struct {
+ 	Instance *limatype.Instance
+ 
+-	SSHLocalPort int
+-	vSockPort    int
+-	virtioPort   string
++	SSHLocalPort     int
++	vSockPort        int
++	virtioPort       string
++	workers          driverWorkers
++	startEntered     bool
++	stopMu           sync.Mutex
++	stopAttempted    bool
++	stopErr          error
++	lifecycleFailure error
+ }
+ 
+ var _ driver.Driver = (*LimaWslDriver)(nil)
+@@ -83,11 +92,10 @@
+ 		return nil, err
+ 	}
+ 
+-	l.Instance = inst
+-	l.SSHLocalPort = inst.SSHLocalPort
++	configured := l.configuredFor(inst)
+ 
+ 	return &driver.ConfiguredDriver{
+-		Driver: l,
++		Driver: configured,
+ 	}, nil
+ }
+ 
+@@ -250,10 +258,21 @@
+ }
+ 
+ func (l *LimaWslDriver) Start(ctx context.Context) (chan error, error) {
++	l.stopMu.Lock() // serialize full Start against Stop; workers use their own lock
++	defer l.stopMu.Unlock()
++	defer func() {
++		if recover() != nil {
++			l.retainPartialStart(errors.New("WSL start panic; original driver retained"))
++		}
++	}()
++	if l.Instance == nil || l.startEntered || l.stopAttempted {
++		return nil, errors.New("configured WSL driver already started or unavailable")
++	}
+ 	if l.Instance.Config.SSH.OverVsock != nil && *l.Instance.Config.SSH.OverVsock {
+ 		// Probably never supportable for WSL2
+ 		logrus.Warn(".ssh.overVsock is not supported for WSL2 driver")
+ 	}
++	l.startEntered = true
+ 	logrus.Infof("Starting WSL VM")
+ 	status, err := getWslStatus(ctx, l.Instance.Name)
+ 	if err != nil {
+@@ -267,14 +286,14 @@
+ 			return nil, err
+ 		}
+ 		if err := initVM(ctx, l.Instance.Dir, distroName); err != nil {
+-			return nil, err
+-		}
+-	}
+-
+-	errCh := make(chan error)
++			l.retainPartialStart(err)
++		}
++	}
++
++	errCh := make(chan error, 2)
+ 
+ 	if err := startVM(ctx, distroName); err != nil {
+-		return nil, err
++		l.retainPartialStart(err)
+ 	}
+ 
+ 	if err := provisionVM(
+@@ -283,11 +302,14 @@
+ 		l.Instance.Name,
+ 		distroName,
+ 		errCh,
++		&l.workers,
+ 	); err != nil {
+-		return nil, err
+-	}
+-
+-	keepAlive(ctx, distroName, errCh)
++		l.retainPartialStart(err)
++	}
++
++	if err := keepAlive(distroName, errCh, &l.workers); err != nil {
++		l.retainPartialStart(err)
++	}
+ 
+ 	return errCh, err
+ }
+@@ -303,9 +325,31 @@
+ }
+ 
+ func (l *LimaWslDriver) Stop(ctx context.Context) error {
++	l.stopMu.Lock()
++	defer l.stopMu.Unlock()
++	if l.stopAttempted {
++		return l.stopErr
++	}
++	l.stopAttempted = true
++	l.stopErr = errors.New("WSL stop incomplete")
++	defer func() {
++		if recover() != nil {
++			l.retainPartialStart(l.stopErr)
++		}
++	}()
+ 	logrus.Info("Shutting down WSL2 VM")
+ 	distroName := "lima-" + l.Instance.Name
+-	return stopVM(ctx, distroName)
++	if !l.workers.seal() {
++		l.retainPartialStart(errors.New("WSL worker birth unknown"))
++	}
++	if err := stopVM(ctx, distroName); err != nil {
++		l.retainPartialStart(err)
++	}
++	if err := l.workers.join(ctx); err != nil {
++		l.retainPartialStart(err)
++	}
++	l.stopErr = nil
++	return nil
+ }
+ 
+ // GuestAgentConn returns the guest agent connection, or nil (if forwarded by ssh).
+@@ -395,3 +439,19 @@
+ func (l *LimaWslDriver) AdditionalSetupForSSH(_ context.Context) error {
+ 	return nil
+ }
++
++func (l *LimaWslDriver) retainPartialStart(err error) {
++	l.lifecycleFailure = err
++	// No cleanup suffix after entered start/stop or unjoined command uncertainty.
++	// Same configured driver and original command frames stay on this producer.
++	logrus.WithError(err).Error("WSL lifecycle incomplete; original driver retained")
++	for {
++		time.Sleep(time.Minute)
++		runtime.KeepAlive(l)
++	}
++}
++
++// Only immutable prototype settings are copied; no live mutex/worker ownership.
++func (l *LimaWslDriver) configuredFor(inst *limatype.Instance) *LimaWslDriver {
++	return &LimaWslDriver{Instance: inst, SSHLocalPort: inst.SSHLocalPort, vSockPort: l.vSockPort, virtioPort: l.virtioPort}
++}
+--- a/pkg/hostagent/hostagent.go
++++ b/pkg/hostagent/hostagent.go
+@@ -65,8 +65,9 @@
+ 	portForwarder     *portForwarder // legacy SSH port forwarder
+ 	grpcPortForwarder *portfwd.Forwarder
+ 
+-	onClose   []func() error // LIFO
+-	onCloseMu sync.Mutex
++	cleanup     cleanupStack
++	routines    routineGroup
++	shutdownCtx context.Context
+ 
+ 	driver   driver.Driver
+ 	signalCh chan os.Signal
+@@ -513,31 +514,47 @@
+ 	stBooting := stBase
+ 	a.emitEvent(ctx, events.Event{Status: stBooting})
+ 	ctxHA, cancelHA := context.WithCancel(ctx)
+-	go func() {
++	var startupErr error
++	a.routines.start(func() {
++		startupErr = a.startHostAgentRoutines(ctxHA)
++		if ctxHA.Err() != nil {
++			return
++		}
+ 		stRunning := stBase
+-		if haErr := a.startHostAgentRoutines(ctxHA); haErr != nil {
++		if startupErr != nil {
+ 			stRunning.Degraded = true
+-			stRunning.Errors = append(stRunning.Errors, haErr.Error())
++			stRunning.Errors = append(stRunning.Errors, startupErr.Error())
+ 		}
+ 		stRunning.Running = true
+-		a.emitEvent(ctx, events.Event{Status: stRunning})
+-	}()
+-	// wait for either the driver to stop or a signal to shut down
++		a.emitEvent(ctxHA, events.Event{Status: stRunning})
++	})
++	var driverErr error
+ 	select {
+-	case driverErr := <-errCh:
+-		logrus.Infof("Driver stopped due to error: %#q", driverErr)
++	case driverErr = <-errCh:
++		logrus.Infof("Driver stopped: %v", driverErr)
+ 	case sig := <-a.signalCh:
+ 		logrus.Infof("Received %s, shutting down the host agent", osutil.SignalName(sig))
+-	}
+-	// close the host agent routines before cancelling the context
+-	if closeErr := a.close(); closeErr != nil {
+-		logrus.WithError(closeErr).Warn("an error during shutting down the host agent")
+-	}
++	case <-ctx.Done():
++	}
++	drain, done := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
++	defer done()
++	a.routines.seal()
+ 	cancelHA()
+-	stopErr := a.driver.Stop(ctx)
+-	// Stop the external driver gRPC server now that the instance is shutting down.
++	if err := a.routines.join(drain); err != nil {
++		a.retainShutdown(err)
++	}
++	// Initialization/event actors can no longer register cleanup or new workers.
++	a.shutdownCtx = drain
++	if err := a.close(); err != nil {
++		a.retainShutdown(err)
++	}
++	stopErr := a.driver.Stop(drain)
++	if stopErr != nil {
++		a.retainShutdown(stopErr)
++	}
+ 	server.Stop(a.instDir, false)
+-	return stopErr
++	return errors.Join(startupErr, driverErr, stopErr)
++
+ }
+ 
+ func (a *HostAgent) Screenshot(ctx context.Context, format string) ([]byte, error) {
+@@ -586,6 +603,7 @@
+ 		logrus.Debugf("shutting down the SSH master")
+ 		if exitMasterErr := ssh.ExitMaster(a.instSSHAddress, a.sshLocalPort, a.sshConfig); exitMasterErr != nil {
+ 			logrus.WithError(exitMasterErr).Warn("failed to exit SSH master")
++			return exitMasterErr
+ 		}
+ 		return nil
+ 	})
+@@ -596,8 +614,11 @@
+ 		essentialRequirements = a.essentialWinRequirements()
+ 	}
+ 
+-	if err := a.waitForRequirements("essential", essentialRequirements); err != nil {
++	if err := a.waitForRequirements(ctx, "essential", essentialRequirements); err != nil {
+ 		errs = append(errs, err)
++	}
++	if ctx.Err() != nil {
++		return errors.Join(errors.Join(errs...), ctx.Err())
+ 	}
+ 
+ 	// Windows guest needs a marker file which shows all installation is done.
+@@ -661,22 +682,22 @@
+ 
+ 	hasGuestAgentDaemon := !*a.instConfig.Plain && *a.instConfig.OS == limatype.LINUX
+ 	if hasGuestAgentDaemon {
+-		go a.watchGuestAgentEvents(ctx)
+-		go a.startTimeSync(ctx)
++		a.routines.start(func() { a.watchGuestAgentEvents(ctx) })
++		a.routines.start(func() { a.startTimeSync(ctx) })
+ 		if a.showProgress {
+ 			cloudInitDone := make(chan struct{})
+-			go func() {
++			a.routines.start(func() {
+ 				timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+ 				defer cancel()
+ 
+ 				a.watchCloudInitProgress(timeoutCtx)
+ 				close(cloudInitDone)
+-			}()
+-
+-			go func() {
++			})
++
++			a.routines.start(func() {
+ 				<-cloudInitDone
+ 				logrus.Debug("Cloud-init monitoring completed, VM is fully ready")
+-			}()
++			})
+ 		}
+ 	}
+ 
+@@ -685,14 +706,19 @@
+ 		optionalRequirements = a.optionalWinRequirements()
+ 	}
+ 
+-	if err := a.waitForRequirements("optional", optionalRequirements); err != nil {
++	if err := a.waitForRequirements(ctx, "optional", optionalRequirements); err != nil {
+ 		errs = append(errs, err)
++	}
++	if ctx.Err() != nil {
++		return errors.Join(errors.Join(errs...), ctx.Err())
+ 	}
+ 	if hasGuestAgentDaemon {
+ 		logrus.Info("Waiting for the guest agent to be running")
+ 		select {
+ 		case <-a.guestAgentAliveCh:
+ 			// NOP
++		case <-ctx.Done():
++			return errors.Join(errors.Join(errs...), ctx.Err())
+ 		case <-time.After(time.Minute):
+ 			errs = append(errs, errors.New("guest agent does not seem to be running; port forwards will not work"))
+ 		}
+@@ -703,8 +729,11 @@
+ 		finalRequirements = a.finalWinRequirements()
+ 	}
+ 
+-	if err := a.waitForRequirements("final", finalRequirements); err != nil {
++	if err := a.waitForRequirements(ctx, "final", finalRequirements); err != nil {
+ 		errs = append(errs, err)
++	}
++	if ctx.Err() != nil {
++		return errors.Join(errors.Join(errs...), ctx.Err())
+ 	}
+ 	// Copy all config files _after_ the requirements are done
+ 	for _, rule := range a.instConfig.CopyToHost {
+@@ -729,24 +758,19 @@
+ }
+ 
+ // cleanUp registers a cleanup function to be called when the host agent is stopped.
+-// The cleanup functions are called before the context is cancelled, in the reverse order of their registration.
++// Cleanup runs after the tracked actors join, in reverse registration order.
+ func (a *HostAgent) cleanUp(fn func() error) {
+-	a.onCloseMu.Lock()
+-	defer a.onCloseMu.Unlock()
+-	a.onClose = append(a.onClose, fn)
+-}
+-
+-func (a *HostAgent) close() error {
+-	a.onCloseMu.Lock()
+-	defer a.onCloseMu.Unlock()
+-	logrus.Infof("Shutting down the host agent")
+-	var errs []error
+-	for _, f := range slices.Backward(a.onClose) {
+-		if err := f(); err != nil {
+-			errs = append(errs, err)
+-		}
+-	}
+-	return errors.Join(errs...)
++	if !a.cleanup.add(fn) {
++		a.retainShutdown(errors.New("late hostagent cleanup registration"))
++	}
++}
++func (a *HostAgent) close() error { return a.cleanup.close() }
++func (a *HostAgent) retainShutdown(err error) {
++	logrus.WithError(err).Error("Hostagent lifecycle incomplete; original resources retained")
++	for {
++		time.Sleep(time.Minute)
++		runtime.KeepAlive(a)
++	}
+ }
+ 
+ func (a *HostAgent) watchGuestAgentEvents(ctx context.Context) {
+@@ -774,20 +798,20 @@
+ 		for _, rule := range a.instConfig.PortForwards {
+ 			if rule.GuestSocket != "" {
+ 				local := hostAddress(rule, &guestagentapi.IPPort{})
+-				if err := forwardSSH(ctx, a.sshConfig, sshAddress, sshPort, local, rule.GuestSocket, verbCancel, rule.Reverse); err != nil {
++				if err := forwardSSH(a.shutdownCtx, a.sshConfig, sshAddress, sshPort, local, rule.GuestSocket, verbCancel, rule.Reverse); err != nil {
+ 					errs = append(errs, err)
+ 				}
+ 			}
+ 		}
+ 		if a.driver.ForwardGuestAgent(ctx) {
+-			if err := a.cancelGuestAgentSockForward(ctx, localUnix, remoteUnix); err != nil {
++			if err := a.cancelGuestAgentSockForward(a.shutdownCtx, localUnix, remoteUnix); err != nil {
+ 				errs = append(errs, err)
+ 			}
+ 		}
+ 		return errors.Join(errs...)
+ 	})
+ 
+-	go func() {
++	a.routines.start(func() {
+ 		if a.instConfig.MountInotify == nil || !*a.instConfig.MountInotify {
+ 			return
+ 		}
+@@ -810,9 +834,9 @@
+ 			case <-time.After(10 * time.Second):
+ 			}
+ 		}
+-	}()
+-
+-	// ensure close before ctx is cancelled
++	})
++
++	// Close after the original event/inotify actors have joined.
+ 	a.cleanUp(a.grpcPortForwarder.Close)
+ 	a.cleanUp(func() error {
+ 		a.clientMu.Lock()
+--- /dev/null
++++ b/pkg/hostagent/lifecycle_state.go
+@@ -0,0 +1,149 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package hostagent
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"runtime"
++	"sync"
++	"time"
++)
++
++type routineGroup struct {
++	mu     sync.Mutex
++	sealed bool
++	active int
++	idle   chan struct{}
++}
++
++func (g *routineGroup) start(fn func()) bool {
++	g.mu.Lock()
++	if g.sealed {
++		g.mu.Unlock()
++		return false
++	}
++	if g.idle == nil {
++		g.idle = make(chan struct{})
++	}
++	g.active++
++	g.mu.Unlock()
++	go func() {
++		defer func() {
++			if recover() != nil {
++				fmt.Fprintln(os.Stderr, "Hostagent worker panic; original routine retained")
++				for {
++					time.Sleep(time.Minute)
++					runtime.KeepAlive(g)
++					runtime.KeepAlive(fn)
++				}
++			}
++			g.mu.Lock()
++			g.active--
++			if g.sealed && g.active == 0 {
++				close(g.idle)
++			}
++			g.mu.Unlock()
++		}()
++		fn()
++	}()
++	return true
++}
++func (g *routineGroup) seal() {
++	g.mu.Lock()
++	defer g.mu.Unlock()
++	if g.sealed {
++		return
++	}
++	g.sealed = true
++	if g.idle == nil {
++		g.idle = make(chan struct{})
++	}
++	if g.active == 0 {
++		close(g.idle)
++	}
++}
++func (g *routineGroup) join(ctx context.Context) error {
++	g.mu.Lock()
++	idle := g.idle
++	sealed := g.sealed
++	g.mu.Unlock()
++	if !sealed {
++		return errors.New("hostagent routines not sealed")
++	}
++	select {
++	case <-idle:
++		return nil
++	case <-ctx.Done():
++		return ctx.Err()
++	}
++}
++func waitRequirementRetry(ctx context.Context, delay time.Duration) error {
++	timer := time.NewTimer(delay)
++	defer timer.Stop()
++	select {
++	case <-ctx.Done():
++		return ctx.Err()
++	case <-timer.C:
++		return nil
++	}
++}
++
++// Snapshot under lock; run callbacks outside it. A failed/panicked prefix is
++// cached and never retried, and the dependent suffix remains retained.
++type cleanupStack struct {
++	mu        sync.Mutex
++	entries   []func() error
++	attempted bool
++	late      bool
++	result    error
++}
++
++func (s *cleanupStack) add(fn func() error) bool {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	s.entries = append(s.entries, fn)
++	if s.attempted {
++		s.late = true
++		s.result = errors.New("late hostagent cleanup registration")
++	}
++	return !s.attempted
++}
++func (s *cleanupStack) close() (result error) {
++	s.mu.Lock()
++	if s.attempted {
++		result = s.result
++		s.mu.Unlock()
++		return
++	}
++	s.attempted = true
++	s.result = errors.New("hostagent cleanup incomplete")
++	entries := append([]func() error(nil), s.entries...)
++	s.mu.Unlock()
++	defer func() {
++		if recover() != nil {
++			result = errors.New("hostagent cleanup panic")
++		}
++		s.mu.Lock()
++		if s.late {
++			result = errors.Join(result, errors.New("late hostagent cleanup registration"))
++		}
++		s.result = result
++		s.mu.Unlock()
++	}()
++	for i := len(entries) - 1; i >= 0; i-- {
++		s.mu.Lock()
++		late := s.late
++		s.mu.Unlock()
++		if late {
++			return errors.New("late hostagent cleanup registration")
++		}
++		if result = entries[i](); result != nil {
++			return
++		}
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/hostagent/lifecycle_state_test.go
+@@ -0,0 +1,77 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package hostagent
++
++import (
++	"context"
++	"errors"
++	"reflect"
++	"testing"
++	"time"
++)
++
++func TestRoutineSealJoinsRegisteredInitialization(t *testing.T) {
++	var g routineGroup
++	entered := make(chan struct{})
++	release := make(chan struct{})
++	var stack cleanupStack
++	if !g.start(func() { close(entered); <-release; stack.add(func() error { return nil }) }) {
++		t.Fatal("admission")
++	}
++	<-entered
++	g.seal()
++	if g.start(func() { t.Error("late birth") }) {
++		t.Fatal("sealed birth")
++	}
++	cancelled, cancel := context.WithCancel(context.Background())
++	cancel()
++	if g.join(cancelled) == nil {
++		t.Fatal("unjoined initialization accepted")
++	}
++	close(release)
++	ctx, done := context.WithTimeout(context.Background(), time.Second)
++	defer done()
++	if g.join(ctx) != nil || stack.close() != nil {
++		t.Fatal("original initializer/callback not joined")
++	}
++}
++func TestCleanupLIFOOutsideLockAndStopsUnknown(t *testing.T) {
++	for _, panicClose := range []bool{false, true} {
++		var s cleanupStack
++		var order []int
++		s.add(func() error { order = append(order, 1); return nil })
++		s.add(func() error {
++			order = append(order, 2)
++			if panicClose {
++				panic("controlled")
++			}
++			return errors.New("controlled")
++		})
++		s.add(func() error { order = append(order, 3); s.mu.Lock(); s.mu.Unlock(); return nil })
++		if s.close() == nil || s.close() == nil || !reflect.DeepEqual(order, []int{3, 2}) {
++			t.Fatal("suffix/retry", order)
++		}
++	}
++}
++func TestLateCleanupRegistrationCannotBecomePositive(t *testing.T) {
++	var s cleanupStack
++	effects := 0
++	s.add(func() error { effects++; return nil })
++	s.add(func() error {
++		if s.add(func() error { effects++; return nil }) {
++			t.Fatal("late admitted")
++		}
++		return nil
++	})
++	if s.close() == nil || s.close() == nil || effects != 0 {
++		t.Fatal("late suffix/positive", effects)
++	}
++}
++func TestReadinessRetryCancellation(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	if !errors.Is(waitRequirementRetry(ctx, time.Hour), context.Canceled) {
++		t.Fatal("sleep ignored cancellation")
++	}
++}
+--- a/pkg/hostagent/requirements.go
++++ b/pkg/hostagent/requirements.go
+@@ -21,7 +21,7 @@
+ 	"github.com/lima-vm/lima/v2/pkg/sshutil"
+ )
+ 
+-func (a *HostAgent) waitForRequirements(label string, requirements []requirement) error {
++func (a *HostAgent) waitForRequirements(ctx context.Context, label string, requirements []requirement) error {
+ 	const (
+ 		retries       = 200
+ 		sleepDuration = 3 * time.Second
+@@ -37,6 +37,9 @@
+ 		logrus.Infof("Waiting for the %s requirement %d of %d: %#q", label, i+1, len(requirements), req.description)
+ 	retryLoop:
+ 		for j := range retries {
++			if err := ctx.Err(); err != nil {
++				return errors.Join(errors.Join(errs...), err)
++			}
+ 			err := fn(req)
+ 			if err == nil {
+ 				logrus.Infof("The %s requirement %d of %d is satisfied", label, i+1, len(requirements))
+@@ -51,7 +54,9 @@
+ 				errs = append(errs, fmt.Errorf("failed to satisfy the %s requirement %d of %d %#q: %s: %w", label, i+1, len(requirements), req.description, req.debugHint, err))
+ 				break retryLoop
+ 			}
+-			time.Sleep(sleepDuration)
++			if err := waitRequirementRetry(ctx, sleepDuration); err != nil {
++				return errors.Join(errors.Join(errs...), err)
++			}
+ 		}
+ 	}
+ 	return errors.Join(errs...)
+--- a/pkg/limayaml/defaults.go
++++ b/pkg/limayaml/defaults.go
+@@ -1,5 +1,6 @@
+ // SPDX-FileCopyrightText: Copyright The Lima Authors
+ // SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: resolve the Windows host-template home after native projection.
+ 
+ package limayaml
+ 
+@@ -53,7 +54,7 @@
+ var (
+ 	IPv4loopback1 = net.IPv4(127, 0, 0, 1)
+ 
+-	userHomeDir = Must(os.UserHomeDir())
++	userHomeDir = initialHostHome()
+ 	currentUser = Must(user.Current())
+ )
+ 
+@@ -975,6 +976,10 @@
+ 	tmpl, err := template.New("").Parse(format)
+ 	if err == nil {
+ 		limaHome, _ := dirnames.LimaDir()
++		hostHome, homeErr := hostTemplateHome(userHomeDir)
++		if homeErr != nil {
++			return bytes.Buffer{}, fmt.Errorf("resolve host template home: %w", homeErr)
++		}
+ 		globalTempDir := "/tmp"
+ 		if runtime.GOOS == "windows" {
+ 			// On Windows the global temp directory "%SystemRoot%\Temp" (normally "C:\Windows\Temp")
+@@ -987,7 +992,7 @@
+ 			// TODO: add hostname fields for the host and the guest
+ 			"UID":           currentUser.Uid,
+ 			"User":          currentUser.Username,
+-			"Home":          userHomeDir,
++			"Home":          hostHome,
+ 			"Param":         param,
+ 			"GlobalTempDir": globalTempDir,
+ 			"TempDir":       os.TempDir(),
+--- /dev/null
++++ b/pkg/limayaml/host_home.go
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: defer the Windows host home until native environment projection.
++
++package limayaml
++
++import (
++	"os"
++	"runtime"
++)
++
++// Preserve upstream's eager cached home on other hosts. A Windows fixed-role
++// process cannot use inherited USERPROFILE before its native setup admission.
++func initialHostHome() string {
++	if runtime.GOOS == "windows" {
++		return ""
++	}
++	home, err := os.UserHomeDir()
++	if err != nil {
++		panic(err)
++	}
++	return home
++}
++
++// Ordinary template DATA only. The owning Go service projects the Windows
++// environment before calling the actual template evaluator. Failure is an
++// error, never an inherited fallback, cached value or native capability.
++func hostTemplateHome(legacy string) (string, error) {
++	if runtime.GOOS == "windows" {
++		return os.UserHomeDir()
++	}
++	return legacy, nil
++}
+--- /dev/null
++++ b/pkg/limayaml/host_home_test.go
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin regression: only stdlib environment DATA, no Lima/native initializers.
++
++package limayaml
++
++import (
++	"runtime"
++	"testing"
++)
++
++func TestHostHomeWindowsDefersUntilProjectionAndDoesNotCache(t *testing.T) {
++	if runtime.GOOS != "windows" {
++		t.Skip("Windows environment contract")
++	}
++	t.Setenv("USERPROFILE", "")
++	if initialHostHome() != "" {
++		t.Fatal("Windows eager home captured")
++	}
++	if _, err := hostTemplateHome("stale inherited home"); err == nil {
++		t.Fatal("missing projection silently used legacy value")
++	}
++	for _, home := range []string{`C:\owned-one\home`, `D:\owned-two\home`} {
++		t.Setenv("USERPROFILE", home)
++		actual, err := hostTemplateHome("stale inherited home")
++		if err != nil || actual != home {
++			t.Fatal("current projection was not observed", actual, err)
++		}
++		if initialHostHome() != "" {
++			t.Fatal("Windows eager path queried projected environment")
++		}
++	}
++	t.Setenv("USERPROFILE", "")
++	if _, err := hostTemplateHome("previous complete value"); err == nil {
++		t.Fatal("removed projection reused a previous home")
++	}
++}
++
++func TestHostHomeOtherHostsKeepEagerCache(t *testing.T) {
++	if runtime.GOOS == "windows" {
++		t.Skip("non-Windows upstream behavior")
++	}
++	t.Setenv("HOME", "/ordinary-initial-home")
++	cached := initialHostHome()
++	t.Setenv("HOME", "/later-host-home")
++	actual, err := hostTemplateHome(cached)
++	if err != nil || actual != "/ordinary-initial-home" {
++		t.Fatal("upstream cached home behavior changed", actual, err)
++	}
++}

@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   append,
-  composeFile,
   entries,
   imageUsers,
+  isPaused,
+  isRunning,
   labels,
   percent,
   ports,
@@ -34,26 +35,6 @@ test("CLI label strings keep commas inside values and accept objects", () => {
   );
   assert.deepEqual(labels({ Labels: { a: 1 } }), { a: "1" });
   assert.deepEqual(labels({}), {});
-});
-
-test("Compose file is known only for one recorded Windows path", () => {
-  const row = (files) => ({
-    Labels: `com.docker.compose.project=p,com.docker.compose.project.config_files=${files}`,
-  });
-  assert.equal(
-    composeFile([row("C:\\app\\compose.yml")]),
-    "C:\\app\\compose.yml",
-  );
-  assert.equal(composeFile([row("/home/u/compose.yml")]), undefined);
-  assert.equal(composeFile([row("C:\\app\\a.yml,C:\\app\\b.yml")]), undefined);
-  assert.equal(
-    composeFile([row("C:\\a\\compose.yml"), row("C:\\b\\compose.yml")]),
-    undefined,
-  );
-  assert.equal(
-    composeFile([{ Labels: "com.docker.compose.project=p" }]),
-    undefined,
-  );
 });
 
 test("entries group by returned project label and sort running first", () => {
@@ -118,6 +99,36 @@ test("usage matches exact returned references only", () => {
   assert.deepEqual(
     imageUsers({ Repository: "redis", Tag: "7", ID: "sha256:y" }, containers),
     [],
+  );
+});
+
+test("paused containers retain a distinct state and group priority without implying execution", () => {
+  const paused = { Names: "paused", State: "paused" };
+  assert.equal(isPaused(paused), true);
+  assert.equal(isRunning(paused), false);
+  assert.equal(isPaused({ State: "exited" }), false);
+  assert.equal(isPaused({ Status: "Up (Paused)" }), false);
+  const rows = [
+    { Names: "a-stopped", State: "exited" },
+    paused,
+    { Names: "z-running", State: "running" },
+    {
+      Names: "p-member",
+      State: "paused",
+      Labels: "com.docker.compose.project=b-project",
+    },
+  ];
+  assert.deepEqual(
+    entries("containers", rows, "status").map((entry) =>
+      entry.kind === "group" ? entry.project : entry.row.Names,
+    ),
+    ["z-running", "b-project", "paused", "a-stopped"],
+  );
+  assert.deepEqual(
+    entries("containers", rows, "name").map((entry) =>
+      entry.kind === "group" ? entry.project : entry.row.Names,
+    ),
+    ["a-stopped", "b-project", "paused", "z-running"],
   );
 });
 

@@ -1,0 +1,860 @@
+diff --git a/rdd/pkg/managementconfig/runtime_image_output_windows.go b/rdd/pkg/managementconfig/runtime_image_output_windows.go
+index b543f8f22fc367a377d20e2c9ac568be713c9586..354bd06882948375335f886d157b9c738c8f033b 100644
+--- a/rdd/pkg/managementconfig/runtime_image_output_windows.go
++++ b/rdd/pkg/managementconfig/runtime_image_output_windows.go
+@@ -72,6 +72,10 @@ func (f *runtimeImageOpenFrame) nativeOwner() runtimeImageFrameOwner {
+ 		if o == nil {
+ 			return nil
+ 		}
++	case *nativeModernIncomingCandidateImage:
++		if o == nil {
++			return nil
++		}
+ 	case *nativeUpgradeSDKServingOwner:
+ 		if o == nil {
+ 			return nil
+diff --git a/rdd/pkg/managementconfig/runtime_managed_authority_windows.go b/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
+index 75764338bfc6f4f33d87d122d7360fb4887459c7..41d4ee48f95877da0663d1e97cc9f49873c1dc1c 100644
+--- a/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
++++ b/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
+@@ -14,21 +14,22 @@ import (
+ )
+ 
+ type nativeManagedRuntimeAuthority struct {
+-	modernIncomingImage *ModernIncomingImage    // same-build borrowed code; no launch/transfer authority
+-	modernSelfLease     *ModernSelfProcessLease // dormant original self-process derivative; not a retirement/upgrade permit
+-	self                *ManagedRuntimeAuthority
+-	mu                  sync.Mutex
+-	image               *ServingImageLease
+-	created             *Created
+-	publisher           *ConfigPublisher
+-	main                upgradeObservedImageBinding
+-	originals           []*os.Process
+-	births              []*ManagedHostagentBirth
+-	launches            []*ManagedHostagentLaunch
+-	capturing           int
+-	controllersStarted  bool
+-	unknown             bool
+-	closeAttempt        runtimeStorageCloseAttempt
++	modernCandidateImage *ModernIncomingCandidateImage // original fixed-role READ derivative; no launch
++	modernIncomingImage  *ModernIncomingImage          // same-build borrowed code; no launch/transfer authority
++	modernSelfLease      *ModernSelfProcessLease       // dormant original self-process derivative; not a retirement/upgrade permit
++	self                 *ManagedRuntimeAuthority
++	mu                   sync.Mutex
++	image                *ServingImageLease
++	created              *Created
++	publisher            *ConfigPublisher
++	main                 upgradeObservedImageBinding
++	originals            []*os.Process
++	births               []*ManagedHostagentBirth
++	launches             []*ManagedHostagentLaunch
++	capturing            int
++	controllersStarted   bool
++	unknown              bool
++	closeAttempt         runtimeStorageCloseAttempt
+ }
+ 
+ func (a *nativeManagedRuntimeAuthority) fence() {
+@@ -280,7 +281,7 @@ func (a *ManagedRuntimeAuthority) closedForImage(image *ServingImageLease) bool
+ 	}
+ 	n.mu.Lock()
+ 	defer n.mu.Unlock()
+-	if n.unknown || n.capturing != 0 || !n.closeAttempt.attempted || n.closeAttempt.closeErr != nil || n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) {
++	if n.unknown || n.capturing != 0 || !n.closeAttempt.attempted || n.closeAttempt.closeErr != nil || n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) || n.modernCandidateImage != nil && !n.modernCandidateImage.closedForAuthority(n) {
+ 		return false
+ 	}
+ 	for _, b := range n.births {
+@@ -474,7 +475,7 @@ func (a *ManagedRuntimeAuthority) Close() error {
+ 	if n.unknown || n.publisher.closeErr != nil || n.publisher.pending != nil || n.created.closeErr != nil {
+ 		return ErrUpgrade
+ 	}
+-	if n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) {
++	if n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) || n.modernCandidateImage != nil && !n.modernCandidateImage.closedForAuthority(n) {
+ 		return ErrUpgrade
+ 	}
+ 	if n.modernSelfLease != nil && !n.modernSelfLease.closedForAuthority(n) {
+diff --git a/rdd/pkg/managementconfig/runtime_modern_candidate_capture.go b/rdd/pkg/managementconfig/runtime_modern_candidate_capture.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e139262266c2c0c6ffd082e08654f0c63b5dee8b
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_modern_candidate_capture.go
+@@ -0,0 +1,76 @@
++package managementconfig
++
++import "errors"
++
++var errModernCandidateCapture = errors.New("native candidate capture unavailable")
++
++// Logical DATA model, never an image or native ownership capability.
++type modernCandidateCaptureState struct {
++	published, complete, rejected, unknown bool
++	closeAttempted, closed                 bool
++}
++
++func (s *modernCandidateCaptureState) finish(valid bool) bool {
++	if !s.published || s.complete || s.rejected || s.unknown || s.closeAttempted {
++		return false
++	}
++	s.complete, s.rejected = valid, !valid
++	return true
++}
++func (s *modernCandidateCaptureState) beginClose() bool {
++	if !s.published || (!s.complete && !s.rejected) || s.unknown || s.closeAttempted {
++		return false
++	}
++	s.closeAttempted = true // Cached failure BEFORE effects; only finishClose publishes success.
++	return true
++}
++func (s *modernCandidateCaptureState) finishClose(allClosed bool) bool {
++	if !s.closeAttempted || s.closed || s.unknown || !allClosed {
++		s.unknown = true
++		return false
++	}
++	s.closed = true
++	return true
++}
++func modernCandidateRoleName(index int, locator string) string {
++	if !modernCandidateHex(locator, 64) {
++		return ""
++	}
++	switch index {
++	case 0:
++		return "rdd-" + locator
++	case 1:
++		return "rdd.exe"
++	case 2:
++		return "rdd-forwarder.exe"
++	case 3:
++		return "rdd-candidate.json"
++	case 4:
++		return "rdd-candidate.sig"
++	default:
++		return ""
++	}
++}
++func modernCandidateRoleSize(index int, size uint64) bool {
++	if size == 0 {
++		return false
++	}
++	switch index {
++	case 1:
++		return size <= 512<<20
++	case 2:
++		return size <= 4<<20
++	case 3:
++		return size <= modernCandidateStatementLimit
++	case 4:
++		return size == 88
++	default:
++		return false
++	}
++}
++
++// Classify before inspecting the native count/buffer: pending/error uncertainty
++// is not a completed read, even when a zero count happens to be visible.
++func modernCandidateReadKnown(raw uintptr, errorKnown bool, code uint32) bool {
++	return uint32(raw) != 0 || errorKnown && code != 0 && code != 997
++}
+diff --git a/rdd/pkg/managementconfig/runtime_modern_candidate_capture_test.go b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff6c85d1c8576a736f727ab15d1b056d2d534d45
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_test.go
+@@ -0,0 +1,111 @@
++package managementconfig
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestModernCandidateCaptureTerminalStates(t *testing.T) {
++	for _, valid := range []bool{false, true} {
++		s := modernCandidateCaptureState{published: true}
++		if !s.finish(valid) || s.finish(valid) || !s.beginClose() || s.beginClose() || !s.finishClose(true) || !s.closed {
++			t.Fatal("one terminal outcome and one checked close")
++		}
++	}
++	for step := 0; step < 5; step++ {
++		s := modernCandidateCaptureState{published: true}
++		s.finish(true)
++		if !s.beginClose() {
++			t.Fatal("begin")
++		}
++		// A panic/uncertain close at any native resource leaves prearmed failure;
++		// no suffix cleanup or later replay may produce a known closed state.
++		func() {
++			defer func() {
++				if recover() != nil {
++					s.unknown = true
++				}
++			}()
++			for n := 0; n < 5; n++ {
++				if n == step {
++					panic("close cut")
++				}
++			}
++			s.finishClose(true)
++		}()
++		if s.closed || !s.unknown || s.beginClose() || s.finishClose(true) {
++			t.Fatal("panic replay published success", step)
++		}
++	}
++	for _, s := range []modernCandidateCaptureState{{}, {published: true}, {published: true, complete: true, unknown: true}, {published: true, rejected: true, unknown: true}} {
++		if s.beginClose() {
++			t.Fatal("unsettled/unknown close admitted")
++		}
++	}
++}
++func TestModernCandidateFixedRolesAndBounds(t *testing.T) {
++	h := strings.Repeat("a", 64)
++	want := []string{"rdd-" + h, "rdd.exe", "rdd-forwarder.exe", "rdd-candidate.json", "rdd-candidate.sig"}
++	for n, v := range want {
++		if modernCandidateRoleName(n, h) != v {
++			t.Fatal(n)
++		}
++	}
++	for _, bad := range []string{"", strings.Repeat("0", 64), strings.Repeat("A", 64), "../" + h, h + "f"} {
++		if modernCandidateRoleName(1, bad) != "" {
++			t.Fatal("noncanonical locator")
++		}
++	}
++	for _, n := range []int{-1, 5, 100} {
++		if modernCandidateRoleName(n, h) != "" {
++			t.Fatal("arbitrary role")
++		}
++	}
++	limits := []uint64{0, 512 << 20, 4 << 20, 4096, 88}
++	for n := 1; n < 5; n++ {
++		if !modernCandidateRoleSize(n, limits[n]) || modernCandidateRoleSize(n, limits[n]+1) || modernCandidateRoleSize(n, 0) {
++			t.Fatal("size", n)
++		}
++	}
++	if modernCandidateRoleSize(4, 87) {
++		t.Fatal("signature must have exact length")
++	}
++}
++func TestModernCandidateReadUncertainBeforeCount(t *testing.T) {
++	for _, c := range []struct {
++		raw   uintptr
++		known bool
++		code  uint32
++		want  bool
++	}{{1, false, 997, true}, {uintptr(1) << 32, true, 997, false}, {0, false, 5, false}, {0, true, 0, false}, {0, true, 997, false}, {0, true, 5, true}} {
++		if modernCandidateReadKnown(c.raw, c.known, c.code) != c.want {
++			t.Fatal(c)
++		}
++	}
++}
++func TestModernCandidateReadReplyCuts(t *testing.T) {
++	for _, c := range []struct {
++		success            bool
++		code, count, limit uint32
++		known, complete    bool
++	}{
++		{true, 0, 3, 4, true, true}, {true, 0, 0, 4, true, true}, {true, 0, 5, 4, false, false},
++		{false, 5, 0, 4, true, false}, {false, 5, 1, 4, false, false}, {false, 997, 0, 4, false, false}, {false, 0, 0, 4, false, false},
++	} {
++		known, complete := runtimeStorageIOReply(c.success, c.code, c.count, c.limit, false)
++		if known != c.known || complete != c.complete {
++			t.Fatal(c)
++		}
++		s := runtimeStorageIOState{}
++		run, allowed := s.begin()
++		if !run || !allowed {
++			t.Fatal("begin")
++		}
++		if s.reply(known, complete) != known || s.settled() != known {
++			t.Fatal("native completion classification", c)
++		}
++		if s.reply(true, true) {
++			t.Fatal("late reply accepted")
++		}
++	}
++}
+diff --git a/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows.go b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..d5c7ad5f8c3b4beda9fe1072177e79ffe96ad52a
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows.go
+@@ -0,0 +1,486 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"hash"
++	"path/filepath"
++	"runtime"
++	"strings"
++	"unicode/utf16"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++// READ-only, different-build image foundation. No launch, transfer, raw HANDLE,
++// writer, publication or receiver interface is implemented by this capability.
++type ModernIncomingCandidateImage struct {
++	native *nativeModernIncomingCandidateImage
++}
++type nativeModernIncomingCandidateImage struct {
++	self                 *ModernIncomingCandidateImage
++	authority            *nativeManagedRuntimeAuthority
++	oldSelf              *ModernSelfProcessLease
++	image                *ServingImageLease
++	state                modernCandidateCaptureState
++	locator, sourcePath  string
++	profileParts         int
++	code                 ConfigVersion
++	paths                [5]string
++	handles              [5]windows.Handle // Original sole closer/out-pointer cells, never copied.
++	frames               [5]runtimeImageOpenFrame
++	opened               int
++	current              *runtimeImageOpenFrame
++	oldChecks            [2]modernIncomingImageQuery
++	checks               [2]modernCandidateNativeQuery
++	reader               modernCandidateNativeRead
++	statement, signature []byte
++	verified             modernCandidateStatementData // DATA, usable only with this original native graph.
++	digests              [2][32]byte
++	closeErr             error
++	closeIndex           int
++}
++type modernCandidateNativeQuery struct {
++	rows        [5]windows.ByHandleFileInformation
++	ids         [5][24]byte // complete FILE_ID_INFO, not a truncated buffer
++	paths       [5][1040]uint16
++	lengths     [5]uint32
++	sds         [5]*windows.SECURITY_DESCRIPTOR // normal-return owned GetSecurityInfo results
++	descriptors [5][32]byte
++	err         error
++}
++type modernCandidateNativeRead struct {
++	index     int
++	data      [64 << 10]byte
++	count     uint32
++	raw       uintptr
++	lastError error
++	state     runtimeStorageIOState
++	hasher    hash.Hash
++	read      uint64
++}
++
++func (*ModernIncomingCandidateImage) String() string {
++	return "held different-build native candidate read foundation"
++}
++func (*ModernIncomingCandidateImage) GoString() string {
++	return "held different-build native candidate read foundation"
++}
++func (i *nativeModernIncomingCandidateImage) fence() { i.state.unknown = true; i.authority.fence() }
++func (i *nativeModernIncomingCandidateImage) originalHeld() bool {
++	if i == nil || i.self == nil || i.self.native != i || i.authority == nil {
++		return false
++	}
++	n, l := i.authority, i.image
++	return n.modernCandidateImage == i.self && n.modernIncomingImage == nil && modernIncomingSelfHeld(n, i.oldSelf) && n.image == l && servingImageCaptureKnown(l) && n.admitted() && n.controllersStarted && n.main.captured && n.main.process == windows.CurrentProcess() && i.code == l.image && i.state.published && !i.state.unknown && !i.state.closeAttempted && len(l.chain) >= 5 && len(l.chain) == len(l.captureParts)+1 && len(l.resources) == len(l.chain) && len(l.openFrames) == len(l.chain)
++}
++func (i *nativeModernIncomingCandidateImage) ownsRuntimeImageOpenFrame(f *runtimeImageOpenFrame) bool {
++	if !i.originalHeld() || f == nil || i.current != f || f.owner != i || i.opened < 0 || i.opened >= len(i.frames) || f != &i.frames[i.opened] || f.output != &i.handles[i.opened] || f.name != modernCandidateRoleName(i.opened, i.locator) {
++		return false
++	}
++	parent := i.handles[0]
++	if i.opened == 0 {
++		parent = i.image.chain[len(i.image.chain)-3]
++	}
++	return parent != 0 && parent != windows.InvalidHandle && f.parent == parent
++}
++func (i *nativeModernIncomingCandidateImage) fenceRuntimeImageOpenFrame() { i.fence() }
++
++// All output rows belong to this registered derivative before the first query.
++// Existing policy wrappers retain their accepted synchronous normal-return
++// GetSecurityInfo allocation/copy/free contract; this adds no raw allocator.
++func (i *nativeModernIncomingCandidateImage) checkOld(phase int) bool {
++	if phase < 0 || phase > 1 || !i.originalHeld() {
++		return false
++	}
++	n, s, l, q := i.authority, i.oldSelf.native, i.image, &i.oldChecks[phase]
++	q.pid, q.err = windows.GetProcessId(s.process)
++	if q.err != nil || q.pid == 0 || q.pid != windows.GetCurrentProcessId() || q.pid != n.publisher.serving.PID || q.pid != s.query.pid {
++		return false
++	}
++	q.err = windows.GetProcessTimes(s.process, &q.created, &q.exit, &q.kernel, &q.user)
++	if q.err != nil || q.created != s.query.created || uint64(q.created.HighDateTime)<<32|uint64(q.created.LowDateTime) != n.main.creation || n.main.creation != n.publisher.serving.Creation {
++		return false
++	}
++	q.err = windows.ProcessIdToSessionId(q.pid, &q.session)
++	if q.err != nil || q.session == 0 || q.session != s.query.session || q.session != n.publisher.serving.Session {
++		return false
++	}
++	q.wait, q.err = windows.WaitForSingleObject(s.process, 0)
++	if q.err != nil || q.wait != uint32(windows.WAIT_TIMEOUT) {
++		return false
++	}
++	for index, h := range l.chain {
++		r, f := l.resources[index], l.openFrames[index]
++		if r == nil || r.handle != h || h == 0 || h == windows.InvalidHandle || r.attempted || f == nil || f.owner != l || f.resource != r || f.output != &r.handle || !f.state.usable() {
++			return false
++		}
++		directory := index < len(l.chain)-1
++		if checkReadObject(h, n.created.parents.sid, directory) != nil || index > i.profileParts && verifyPrivate(h, n.created.parents.sid, directory) != nil {
++			return false
++		}
++		q.err = windows.GetFileInformationByHandle(h, &q.rows[index])
++		if q.err != nil {
++			return false
++		}
++		if phase == 1 && !modernCandidateSameRow(i.oldChecks[0].rows[index], q.rows[index], directory) {
++			return false
++		}
++	}
++	leaf := len(l.chain) - 1
++	v := q.rows[leaf]
++	if v.VolumeSerialNumber != i.code.Volume || v.FileIndexHigh != i.code.High || v.FileIndexLow != i.code.Low || v.NumberOfLinks != 1 || v.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY|windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0 || v.FileSizeHigh != 0 || v.FileSizeLow == 0 || v.FileSizeLow > 512<<20 || n.main.file != l.chain[leaf] || n.main.id.Volume != i.code.Volume || n.main.id.High != i.code.High || n.main.id.Low != i.code.Low {
++		return false
++	}
++	q.pathLength, q.err = windows.GetFinalPathNameByHandle(l.chain[leaf], &q.path[0], uint32(len(q.path)), 0)
++	if q.err != nil || q.pathLength == 0 || q.pathLength >= uint32(len(q.path)) || !modernIncomingFinalPathMatches(windows.UTF16ToString(q.path[:q.pathLength]), i.sourcePath) {
++		return false
++	}
++	q.mappingFile = l.chain[leaf]
++	q.mappingStatus, _, _ = modernIncomingQueryProcess.Call(uintptr(n.main.process), 44, uintptr(unsafe.Pointer(&q.mappingFile)), unsafe.Sizeof(q.mappingFile), uintptr(unsafe.Pointer(&q.mappingLength)))
++	runtime.KeepAlive(i)
++	if uint32(q.mappingStatus) != 0 {
++		return false
++	} // never inspect a pending in/out word
++	return q.mappingFile == l.chain[leaf] && i.originalHeld()
++}
++func modernCandidateSameRow(a, b windows.ByHandleFileInformation, directory bool) bool {
++	return a.VolumeSerialNumber == b.VolumeSerialNumber && a.FileIndexHigh == b.FileIndexHigh && a.FileIndexLow == b.FileIndexLow && a.FileAttributes == b.FileAttributes && a.NumberOfLinks == b.NumberOfLinks && (directory || a.FileSizeHigh == b.FileSizeHigh && a.FileSizeLow == b.FileSizeLow && a.LastWriteTime == b.LastWriteTime)
++}
++func (i *nativeModernIncomingCandidateImage) checkCandidate(phase int) bool {
++	if !i.originalHeld() || phase < 0 || phase > 1 || i.opened != 5 {
++		return false
++	}
++	q := &i.checks[phase]
++	for index, h := range i.handles {
++		f := &i.frames[index]
++		if h == 0 || h == windows.InvalidHandle || f.owner != i || f.output != &i.handles[index] || !f.state.usable() {
++			return false
++		}
++		directory := index == 0
++		if checkReadObject(h, i.authority.created.parents.sid, directory) != nil || verifyPrivate(h, i.authority.created.parents.sid, directory) != nil {
++			return false
++		}
++		q.err = windows.GetFileInformationByHandle(h, &q.rows[index])
++		if q.err != nil {
++			return false
++		}
++		q.err = windows.GetFileInformationByHandleEx(h, windows.FileIdInfo, &q.ids[index][0], uint32(len(q.ids[index])))
++		if q.err != nil {
++			return false
++		}
++		v := q.rows[index]
++		if v.VolumeSerialNumber != i.code.Volume || v.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (v.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != directory || !directory && (v.NumberOfLinks != 1 || !modernCandidateRoleSize(index, uint64(v.FileSizeHigh)<<32|uint64(v.FileSizeLow))) {
++			return false
++		}
++		q.lengths[index], q.err = windows.GetFinalPathNameByHandle(h, &q.paths[index][0], uint32(len(q.paths[index])), 0)
++		if q.err != nil || q.lengths[index] == 0 || q.lengths[index] >= uint32(len(q.paths[index])) || !modernIncomingFinalPathMatches(windows.UTF16ToString(q.paths[index][:q.lengths[index]]), i.paths[index]) {
++			return false
++		}
++		q.sds[index], q.err = windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++		if q.err != nil || q.sds[index] == nil || q.sds[index].Length() < 20 || q.sds[index].Length() > 65536 {
++			return false
++		}
++		q.descriptors[index] = sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(q.sds[index])), int(q.sds[index].Length())))
++		if phase == 1 && (!modernCandidateSameRow(i.checks[0].rows[index], v, directory) || i.checks[0].ids[index] != q.ids[index] || i.checks[0].descriptors[index] != q.descriptors[index]) {
++			return false
++		}
++	}
++	return i.originalHeld()
++}
++
++func (i *nativeModernIncomingCandidateImage) open(index int) error {
++	if !i.originalHeld() || index != i.opened || index < 0 || index >= 5 {
++		return ErrUpgrade
++	}
++	f := &i.frames[index]
++	parent := i.handles[0]
++	if index == 0 {
++		parent = i.image.chain[len(i.image.chain)-3]
++	}
++	f.owner, f.output, f.parent, f.name = i, &i.handles[index], parent, modernCandidateRoleName(index, i.locator)
++	i.current = f
++	access := uint32(windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES | windows.SYNCHRONIZE)
++	share := uint32(windows.FILE_SHARE_READ)
++	options := uint32(windows.FILE_SYNCHRONOUS_IO_NONALERT | windows.FILE_OPEN_REPARSE_POINT)
++	if index == 0 {
++		access |= windows.FILE_TRAVERSE
++		share |= windows.FILE_SHARE_WRITE
++		options |= windows.FILE_DIRECTORY_FILE
++	} else {
++		access |= windows.FILE_READ_DATA
++		options |= windows.FILE_NON_DIRECTORY_FILE
++	}
++	_, e := f.ntCall(parent, f.name, access, share, options)
++	if e != nil {
++		return e
++	}
++	if !f.state.attach() {
++		i.fence()
++		return ErrUpgrade
++	}
++	i.current = nil
++	i.opened++
++	return nil
++}
++
++func (i *nativeModernIncomingCandidateImage) read(ctx context.Context, index int) bool {
++	if !i.originalHeld() || index < 1 || index > 4 || !i.frames[index].state.usable() {
++		i.fence()
++		return false
++	}
++	f := &i.reader
++	f.index = index
++	f.read = 0
++	f.hasher = sha256.New()
++	size := uint64(i.checks[0].rows[index].FileSizeHigh)<<32 | uint64(i.checks[0].rows[index].FileSizeLow)
++	for f.read < size {
++		if ctx.Err() != nil {
++			return false
++		} // only between positively completed native reads
++		remaining := size - f.read
++		limit := len(f.data)
++		if remaining < uint64(limit) {
++			limit = int(remaining)
++		}
++		f.state = runtimeStorageIOState{}
++		f.count = 0
++		f.raw = 0
++		f.lastError = nil
++		run, ok := f.state.begin()
++		if !run || !ok {
++			i.fence()
++			return false
++		}
++		f.raw, _, f.lastError = storageIOReadFile.Call(uintptr(i.handles[index]), uintptr(unsafe.Pointer(&f.data[0])), uintptr(limit), uintptr(unsafe.Pointer(&f.count)), 0)
++		runtime.KeepAlive(i)
++		if !i.originalHeld() {
++			i.fence()
++			return false
++		}
++		success := uint32(f.raw) != 0
++		code := windows.Errno(0)
++		known := true
++		if !success {
++			code, known = f.lastError.(windows.Errno)
++		}
++		if !modernCandidateReadKnown(f.raw, known, uint32(code)) {
++			i.fence()
++			return false
++		}
++		settled, complete := runtimeStorageIOReply(success, uint32(code), f.count, uint32(limit), false)
++		if !f.state.reply(settled, complete) {
++			i.fence()
++			return false
++		}
++		if !complete || f.count == 0 {
++			return false
++		} // settled short body/EOF; explicit Close is possible
++		f.hasher.Write(f.data[:f.count])
++		if index == 3 {
++			i.statement = append(i.statement, f.data[:f.count]...)
++		}
++		if index == 4 {
++			i.signature = append(i.signature, f.data[:f.count]...)
++		}
++		f.read += uint64(f.count)
++	}
++	if index <= 2 {
++		copy(i.digests[index-1][:], f.hasher.Sum(nil))
++	}
++	return true
++}
++
++// Prepublication guards below are PURE. Every native query, including checking
++// the old graph, occurs only after the original derivative is registered.
++func (a *ManagedRuntimeAuthority) CaptureModernIncomingCandidateImage(ctx context.Context, oldSelf *ModernSelfProcessLease, rddSHA string) (out *ModernIncomingCandidateImage, result error) {
++	n, e := a.exact()
++	if e != nil || !freshBoundedContext(ctx) || !modernCandidateHex(rddSHA, 64) {
++		return nil, ErrUpgrade
++	}
++	if _, e = compiledModernCandidateVerifier(); e != nil {
++		return nil, ErrUpgrade
++	}
++	n.publisher.mu.Lock()
++	defer n.publisher.mu.Unlock()
++	n.created.mu.Lock()
++	defer n.created.mu.Unlock()
++	n.image.mu.Lock()
++	defer n.image.mu.Unlock()
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	if !n.admitted() || !n.controllersStarted || n.modernCandidateImage != nil || n.modernIncomingImage != nil || !modernIncomingSelfHeld(n, oldSelf) || n.created.parents == nil || n.created.parents.sid == "" || !servingImageCaptureKnown(n.image) || len(n.image.chain) > 40 || len(n.image.captureParts) < 5 || len(n.image.chain) != len(n.image.captureParts)+1 {
++		return nil, ErrUpgrade
++	}
++	l := n.image
++	path := filepath.Join(append([]string{l.captureVolume}, l.captureParts...)...)
++	profile := filepath.Join(append([]string{l.captureVolume}, l.captureParts[:len(l.captureParts)-4]...)...)
++	digest, e := servingImageDigest(profile, path)
++	if e != nil || digest != l.image.Hash || !strings.EqualFold(l.captureParts[len(l.captureParts)-4], ".orbwin-private") || !strings.EqualFold(l.captureParts[len(l.captureParts)-3], "runtime") || !strings.EqualFold(l.captureParts[len(l.captureParts)-2], "rdd-"+hex.EncodeToString(l.image.Hash[:])) || !strings.EqualFold(l.captureParts[len(l.captureParts)-1], "rdd.exe") || rddSHA == hex.EncodeToString(l.image.Hash[:]) {
++		return nil, ErrUpgrade
++	}
++	cap := &ModernIncomingCandidateImage{}
++	i := &nativeModernIncomingCandidateImage{self: cap, authority: n, oldSelf: oldSelf, image: l, locator: rddSHA, sourcePath: path, profileParts: len(l.captureParts) - 4, code: l.image, closeErr: ErrUpgrade}
++	cap.native = i
++	i.paths[0] = filepath.Join(filepath.Dir(filepath.Dir(path)), modernCandidateRoleName(0, rddSHA))
++	for index := 1; index < 5; index++ {
++		i.paths[index] = filepath.Join(i.paths[0], modernCandidateRoleName(index, rddSHA))
++	}
++	for _, p := range i.paths {
++		if len(utf16.Encode([]rune(p)))+1 >= 1040 {
++			return nil, ErrUpgrade
++		}
++	}
++	for phase := range i.oldChecks {
++		i.oldChecks[phase].rows = make([]windows.ByHandleFileInformation, len(l.chain))
++	}
++	if ctx.Err() != nil {
++		return nil, ErrUpgrade
++	}
++	i.state.published = true
++	n.modernCandidateImage = cap
++	out = cap
++	defer func() {
++		if recover() != nil {
++			i.fence()
++			result = ErrUpgrade
++		}
++		runtime.KeepAlive(out)
++	}()
++	if !i.checkOld(0) {
++		i.fence()
++		return cap, ErrUpgrade
++	}
++	for index := 0; index < 5; index++ {
++		if ctx.Err() != nil {
++			i.state.finish(false)
++			return cap, ErrUpgrade
++		}
++		if e = i.open(index); e != nil {
++			if !i.state.unknown {
++				i.state.finish(false)
++			}
++			return cap, ErrUpgrade
++		}
++	}
++	if !i.checkCandidate(0) {
++		i.fence()
++		return cap, ErrUpgrade
++	}
++	for _, index := range []int{3, 4} {
++		if ctx.Err() != nil {
++			i.state.finish(false)
++			return cap, ErrUpgrade
++		}
++		if !i.read(ctx, index) {
++			if !i.state.unknown {
++				i.state.finish(false)
++			}
++			return cap, ErrUpgrade
++		}
++	}
++	i.verified, e = verifyCompiledModernCandidateStatement(i.statement, i.signature)
++	if e != nil || i.verified.Assets[0].SHA256 != rddSHA {
++		i.state.finish(false)
++		return cap, ErrUpgrade
++	}
++	for index, asset := range i.verified.Assets {
++		v := i.checks[0].rows[index+1]
++		if asset.Size != uint64(v.FileSizeHigh)<<32|uint64(v.FileSizeLow) {
++			i.state.finish(false)
++			return cap, ErrUpgrade
++		}
++		if !i.read(ctx, index+1) {
++			if !i.state.unknown {
++				i.state.finish(false)
++			}
++			return cap, ErrUpgrade
++		}
++		if asset.SHA256 != hex.EncodeToString(i.digests[index][:]) {
++			i.state.finish(false)
++			return cap, ErrUpgrade
++		}
++	}
++	if !i.checkOld(1) || !i.checkCandidate(1) {
++		i.fence()
++		return cap, ErrUpgrade
++	}
++	if !i.state.finish(true) {
++		i.fence()
++		return cap, ErrUpgrade
++	}
++	if ctx.Err() != nil {
++		return cap, ErrUpgrade
++	}
++	return cap, nil
++}
++
++// Parent-side cached facts only. Never acquire image.mu from authority.mu.
++func (cap *ModernIncomingCandidateImage) closedForAuthority(n *nativeManagedRuntimeAuthority) bool {
++	if cap == nil || cap.native == nil || n == nil {
++		return false
++	}
++	i := cap.native
++	return i.self == cap && i.authority == n && n.modernCandidateImage == cap && i.oldSelf == n.modernSelfLease && i.image == n.image && i.state.closeAttempted && i.state.closed && !i.state.unknown && i.closeErr == nil
++}
++func (cap *ModernIncomingCandidateImage) Close() (result error) {
++	if cap == nil || cap.native == nil {
++		return ErrUpgrade
++	}
++	i := cap.native
++	n := i.authority
++	if i.self != cap || n == nil || n.publisher == nil || n.created == nil {
++		return ErrUpgrade
++	}
++	n.publisher.mu.Lock()
++	defer n.publisher.mu.Unlock()
++	n.created.mu.Lock()
++	defer n.created.mu.Unlock()
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	if n.modernCandidateImage != cap || i.image != n.image || i.oldSelf != n.modernSelfLease {
++		return ErrUpgrade
++	}
++	if i.state.closeAttempted {
++		return i.closeErr
++	}
++	if !n.admitted() || !i.state.beginClose() {
++		return ErrUpgrade
++	}
++	result = ErrUpgrade
++	i.closeErr = ErrUpgrade
++	defer func() {
++		if recover() != nil {
++			i.fence()
++			result = ErrUpgrade
++		}
++		runtime.KeepAlive(cap)
++	}()
++	for index := len(i.handles) - 1; index >= 0; index-- {
++		i.closeIndex = index
++		if i.handles[index] == 0 {
++			continue
++		}
++		if i.handles[index] == windows.InvalidHandle {
++			i.fence()
++			return ErrUpgrade
++		}
++		i.closeErr = windows.CloseHandle(i.handles[index])
++		if i.closeErr != nil {
++			i.closeErr = ErrUpgrade
++			i.fence()
++			return ErrUpgrade
++		}
++		i.closeErr = ErrUpgrade // prearm next effect / panic; never publish transient nil
++	}
++	if !i.state.finishClose(true) {
++		i.fence()
++		return ErrUpgrade
++	}
++	i.closeErr = nil
++	return nil
++}
+diff --git a/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows_test.go b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f0a1b2121d6c9413a99d99668a78f740a6c0d0c4
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_modern_candidate_capture_windows_test.go
+@@ -0,0 +1,53 @@
++//go:build windows
++
++package managementconfig
++
++import "testing"
++
++// Compiled only in the source qualification. No forged object is passed through
++// a native syscall; these exercise refusal and cached parent-edge predicates.
++func TestModernCandidateNativeOriginalGuards(t *testing.T) {
++	var zero *nativeModernIncomingCandidateImage
++	if zero.originalHeld() || zero.ownsRuntimeImageOpenFrame(&runtimeImageOpenFrame{}) {
++		t.Fatal("nil original")
++	}
++	n := &nativeManagedRuntimeAuthority{}
++	cap := &ModernIncomingCandidateImage{}
++	i := &nativeModernIncomingCandidateImage{self: cap, authority: n, state: modernCandidateCaptureState{published: true}}
++	cap.native = i
++	if i.originalHeld() {
++		t.Fatal("unregistered authority")
++	}
++	n.modernCandidateImage = cap
++	f := &runtimeImageOpenFrame{owner: i, output: &i.handles[0]}
++	if f.original() || f.entryReady() {
++		t.Fatal("local clean fields are not native admission")
++	}
++	if cap.closedForAuthority(n) {
++		t.Fatal("pending derivative releases parent")
++	}
++	i.state.complete = true
++	i.state.closeAttempted = true
++	i.state.closed = true
++	i.closeErr = nil
++	// This predicate reports cached release facts only; it is not native admission.
++	if !cap.closedForAuthority(n) {
++		t.Fatal("known closed cached edge")
++	}
++	copyCap := *cap
++	if copyCap.closedForAuthority(n) {
++		t.Fatal("copied wrapper")
++	}
++	i.state.unknown = true
++	if cap.closedForAuthority(n) {
++		t.Fatal("unknown releases parent")
++	}
++	i.state.unknown = false
++	i.closeErr = ErrUpgrade
++	if cap.closedForAuthority(n) {
++		t.Fatal("failed close releases parent")
++	}
++	if f.entryReady() {
++		t.Fatal("closed original cannot enter native call")
++	}
++}
+diff --git a/rdd/pkg/managementconfig/runtime_modern_image_windows.go b/rdd/pkg/managementconfig/runtime_modern_image_windows.go
+index eaeea0a437da612424ff642ef3f935f5ed7c0f42..a6c14887c9625eeaaafb91bcc3da09d482b94d48 100644
+--- a/rdd/pkg/managementconfig/runtime_modern_image_windows.go
++++ b/rdd/pkg/managementconfig/runtime_modern_image_windows.go
+@@ -59,7 +59,7 @@ func (i *nativeModernIncomingImage) originalHeld() bool {
+ 		return false
+ 	}
+ 	n, l := i.authority, i.image
+-	return n.modernIncomingImage == i.self && modernIncomingSelfHeld(n, i.oldSelf) && n.image == l && servingImageCaptureKnown(l) && n.admitted() && n.controllersStarted && n.main.captured && n.main.process == windows.CurrentProcess() && i.code == l.image && len(l.chain) >= 5 && len(l.chain) == len(l.captureParts)+1 && len(l.resources) == len(l.chain) && len(l.openFrames) == len(l.chain)
++	return n.modernIncomingImage == i.self && n.modernCandidateImage == nil && modernIncomingSelfHeld(n, i.oldSelf) && n.image == l && servingImageCaptureKnown(l) && n.admitted() && n.controllersStarted && n.main.captured && n.main.process == windows.CurrentProcess() && i.code == l.image && len(l.chain) >= 5 && len(l.chain) == len(l.captureParts)+1 && len(l.resources) == len(l.chain) && len(l.openFrames) == len(l.chain)
+ }
+ func (i *nativeModernIncomingImage) checkNative(phase int) bool {
+ 	if !i.originalHeld() || i.state.unknown || phase < 0 || phase > 1 {
+@@ -159,7 +159,7 @@ func (a *ManagedRuntimeAuthority) CaptureModernIncomingSelfImage(ctx context.Con
+ 	defer n.image.mu.Unlock()
+ 	n.mu.Lock()
+ 	defer n.mu.Unlock()
+-	if !n.admitted() || !n.controllersStarted || n.modernIncomingImage != nil || !modernIncomingSelfHeld(n, oldSelf) || n.created.parents == nil || n.created.parents.sid == "" || !servingImageCaptureKnown(n.image) || len(n.image.chain) > 40 || len(n.image.captureParts) < 5 {
++	if !n.admitted() || !n.controllersStarted || n.modernIncomingImage != nil || n.modernCandidateImage != nil || !modernIncomingSelfHeld(n, oldSelf) || n.created.parents == nil || n.created.parents.sid == "" || !servingImageCaptureKnown(n.image) || len(n.image.chain) > 40 || len(n.image.captureParts) < 5 {
+ 		return nil, ErrUpgrade
+ 	}
+ 	l := n.image
+diff --git a/rdd/pkg/managementconfig/runtime_modern_self_windows.go b/rdd/pkg/managementconfig/runtime_modern_self_windows.go
+index a3129303b0262cabb3658b74a6482802eb50e3f5..4a2e3551ec657ed017c7c973b86f630671c4d27d 100644
+--- a/rdd/pkg/managementconfig/runtime_modern_self_windows.go
++++ b/rdd/pkg/managementconfig/runtime_modern_self_windows.go
+@@ -132,7 +132,7 @@ func (l *ModernSelfProcessLease) Close() (result error) {
+ 	if n.modernSelfLease != l {
+ 		return ErrUpgrade
+ 	}
+-	if n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) {
++	if n.modernIncomingImage != nil && !n.modernIncomingImage.closedForAuthority(n) || n.modernCandidateImage != nil && !n.modernCandidateImage.closedForAuthority(n) {
+ 		return ErrUpgrade
+ 	}
+ 	if l.closedForAuthority(n) {

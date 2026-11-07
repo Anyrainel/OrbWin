@@ -1,0 +1,7 @@
+services:
+  app:
+    healthcheck:
+      test: [CMD-SHELL, "test -f /data/ready"]
+      interval: 1s
+      timeout: 1s
+      retries: 180

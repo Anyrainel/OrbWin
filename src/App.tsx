@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { RefreshCw, Search, X } from "lucide-react";
 import * as backend from "./backend";
 import {
@@ -9,10 +17,20 @@ import {
   type Page,
 } from "./model/navigation";
 import { ResourceList, Unavailable } from "./components/ResourceInventory";
+import { VolumeTransfers } from "./components/resources/VolumeTransfers";
+import {
+  VolumeFileEditor,
+  type VolumeFileEdit,
+} from "./components/resources/VolumeFileEditor";
+import { ImageImports } from "./components/resources/ImageImports";
+import { EngineActivity } from "./components/resources/StatsPanel";
+import { project as composeProjectName } from "./components/resources/model";
 import { Cluster } from "./components/Cluster";
 import { Wsl } from "./components/Wsl";
 import { BuildHistory } from "./components/BuildHistory";
+import { NetworkDiagnostics } from "./components/NetworkDiagnostics";
 import { isKubernetesContainer } from "./model/resources";
+
 import {
   OperationProvider,
   ProjectControls,
@@ -44,6 +62,24 @@ import {
 } from "./components/settings/useAppSettings";
 import { kubernetesState } from "./components/settings/app-settings-model";
 import "./styles/shell.css";
+
+const LazyMigrationControls = lazy(() =>
+  import("./components/resources/MigrationImages").then((module) => ({
+    default: module.MigrationExports,
+  })),
+);
+function MigrationControls(props: {
+  connected: boolean;
+  resource: "images" | "volumes" | "projects";
+  targetProjects?: string[];
+  targetVolumes?: string[];
+}) {
+  return (
+    <Suspense fallback={<p role="status">Loading migration controls…</p>}>
+      <LazyMigrationControls {...props} />
+    </Suspense>
+  );
+}
 
 export function App() {
   return (
@@ -160,6 +196,11 @@ function Shell({
     if (titleBarError) notify("error", titleBarError);
   }, [titleBarError, notify]);
   const [query, setQuery] = useState("");
+  // Inventory failure may unmount its pane, but never owns the open editor.
+  const [fileEditor, setFileEditor] = useState<{
+    context: VolumeFileEdit;
+    refreshPreview: () => void;
+  } | null>(null);
   const [includeKubernetes, setIncludeKubernetes] = useState(false);
   const [diagnostics, setDiagnostics] = useState<backend.Diagnostic[]>([]);
   const [diagnosticBusy, setDiagnosticBusy] = useState(false);
@@ -382,12 +423,18 @@ function Shell({
           onReload={() => void settings.reload()}
         />
         {isResourcePage(page) && status && !connected ? (
-          <EngineSetup
-            status={status}
-            checking={busy}
-            onRefresh={refresh}
-            onDiagnostics={() => navigate("diagnostics")}
-          />
+          <>
+            <EngineSetup
+              status={status}
+              checking={busy}
+              onRefresh={refresh}
+              onDiagnostics={() => navigate("diagnostics")}
+            />
+            {page === "images" && <ImageImports connected={false} />}
+            {page === "volumes" && (
+              <MigrationControls resource="volumes" connected={false} />
+            )}
+          </>
         ) : isResourcePage(page) ? (
           <section className="resource-workspace" aria-label={current.label}>
             <div className="list-pane">
@@ -448,7 +495,40 @@ function Shell({
                 </label>
               )}
               {page === "containers" && (
-                <ProjectControls disabled={!inventory || busy} />
+                <>
+                  <ProjectControls disabled={!inventory || busy} />
+                  {connected && <EngineActivity />}
+                  <MigrationControls
+                    resource="projects"
+                    targetVolumes={
+                      inventory?.volumes
+                        .filter(
+                          (volume) =>
+                            volume.Driver === "local" &&
+                            volume.Scope === "local",
+                        )
+                        .flatMap((volume) =>
+                          typeof volume.Name === "string" ? [volume.Name] : [],
+                        ) ?? []
+                    }
+                    connected={!!inventory && !busy}
+                    targetProjects={[
+                      ...new Set(
+                        inventory?.containers
+                          .map(composeProjectName)
+                          .filter((name): name is string => !!name) ?? [],
+                      ),
+                    ]}
+                  />
+                </>
+              )}
+              {page === "volumes" && inventory && <VolumeTransfers />}
+              {page === "volumes" && (
+                <MigrationControls resource="volumes" connected={!!inventory} />
+              )}
+              {page === "images" && <ImageImports connected={!!inventory} />}
+              {page === "images" && (
+                <MigrationControls resource="images" connected={!!inventory} />
               )}
               {inventory ? (
                 <ResourceList
@@ -458,6 +538,12 @@ function Shell({
                   query={query}
                   label={current.label}
                   containers={inventory.containers}
+                  onEditFile={(context, refreshPreview) =>
+                    setFileEditor(
+                      (current) =>
+                        current ?? { context: { ...context }, refreshPreview },
+                    )
+                  }
                 />
               ) : (
                 <Unavailable
@@ -512,6 +598,7 @@ function Shell({
             )}
             {page === "diagnostics" && (
               <>
+                <NetworkDiagnostics />
                 <h2>Connection</h2>
                 <p>
                   Save a local diagnostic snapshot with the connection result,
@@ -577,6 +664,26 @@ function Shell({
           </section>
         )}
       </main>
+      {fileEditor && (
+        <VolumeFileEditor
+          {...fileEditor.context}
+          available={
+            connected &&
+            !!inventory?.volumes.some(
+              (volume) => volume.Name === fileEditor.context.volume,
+            )
+          }
+          refreshing={busy}
+          onRefresh={refresh}
+          onFocusFallback={() =>
+            document.getElementById("main-content")?.focus()
+          }
+          onClose={() => {
+            setFileEditor(null);
+            fileEditor.refreshPreview();
+          }}
+        />
+      )}
       {palette && (
         <CommandPalette commands={commands} onClose={() => setPalette(false)} />
       )}

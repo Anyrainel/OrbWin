@@ -1,0 +1,896 @@
+diff --git a/rdd/cmd/rdd/main.go b/rdd/cmd/rdd/main.go
+index a6984b34b7106efb928f09b327fbda8e9d849e57..8fababb78a3e8f764af969d239806949d74fa4cb 100644
+--- a/rdd/cmd/rdd/main.go
++++ b/rdd/cmd/rdd/main.go
+@@ -125,6 +125,10 @@ func newVersionCommand() *cobra.Command {
+ }
+ 
+ func main() {
++	// Closed setup role precedes every instance/environment/Cobra/cache access.
++	if handled, code := earlyRuntimeSetup(os.Args[1:], os.Stdin, os.Stdout); handled {
++		os.Exit(code)
++	}
+ 	// Fixed same-image observer precedes every CLI/environment/lifecycle path.
+ 	// The management adapter returns only after known empty native custody.
+ 	if handled, code := managementconfig.RuntimeInspectionCLI(os.Args[1:], os.Stdin, os.Stdout); handled {
+diff --git a/rdd/cmd/rdd/runtime_setup_other.go b/rdd/cmd/rdd/runtime_setup_other.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..804ce9be4791d05956d7d802ef80f2b4a9f66604
+--- /dev/null
++++ b/rdd/cmd/rdd/runtime_setup_other.go
+@@ -0,0 +1,12 @@
++//go:build !windows
++
++package main
++
++import "io"
++
++func earlyRuntimeSetup(args []string, _ io.Reader, _ io.Writer) (bool, int) {
++	if classifyRuntimeSetup(args) == runtimeSetupUnrequested {
++		return false, 0
++	}
++	return true, 2
++}
+diff --git a/rdd/cmd/rdd/runtime_setup_route.go b/rdd/cmd/rdd/runtime_setup_route.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..9d243a1e7378a1b227391e9c15ec6e3c571718cd
+--- /dev/null
++++ b/rdd/cmd/rdd/runtime_setup_route.go
+@@ -0,0 +1,34 @@
++package main
++
++import "context"
++
++type runtimeSetupRoute uint8
++
++const (
++	runtimeSetupUnrequested runtimeSetupRoute = iota
++	runtimeSetupRefused
++	runtimeSetupRequested
++)
++
++// Raw closed role only; no environment/instance/path/callback selects authority.
++// Preflight remains on its existing route and cannot fall back into setup.
++func classifyRuntimeSetup(args []string) runtimeSetupRoute {
++	if len(args) == 0 || args[0] != "private-runtime-operation" {
++		return runtimeSetupUnrequested
++	}
++	if len(args) >= 2 && args[1] == "preflight" {
++		return runtimeSetupUnrequested
++	}
++	if len(args) == 2 && args[1] == "setup" {
++		return runtimeSetupRequested
++	}
++	return runtimeSetupRefused
++}
++
++func runtimeSetupContextKnown(ctx context.Context) bool {
++	if ctx == nil || ctx.Err() != nil {
++		return false
++	}
++	_, bounded := ctx.Deadline()
++	return bounded
++}
+diff --git a/rdd/cmd/rdd/runtime_setup_route_test.go b/rdd/cmd/rdd/runtime_setup_route_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..274f821decd8648f8d76e611cde89b275c60701d
+--- /dev/null
++++ b/rdd/cmd/rdd/runtime_setup_route_test.go
+@@ -0,0 +1,76 @@
++package main
++
++import (
++	"context"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"testing"
++	"time"
++)
++
++func TestRuntimeSetupRawClosedRoute(t *testing.T) {
++	for _, v := range []struct {
++		args []string
++		want runtimeSetupRoute
++	}{
++		{nil, runtimeSetupUnrequested}, {[]string{"service", "start"}, runtimeSetupUnrequested},
++		{[]string{"private-runtime-operation", "preflight"}, runtimeSetupUnrequested},
++		{[]string{"private-runtime-operation", "setup"}, runtimeSetupRequested},
++		{[]string{"private-runtime-operation"}, runtimeSetupRefused},
++		{[]string{"private-runtime-operation", "resume"}, runtimeSetupRefused},
++		{[]string{"private-runtime-operation", "setup", "--instance=other"}, runtimeSetupRefused},
++		{[]string{"private-runtime-operation", "setup", "C:\\other"}, runtimeSetupRefused},
++	} {
++		if classifyRuntimeSetup(v.args) != v.want {
++			t.Fatalf("route mismatch %q", v.args)
++		}
++	}
++}
++
++func TestRuntimeSetupContextRefusal(t *testing.T) {
++	if runtimeSetupContextKnown(nil) || runtimeSetupContextKnown(context.Background()) {
++		t.Fatal("unbounded context")
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
++	if !runtimeSetupContextKnown(ctx) {
++		t.Fatal("bounded context refused")
++	}
++	cancel()
++	if runtimeSetupContextKnown(ctx) {
++		t.Fatal("cancelled context")
++	}
++}
++
++// Parse actual main source, without importing/executing its provider graph.
++func TestRuntimeSetupActualMainPrecedesInstanceAndEnvironment(t *testing.T) {
++	f, e := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
++	if e != nil {
++		t.Fatal(e)
++	}
++	var body *ast.BlockStmt
++	for _, d := range f.Decls {
++		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "main" {
++			body = fn.Body
++		}
++	}
++	if body == nil || len(body.List) == 0 {
++		t.Fatal("main absent")
++	}
++	first, ok := body.List[0].(*ast.IfStmt)
++	if !ok {
++		t.Fatal("early role not first")
++	}
++	assign, ok := first.Init.(*ast.AssignStmt)
++	if !ok || len(assign.Rhs) != 1 {
++		t.Fatal("early call shape")
++	}
++	call, ok := assign.Rhs[0].(*ast.CallExpr)
++	if !ok {
++		t.Fatal("early call absent")
++	}
++	name, ok := call.Fun.(*ast.Ident)
++	if !ok || name.Name != "earlyRuntimeSetup" {
++		t.Fatal("instance/environment reachable before role")
++	}
++}
+diff --git a/rdd/cmd/rdd/runtime_setup_windows.go b/rdd/cmd/rdd/runtime_setup_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b49a2c4b1faecf0d7b6aea0a736fbac8fa746fc
+--- /dev/null
++++ b/rdd/cmd/rdd/runtime_setup_windows.go
+@@ -0,0 +1,36 @@
++//go:build windows
++
++package main
++
++import (
++	"context"
++	service "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/service/cmd"
++	"io"
++	"time"
++)
++
++func earlyRuntimeSetup(args []string, input io.Reader, output io.Writer) (bool, int) {
++	switch classifyRuntimeSetup(args) {
++	case runtimeSetupUnrequested:
++		return false, 0
++	case runtimeSetupRefused:
++		return true, 2
++	}
++	// Acquisition/protocol startup budget only. The existing SAME service owns
++	// its lifetime; post-Begin observer EOF/deadline cannot kill healthy actors.
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
++	defer cancel()
++	return runEarlyRuntimeSetup(ctx, input, output)
++}
++
++func runEarlyRuntimeSetup(ctx context.Context, input io.Reader, output io.Writer) (bool, int) {
++	if !runtimeSetupContextKnown(ctx) || input == nil || output == nil {
++		return true, 2
++	}
++	// This producer returns ONLY after original workers/owners positively settle;
++	// unknown is retained inside it. No caller error or EOF grants retirement.
++	if service.RunFreshSetupOperation(ctx, input, output) != nil {
++		return true, 2
++	}
++	return true, 0
++}
+diff --git a/rdd/cmd/rdd/runtime_setup_windows_test.go b/rdd/cmd/rdd/runtime_setup_windows_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..6a125d6ee5bc09e23e8044aeaf3a5a322f7a873a
+--- /dev/null
++++ b/rdd/cmd/rdd/runtime_setup_windows_test.go
+@@ -0,0 +1,21 @@
++//go:build windows
++
++package main
++
++import (
++	"bytes"
++	"context"
++	"testing"
++)
++
++// Compile-only actual adapter guards; no service/native producer is entered.
++func TestEarlyRuntimeSetupInvalidContextBeforeProducer(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	for _, ctx := range []context.Context{nil, context.Background(), ctx} {
++		var out bytes.Buffer
++		if handled, code := runEarlyRuntimeSetup(ctx, bytes.NewReader(nil), &out); !handled || code != 2 || out.Len() != 0 {
++			t.Fatal("guard entered producer")
++		}
++	}
++}
+diff --git a/rdd/pkg/service/cmd/fresh_setup_io_model.go b/rdd/pkg/service/cmd/fresh_setup_io_model.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..1e3165f5c034aebc2aeb79cca1f4e865a2e23c43
+--- /dev/null
++++ b/rdd/pkg/service/cmd/fresh_setup_io_model.go
+@@ -0,0 +1,64 @@
++package service
++
++import (
++	"errors"
++	"io"
++)
++
++// Ordering DATA only. Actual original files/workers remain in the Windows owner.
++type freshIOPhase uint8
++
++const (
++	freshIOJoinOutput freshIOPhase = iota
++	freshIOCloseOutput
++	freshIOJoinInput
++	freshIOCloseInput
++	freshIOComplete
++)
++
++type freshIOSettlement struct {
++	phase   freshIOPhase
++	unknown bool
++	active  bool
++}
++
++func (s *freshIOSettlement) begin(step freshIOPhase) bool {
++	if s == nil || s.unknown || s.active || s.phase != step || step >= freshIOComplete {
++		if s != nil {
++			s.unknown = true
++		}
++		return false
++	}
++	s.active = true
++	return true
++}
++
++func (s *freshIOSettlement) complete(step freshIOPhase, positive bool) bool {
++	if s == nil || s.unknown || !s.active || s.phase != step || step >= freshIOComplete || !positive {
++		if s != nil {
++			s.unknown = true
++		}
++		return false
++	}
++	s.active = false
++	s.phase++
++	return true
++}
++
++// ReadFull can synthesize UnexpectedEOF from completed EOF. The concrete reader
++// records its own File.Read error; a malformed/partial wire is not kernel unknown.
++func freshIOReadKnown(n, size int, err error) bool {
++	return size > 0 && size <= 128 && n >= 0 && n <= size &&
++		(err == nil && n > 0 || errors.Is(err, io.EOF))
++}
++
++func freshIOWriteKnown(n, size int, err error) bool {
++	return size > 0 && size <= 257 && err == nil && n == size
++}
++
++// A panic during an entered close/join cannot reset or permit a suffix.
++func (s *freshIOSettlement) panicUnknown() {
++	if s != nil {
++		s.unknown = true
++	}
++}
+diff --git a/rdd/pkg/service/cmd/fresh_setup_io_model_test.go b/rdd/pkg/service/cmd/fresh_setup_io_model_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..b72a3d895bddebcabd76e5a70ee7aacd6a77f1bd
+--- /dev/null
++++ b/rdd/pkg/service/cmd/fresh_setup_io_model_test.go
+@@ -0,0 +1,114 @@
++package service
++
++import (
++	"errors"
++	"io"
++	"strings"
++	"testing"
++)
++
++func TestFreshIOSettlementStopFirstAndNoLateReset(t *testing.T) {
++	for fail := freshIOJoinOutput; fail < freshIOComplete; fail++ {
++		var s freshIOSettlement
++		for step := freshIOJoinOutput; step < freshIOComplete; step++ {
++			if !s.begin(step) {
++				t.Fatal("begin prefix")
++			}
++			if step == fail {
++				if s.complete(step, false) || s.complete(step, true) {
++					t.Fatal("unknown replayed")
++				}
++				break
++			}
++			if !s.complete(step, true) {
++				t.Fatal("positive prefix refused")
++			}
++		}
++		if !s.unknown || s.phase == freshIOComplete || s.complete(freshIOCloseInput, true) {
++			t.Fatal("suffix escaped")
++		}
++	}
++	var bad freshIOSettlement
++	if bad.complete(freshIOCloseOutput, true) || !bad.unknown {
++		t.Fatal("close before writer join")
++	}
++	var good freshIOSettlement
++	for step := freshIOJoinOutput; step < freshIOComplete; step++ {
++		if !good.begin(step) || !good.complete(step, true) {
++			t.Fatal("known sequence")
++		}
++	}
++	if good.phase != freshIOComplete || good.unknown || good.complete(freshIOCloseInput, true) {
++		t.Fatal("completion replay")
++	}
++}
++
++func TestFreshIOCompletedEOFAndWireCutsDifferFromNativeUnknown(t *testing.T) {
++	for _, v := range []struct {
++		n, size int
++		e       error
++		known   bool
++	}{
++		{4, 4, nil, true}, {1, 4, nil, true}, {0, 4, io.EOF, true}, {2, 4, io.EOF, true},
++		{0, 4, nil, false}, {5, 4, nil, false}, {-1, 4, nil, false}, {1, 129, nil, false},
++		{0, 4, errors.New("native uncertainty"), false},
++	} {
++		if freshIOReadKnown(v.n, v.size, v.e) != v.known {
++			t.Fatal("read classification")
++		}
++	}
++	for _, v := range []struct {
++		n, size int
++		e       error
++		known   bool
++	}{{3, 3, nil, true}, {2, 3, nil, false}, {3, 3, io.ErrClosedPipe, false}, {0, 0, nil, false}} {
++		if freshIOWriteKnown(v.n, v.size, v.e) != v.known {
++			t.Fatal("write classification")
++		}
++	}
++}
++
++func TestFreshIOReadFullPartialWireIsCompletedEOF(t *testing.T) {
++	data := strings.NewReader("ab")
++	var buffer [4]byte
++	n, e := io.ReadFull(data, buffer[:])
++	if n != 2 || !errors.Is(e, io.ErrUnexpectedEOF) {
++		t.Fatal("partial frame expectation")
++	}
++	// The actual File.Read wrapper sees completed EOF, while ReadFull gives its
++	// caller UnexpectedEOF. Neither requires an uncertain kernel completion.
++	if !freshIOReadKnown(0, 2, io.EOF) {
++		t.Fatal("completed EOF quarantined")
++	}
++	var s freshIOSettlement
++	if !s.begin(freshIOJoinOutput) || s.begin(freshIOJoinOutput) || !s.unknown || s.complete(freshIOJoinOutput, true) {
++		t.Fatal("entered attempt replay")
++	}
++}
++
++func TestFreshIOPanicDuringSettlementRetainsAttempt(t *testing.T) {
++	for cut := freshIOJoinOutput; cut < freshIOComplete; cut++ {
++		var s freshIOSettlement
++		for phase := freshIOJoinOutput; phase < cut; phase++ {
++			if !s.begin(phase) || !s.complete(phase, true) {
++				t.Fatal("known prefix")
++			}
++		}
++		escaped := true
++		func() {
++			defer func() {
++				if recover() != nil {
++					s.panicUnknown()
++					escaped = false
++				}
++			}()
++			if !s.begin(cut) {
++				t.Fatal("entered attempt")
++			}
++			panic("controlled join/close panic")
++		}()
++		if escaped || !s.unknown || !s.active || s.phase != cut || s.begin(cut) || s.complete(cut, true) {
++			t.Fatal("panic escaped/reset original attempt")
++		}
++	}
++}
+diff --git a/rdd/pkg/service/cmd/fresh_setup_io_windows.go b/rdd/pkg/service/cmd/fresh_setup_io_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..543d8a9a872327f1dfb0ec2248cb49c12bee1c34
+--- /dev/null
++++ b/rdd/pkg/service/cmd/fresh_setup_io_windows.go
+@@ -0,0 +1,184 @@
++//go:build windows
++
++package service
++
++import (
++	"context"
++	"errors"
++	"io"
++	"os"
++	"runtime"
++	"sync"
++	"sync/atomic"
++	"time"
++
++	"golang.org/x/sys/windows"
++)
++
++var freshOperationStarted atomic.Bool
++var originalFreshProtocol *freshSetupProtocolIO
++var errFreshReadStopped = errors.New("private setup input stopping")
++
++type freshOwnedProtocolIOFrame struct {
++	buffer            []byte
++	count             int
++	err               error
++	entered, returned bool
++}
++type freshSetupProtocolIO struct {
++	input, output    *os.File
++	observer         *freshSetupObserver
++	readerDone       chan struct{}
++	readerStarted    bool
++	stopping, failed atomic.Bool
++	mu               sync.Mutex
++	reads, writes    []*freshOwnedProtocolIOFrame
++	settlement       freshIOSettlement
++}
++
++// No stream worker, owned native setup effect or stdio mutation precedes this
++// exact original-process pipe check. Console/redirection substitutes refuse.
++func newFreshProtocolIO(ctx context.Context, input io.Reader, output io.Writer) (*freshSetupProtocolIO, error) {
++	if ctx == nil || ctx.Err() != nil {
++		return nil, errPrivateAuthority
++	}
++	if _, ok := ctx.Deadline(); !ok {
++		return nil, errPrivateAuthority
++	}
++	in, ok := input.(*os.File)
++	if !ok || in == nil || in != os.Stdin {
++		return nil, errPrivateAuthority
++	}
++	out, ok := output.(*os.File)
++	if !ok || out == nil || out != os.Stdout || out == os.Stderr || out == in {
++		return nil, errPrivateAuthority
++	}
++	hi, e := windows.GetStdHandle(windows.STD_INPUT_HANDLE)
++	if e != nil || hi == 0 || hi == windows.InvalidHandle || hi != windows.Handle(in.Fd()) {
++		return nil, errPrivateAuthority
++	}
++	ho, e := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
++	if e != nil || ho == 0 || ho == windows.InvalidHandle || ho != windows.Handle(out.Fd()) || ho == hi {
++		return nil, errPrivateAuthority
++	}
++	for _, f := range []*os.File{in, out} {
++		s, e := f.Stat()
++		if e != nil || s.Mode()&os.ModeNamedPipe == 0 {
++			return nil, errPrivateAuthority
++		}
++	}
++	if ctx.Err() != nil || !freshOperationStarted.CompareAndSwap(false, true) {
++		return nil, errPrivateAuthority
++	}
++	o := &freshSetupProtocolIO{input: in, output: out, readerDone: make(chan struct{})}
++	originalFreshProtocol = o
++	return o, nil
++}
++
++func (o *freshSetupProtocolIO) Read(p []byte) (n int, err error) {
++	if o == nil || originalFreshProtocol != o || o.stopping.Load() {
++		return 0, errFreshReadStopped
++	}
++	o.mu.Lock()
++	if len(o.reads) >= 272 || len(p) == 0 || len(p) > 128 {
++		o.mu.Unlock()
++		o.failed.Store(true)
++		return 0, errFreshSetupProtocol
++	}
++	f := &freshOwnedProtocolIOFrame{buffer: make([]byte, len(p))}
++	o.reads = append(o.reads, f)
++	o.mu.Unlock()
++	f.entered = true
++	f.count, f.err = o.input.Read(f.buffer)
++	f.returned = true
++	if !freshIOReadKnown(f.count, len(f.buffer), f.err) {
++		o.failed.Store(true)
++		return 0, errFreshSetupProtocol
++	}
++	copy(p, f.buffer[:f.count])
++	return f.count, f.err
++}
++
++type freshProtocolOutput struct{ owner *freshSetupProtocolIO }
++
++func (w freshProtocolOutput) Write(p []byte) (int, error) {
++	o := w.owner
++	if o == nil || originalFreshProtocol != o {
++		return 0, errFreshSetupProtocol
++	}
++	o.mu.Lock()
++	if len(o.writes) >= 4 || len(p) == 0 || len(p) > 257 {
++		o.mu.Unlock()
++		o.failed.Store(true)
++		return 0, errFreshSetupProtocol
++	}
++	f := &freshOwnedProtocolIOFrame{buffer: append([]byte(nil), p...)}
++	o.writes = append(o.writes, f)
++	o.mu.Unlock()
++	f.entered = true
++	f.count, f.err = o.output.Write(f.buffer)
++	f.returned = true
++	if !freshIOWriteKnown(f.count, len(f.buffer), f.err) {
++		o.failed.Store(true)
++		return 0, errFreshSetupProtocol
++	}
++	return f.count, nil
++}
++
++// Called only after actual service/native owner defers have positively settled.
++// No concurrent File.Close: blocking stdin is released by peer's real EOF path.
++func (o *freshSetupProtocolIO) settle() error {
++	if o == nil || originalFreshProtocol != o || o.failed.Load() || o.observer == nil {
++		return errPrivateAuthority
++	}
++	if !o.settlement.begin(freshIOJoinOutput) {
++		return errPrivateAuthority
++	}
++	if !o.settlement.complete(freshIOJoinOutput, o.observer.finish() == nil && !o.failed.Load()) {
++		return errPrivateAuthority
++	}
++	o.stopping.Store(true)
++	if !o.settlement.begin(freshIOCloseOutput) {
++		return errPrivateAuthority
++	}
++	if !o.settlement.complete(freshIOCloseOutput, o.output.Close() == nil) {
++		return errPrivateAuthority
++	}
++	if !o.settlement.begin(freshIOJoinInput) {
++		return errPrivateAuthority
++	}
++	joined := !o.readerStarted
++	if !joined {
++		timer := time.NewTimer(5 * time.Second)
++		select {
++		case <-o.readerDone:
++			joined = true
++		case <-timer.C:
++		}
++		timer.Stop()
++	}
++	if !o.settlement.complete(freshIOJoinInput, joined && !o.failed.Load()) {
++		return errPrivateAuthority
++	}
++	if !o.settlement.begin(freshIOCloseInput) {
++		return errPrivateAuthority
++	}
++	if !o.settlement.complete(freshIOCloseInput, o.input.Close() == nil) {
++		return errPrivateAuthority
++	}
++	return nil
++}
++
++func keepFreshProtocolUnknown(o *freshSetupProtocolIO) {
++	if o != nil {
++		o.failed.Store(true)
++	}
++	func() {
++		defer func() { _ = recover() }()
++		_, _ = os.Stderr.WriteString("private setup protocol settlement unknown; original IO retained\n")
++	}()
++	for {
++		runtime.KeepAlive(o)
++		time.Sleep(time.Hour)
++	}
++}
+diff --git a/rdd/pkg/service/cmd/fresh_setup_keeper_windows.go b/rdd/pkg/service/cmd/fresh_setup_keeper_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..05caf3438572c4c6c0c431edd429378fe0c4d23d
+--- /dev/null
++++ b/rdd/pkg/service/cmd/fresh_setup_keeper_windows.go
+@@ -0,0 +1,25 @@
++//go:build windows
++
++package service
++
++import (
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig"
++	"os"
++	"runtime"
++	"time"
++)
++
++// SAME actual producer and original graph, never a map-as-keeper or success DTO.
++// No cancel, native query, close, retry, new manager or output fallback occurs.
++func keepFreshServiceUnknown(owner *managementconfig.FreshSetupOwner, authority *windowsPrivateAuthority, observer *freshSetupObserver) {
++	func() {
++		defer func() { _ = recover() }()
++		_, _ = os.Stderr.WriteString("private setup settlement unknown; original owners retained\n")
++	}()
++	for {
++		runtime.KeepAlive(owner)
++		runtime.KeepAlive(authority)
++		runtime.KeepAlive(observer)
++		time.Sleep(time.Hour)
++	}
++}
+diff --git a/rdd/pkg/service/cmd/fresh_setup_windows.go b/rdd/pkg/service/cmd/fresh_setup_windows.go
+index 445cd15470cecfe0f0fab6478d7867e901fa9da3..5d6d714e191da51877a84cd166db30d477ce8b7b 100644
+--- a/rdd/pkg/service/cmd/fresh_setup_windows.go
++++ b/rdd/pkg/service/cmd/fresh_setup_windows.go
+@@ -39,18 +39,36 @@ func RunFreshSetupOperation(ctx context.Context, input io.Reader, output io.Writ
+ 	if _, ok := ctx.Deadline(); !ok {
+ 		return errPrivateAuthority
+ 	}
+-	startup, cancel := context.WithCancel(ctx)
+-	defer cancel()
+-	observer := newFreshSetupObserver(startup, cancel, output)
++	protocol, e := newFreshProtocolIO(ctx, input, output)
++	if e != nil {
++		return errPrivateAuthority
++	}
+ 	defer func() {
+-		if observer.finish() != nil && result == nil {
+-			result = errPrivateAuthority
++		if recover() != nil {
++			keepFreshProtocolUnknown(protocol)
++		}
++		defer func() {
++			if recover() != nil {
++				protocol.settlement.panicUnknown()
++				keepFreshProtocolUnknown(protocol)
++			}
++		}()
++		if protocol.settle() != nil {
++			keepFreshProtocolUnknown(protocol)
+ 		}
++		runtime.KeepAlive(protocol)
+ 	}()
++	startup, cancel := context.WithCancel(ctx)
++	defer cancel()
++	observer := newFreshSetupObserver(startup, cancel, freshProtocolOutput{protocol})
++	protocol.observer = observer
+ 	first := make(chan error, 1)
++	protocol.readerStarted = true
+ 	go func() {
++		defer close(protocol.readerDone)
+ 		defer func() {
+ 			if recover() != nil {
++				protocol.failed.Store(true)
+ 				select {
+ 				case first <- errPrivateAuthority:
+ 				default:
+@@ -58,12 +76,12 @@ func RunFreshSetupOperation(ctx context.Context, input io.Reader, output io.Writ
+ 				observer.disconnect()
+ 			}
+ 		}()
+-		e := readFreshSetupFrame(input, "setup")
++		e := readFreshSetupFrame(protocol, "setup")
+ 		first <- e
+ 		if e != nil {
+ 			return
+ 		}
+-		command, e := readFreshSetupCommand(input)
++		command, e := readFreshSetupCommand(protocol)
+ 		if e != nil || command.operation != "continue-original-setup" || !observer.claimContinuation(command.nonce) {
+ 			observer.disconnect()
+ 		}
+@@ -89,6 +107,13 @@ func RunFreshSetupOperation(ctx context.Context, input io.Reader, output io.Writ
+ }
+ 
+ func runFreshSetupService(startup context.Context, observer *freshSetupObserver) (result error) {
++	var owner *managementconfig.FreshSetupOwner
++	var w *windowsPrivateAuthority
++	defer func() {
++		if recover() != nil {
++			keepFreshServiceUnknown(owner, w, observer)
++		}
++	}()
+ 	stage := freshStageCapture
+ 	defer func() {
+ 		if result != nil {
+@@ -100,11 +125,20 @@ func runFreshSetupService(startup context.Context, observer *freshSetupObserver)
+ 			logrus.WithField("stage", failure.stage.String()).Error("private setup failed")
+ 		}
+ 	}()
+-	owner, e := managementconfig.CaptureSelectedFreshSetupOwner(startup)
++	var e error
++	owner, e = managementconfig.CaptureSelectedFreshSetupOwner(startup)
+ 	if owner != nil {
+ 		defer func() {
++			if recover() != nil {
++				keepFreshServiceUnknown(owner, w, observer)
++			}
++			defer func() {
++				if recover() != nil {
++					keepFreshServiceUnknown(owner, w, observer)
++				}
++			}()
+ 			if owner.Close() != nil {
+-				result = freshSetupFailure{stage: freshStageSettlement}
++				keepFreshServiceUnknown(owner, w, observer)
+ 			}
+ 		}()
+ 	}
+@@ -153,7 +187,7 @@ func runFreshSetupService(startup context.Context, observer *freshSetupObserver)
+ 	if e != nil {
+ 		return errPrivateAuthority
+ 	}
+-	w, e := preparePrivateAuthorityCreated(startup, s, c)
++	w, e = preparePrivateAuthorityCreated(startup, s, c)
+ 	if e != nil {
+ 		return errPrivateAuthority
+ 	}
+@@ -161,11 +195,18 @@ func runFreshSetupService(startup context.Context, observer *freshSetupObserver)
+ 	w.freshStartup = startup
+ 	w.freshObserver = observer
+ 	defer func() {
++		if recover() != nil {
++			keepFreshServiceUnknown(owner, w, observer)
++		}
++		defer func() {
++			if recover() != nil {
++				keepFreshServiceUnknown(owner, w, observer)
++			}
++		}()
+ 		if w.Close() != nil {
+-			result = freshSetupFailure{stage: freshStageSettlement}
+-		} else {
+-			result = confirmFreshPendingAfterClose(w, result)
++			keepFreshServiceUnknown(owner, w, observer)
+ 		}
++		result = confirmFreshPendingAfterClose(w, result)
+ 	}()
+ 	if w.AdoptImage(image) != nil || startup.Err() != nil {
+ 		return errPrivateAuthority
+diff --git a/rdd/pkg/service/cmd/private_authority_failure_model.go b/rdd/pkg/service/cmd/private_authority_failure_model.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..2887ed07d7b33355e7d9bd980c9f41a498feacb3
+--- /dev/null
++++ b/rdd/pkg/service/cmd/private_authority_failure_model.go
+@@ -0,0 +1,21 @@
++package service
++
++// Failure-only DATA ledger. Actual producer calls its concrete Close once;
++// a false/panic result cannot reset the attempt or permit suffix cleanup.
++type privateAuthorityFailureClose struct{ entered, returned, positive bool }
++
++func (s *privateAuthorityFailureClose) begin() bool {
++	if s.entered {
++		return false
++	}
++	s.entered = true
++	return true
++}
++func (s *privateAuthorityFailureClose) complete(positive bool) bool {
++	if !s.entered || s.returned {
++		return false
++	}
++	s.returned = true
++	s.positive = positive
++	return positive
++}
+diff --git a/rdd/pkg/service/cmd/private_authority_failure_model_test.go b/rdd/pkg/service/cmd/private_authority_failure_model_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..2d653d8849b120d53e5e671ee66c394e59f2c20c
+--- /dev/null
++++ b/rdd/pkg/service/cmd/private_authority_failure_model_test.go
+@@ -0,0 +1,23 @@
++package service
++
++import "testing"
++
++func TestPrivateAuthorityFailureCloseStopsUnknownAndReplay(t *testing.T) {
++	for _, positive := range []bool{false, true} {
++		var s privateAuthorityFailureClose
++		if !s.begin() || s.begin() || s.complete(positive) != positive || s.begin() || s.complete(true) {
++			t.Fatal("failure close replay")
++		}
++		if !s.entered || !s.returned || s.positive != positive {
++			t.Fatal("lost actual result")
++		}
++	}
++	var before privateAuthorityFailureClose
++	if before.complete(true) || before.entered || before.returned {
++		t.Fatal("completion before Close")
++	}
++	var panicCut privateAuthorityFailureClose
++	if !panicCut.begin() || panicCut.returned || panicCut.positive || panicCut.begin() {
++		t.Fatal("panic attempt reset")
++	}
++}
+diff --git a/rdd/pkg/service/cmd/private_authority_failure_windows.go b/rdd/pkg/service/cmd/private_authority_failure_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..97d7c441a60f191da8f8fea8781d45ee0d7eec29
+--- /dev/null
++++ b/rdd/pkg/service/cmd/private_authority_failure_windows.go
+@@ -0,0 +1,19 @@
++//go:build windows
++
++package service
++
++import (
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig"
++	"runtime"
++	"time"
++)
++
++// Original factory stack is the live keeper, including partial datastore/server.
++// No Close retry, caller return, callback, replacement owner or second manager.
++func keepPrivateAuthorityFactoryUnknown(c *managementconfig.Created, w *windowsPrivateAuthority) {
++	for {
++		runtime.KeepAlive(c)
++		runtime.KeepAlive(w)
++		time.Sleep(time.Hour)
++	}
++}
+diff --git a/rdd/pkg/service/cmd/private_authority_windows.go b/rdd/pkg/service/cmd/private_authority_windows.go
+index e0bd3eb911cf29e0751a2083916edfde87f861a9..4af1480b9e1b1b7bd5d33b591c0b6a64f6b47469 100644
+--- a/rdd/pkg/service/cmd/private_authority_windows.go
++++ b/rdd/pkg/service/cmd/private_authority_windows.go
+@@ -169,9 +169,33 @@ func preparePrivateAuthorityCreated(ctx context.Context, o *options.Options, c *
+ 		return nil, errPrivateAuthority
+ 	}
+ 	ok := false
++	var owner *windowsPrivateAuthority
++	var failureClose privateAuthorityFailureClose
+ 	defer func() {
+-		if !ok {
+-			c.Close()
++		// A panic after this actual Created entered the producer is unknown:
++		// retain original partial graph BEFORE any cleanup suffix can unwind.
++		if recover() != nil {
++			keepPrivateAuthorityFactoryUnknown(c, owner)
++		}
++		if ok {
++			return
++		}
++		defer func() {
++			if recover() != nil {
++				keepPrivateAuthorityFactoryUnknown(c, owner)
++			}
++		}()
++		if !failureClose.begin() {
++			keepPrivateAuthorityFactoryUnknown(c, owner)
++		}
++		var closeErr error
++		if owner != nil {
++			closeErr = owner.Close()
++		} else {
++			closeErr = c.Close()
++		}
++		if !failureClose.complete(closeErr == nil) {
++			keepPrivateAuthorityFactoryUnknown(c, owner)
+ 		}
+ 	}()
+ 	if ctx == nil || ctx.Err() != nil || o == nil || validatePrivateDatastoreOptions(o) != nil {
+@@ -215,9 +239,8 @@ func preparePrivateAuthorityCreated(ctx context.Context, o *options.Options, c *
+ 	o.ControlPlane.SecureServing.ServerCert.GeneratedCert = provider
+ 	o.ControlPlane.Authentication.ServiceAccounts.KeyFiles = []string{filepath.Join(instance.TLSDir(), "sa.key")}
+ 	o.ControlPlane.ServiceAccountSigningKeyFile = filepath.Join(instance.TLSDir(), "sa.key")
+-	owner := &windowsPrivateAuthority{created: c}
++	owner = &windowsPrivateAuthority{created: c}
+ 	if owner.prepareDatastore(ctx, o) != nil {
+-		owner.Close()
+ 		return nil, errPrivateAuthority
+ 	}
+ 	ok = true

@@ -1,4 +1,11 @@
-import { isValidElement, useEffect, useState, type ReactNode } from "react";
+import {
+  isValidElement,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import * as backend from "../../backend";
 import { retryBusyRead } from "../../model/read-retry";
 import { LocalPortLink } from "../LocalPortLink";
@@ -15,6 +22,10 @@ import {
   type Page,
   type Row,
 } from "./model";
+
+const VolumeSize = lazy(() =>
+  import("./VolumeSize").then((module) => ({ default: module.VolumeSize })),
+);
 
 type Inspect =
   | { state: "pending" }
@@ -315,6 +326,23 @@ export function InfoPanel({
           ]}
         />
         <Pairs title="Options" pairs={record(get(data, "Options"))} />
+        {data &&
+          (typeof data.CreatedAt === "string" && data.CreatedAt ? (
+            <Suspense
+              fallback={<p role="status">Loading volume size controls…</p>}
+            >
+              <VolumeSize
+                key={`${id}:${data.CreatedAt}`}
+                name={id}
+                createdAt={data.CreatedAt}
+              />
+            </Suspense>
+          ) : (
+            <p role="status">
+              Volume size refresh requires creation metadata that the engine did
+              not return.
+            </p>
+          ))}
         <Pairs title="Labels" pairs={Object.entries(labels(row))} />
       </>
     );

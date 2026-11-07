@@ -1,0 +1,75 @@
+diff --git a/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go b/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
+index 49c914230388457fc3a03baebcd6c4aaec1c0e92..b26881c35eef7d476acc4c76bbca65a4c2d41f81 100644
+--- a/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
++++ b/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
+@@ -756,7 +756,7 @@ func (t freshDockerTransport) RoundTrip(request *http.Request) (response *http.R
+ 			}
+ 		}
+ 	}()
+-	returned, e := winio.DialPipeAccessImpLevel(request.Context(), freshDockerPipe, windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification)
++	returned, e := winio.DialPipeAccessImpLevelInto(request.Context(), freshDockerPipe, windows.GENERIC_READ|windows.GENERIC_WRITE, winio.PipeImpLevelIdentification, &r.dial)
+ 	if w.retainTransportDialLocked(r, returned, e) != nil {
+ 		return nil, ErrUpgrade
+ 	}
+@@ -944,7 +944,7 @@ func (w *FreshRuntimeObservation) closeHeld(o *FreshSetupOwner) error {
+ 	return w.closeAttempt.run(func() error {
+ 		for i := len(w.connections) - 1; i >= 0; i-- {
+ 			r := w.connections[i]
+-			if r.conn != nil && w.settleTransportLocked(r, false) != nil {
++			if (r.conn != nil || r.dial != nil) && w.settleTransportLocked(r, false) != nil {
+ 				return ErrUpgrade
+ 			}
+ 		}
+diff --git a/rdd/pkg/managementconfig/runtime_fresh_transport_windows.go b/rdd/pkg/managementconfig/runtime_fresh_transport_windows.go
+index 85d2293b6dae4f1e7b0a6c17cd0ae831409dce54..2a63300b5fe89bf36519e6b9ba4e1223d8dd07c8 100644
+--- a/rdd/pkg/managementconfig/runtime_fresh_transport_windows.go
++++ b/rdd/pkg/managementconfig/runtime_fresh_transport_windows.go
+@@ -8,6 +8,8 @@ import (
+ 	"net"
+ 	"sync"
+ 	"time"
++
++	winio "github.com/Microsoft/go-winio"
+ )
+ 
+ // Only cached borrowed state is inspected here, before any own socket close.
+@@ -43,11 +45,18 @@ func (w *FreshRuntimeObservation) syncTransportUnknownLocked() bool {
+ 	return false
+ }
+ 
+-// A failed high-level Dial hides internal native close results, including a
+-// nil returned value. Retain the exact output and fence every failed Dial.
++// Into publishes the actual operation in c.dial before native effects. A
++// failed nil-Conn birth still requires the exact operation's settlement; only
++// that checked result determines whether the existing witness must fence.
+ func (w *FreshRuntimeObservation) retainTransportDialLocked(c *freshObservationConnection, returned net.Conn, err error) error {
+ 	c.conn = returned
+ 	if err != nil || returned == nil {
++		if c.dial == nil || returned != nil {
++			w.fenceLocked()
++		}
++		return ErrUpgrade
++	}
++	if c.dial == nil {
+ 		w.fenceLocked()
+ 		return ErrUpgrade
+ 	}
+@@ -105,6 +114,8 @@ func (w *FreshRuntimeObservation) settleTransportLocked(c *freshObservationConne
+ 	var closeRaw func() error
+ 	if c.conn != nil {
+ 		closeRaw = c.conn.Close
++	} else if c.dial != nil {
++		closeRaw = c.dial.Close
+ 	}
+ 	return w.settleTransportUsing(c, panicked, closeRaw)
+ }
+@@ -249,7 +260,8 @@ func (c *freshObservationAbortConn) sealAndJoin() bool {
+ }
+ 
+ type freshObservationConnection struct {
+-	conn    net.Conn // exact raw Dial result; TLS never replaces this closer
++	dial    winio.PipeDialOperation // immutable original output slot, including nil-Conn failure
++	conn    net.Conn                // exact raw Dial result; TLS never replaces this closer
+ 	tls     *tls.Conn
+ 	guard   *freshObservationAbortConn
+ 	stop    func() bool

@@ -101,6 +101,11 @@ missing product feature from a backend defect, unverified capability or WSL limi
 
 ## Phase 2 - Bring missing OrbStack conveniences to OrbWin
 
+The [Phase 2 scope evaluation](phase-2-scope.md) maps this outcome to concrete
+journeys, current coverage, acceptance evidence and unresolved scope decisions.
+It includes minimal-container debugging and native-tool integration, which the
+initial high-level workstream list did not account for explicitly.
+
 ### Outcome
 
 A working product whose routine development experience includes the researched

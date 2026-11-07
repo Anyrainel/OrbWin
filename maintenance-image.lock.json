@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "source": "docker.io/library/alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30",
+  "root": "sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30",
+  "config": "sha256:f439434f9e6739ae2f80313f260d2084bb89feaf7220a06a5398e6b90797e2e3",
+  "diffIds": [
+    "sha256:41058dd4c122275500b8ee145e3ff1692ea26c7c568f55c00caf2878e7c61db0"
+  ],
+  "os": "linux",
+  "architecture": "amd64",
+  "bytes": 3731968,
+  "sha256": "4a785a3d0998a81d8f0bf2d4d2949bc4905b54170bd20fd4d17707525de392cf",
+  "tagFree": true
+}

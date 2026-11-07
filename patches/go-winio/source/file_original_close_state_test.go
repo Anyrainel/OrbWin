@@ -1,0 +1,227 @@
+//go:build windows
+
+package winio
+
+import (
+	"errors"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// Explicit file-list tests exercise only DATA and synchronization. No real
+// handle, win32File, DLL, pipe or native function is constructed here.
+func TestOriginalCloseReplyBOOLAndStaleError(t *testing.T) {
+	for _, test := range []struct {
+		raw  uintptr
+		err  error
+		want error
+	}{
+		{1, syscall.Errno(997), nil}, {2, syscall.Errno(5), nil},
+		{0, syscall.Errno(5), syscall.Errno(5)},
+		{0, syscall.Errno(997), syscall.Errno(997)},
+		{uintptr(1) << 32, syscall.Errno(5), syscall.Errno(5)},
+		{0, syscall.Errno(0), errOriginalCloseUnknown},
+		{0, nil, errOriginalCloseUnknown},
+		{0, errors.New("not a native error"), errOriginalCloseUnknown},
+	} {
+		if got := originalFileCloseReply(test.raw, test.err); got != test.want {
+			t.Fatalf("raw=%x: got %v, want %v", test.raw, got, test.want)
+		}
+	}
+}
+
+func TestOriginalCloseDefaultAndRefusedAttemptCannotPublish(t *testing.T) {
+	var state originalFileCloseState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.result() == nil || state.publishClosed() || !state.begin() || state.result() == nil {
+		t.Fatal("default/inflight state published nil")
+	}
+	state.refuse(syscall.Errno(6))
+	state.refuse(nil)
+	if state.begin() || state.publishClosed() || state.result() != syscall.Errno(6) {
+		t.Fatal("failed original result was retried/reset")
+	}
+}
+
+func testOriginalCloseConcurrent(t *testing.T, raw uintptr, nativeError error) {
+	t.Helper()
+	var state originalFileCloseState
+	var calls atomic.Int32
+	// Dummy original input history. Its scalar is never passed to any OS API.
+	input, owned := 42, 42
+	entered := make(chan struct{})
+	returnNative := make(chan struct{})
+	results := make(chan error, 33)
+	var workers sync.WaitGroup
+	closeOriginal := func(winner bool) {
+		defer workers.Done()
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if state.begin() {
+			calls.Add(1)
+			close(entered)
+			<-returnNative
+			if err := originalFileCloseReply(raw, nativeError); err != nil {
+				state.refuse(err)
+			} else {
+				owned = 0 // Actual owner publishes nil only AFTER this disarm.
+				if !state.publishClosed() {
+					t.Error("positive publication refused")
+				}
+			}
+		} else if winner {
+			t.Error("original winner did not enter")
+		}
+		results <- state.result()
+	}
+	workers.Add(1)
+	go closeOriginal(true)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("winner never entered")
+	}
+	ready := make(chan struct{}, 32)
+	for i := 0; i < 32; i++ {
+		workers.Add(1)
+		go func() {
+			ready <- struct{}{}
+			closeOriginal(false)
+		}()
+	}
+	for i := 0; i < 32; i++ {
+		<-ready
+	}
+	select {
+	case <-results:
+		t.Error("a concurrent caller returned before original completion")
+	default:
+	}
+	close(returnNative)
+	workers.Wait()
+	want := originalFileCloseReply(raw, nativeError)
+	for i := 0; i < 33; i++ {
+		if got := <-results; got != want {
+			t.Fatalf("different cached result: %v vs %v", got, want)
+		}
+	}
+	if calls.Load() != 1 || input != 42 || want != nil && owned != 42 || want == nil && owned != 0 {
+		t.Fatal("original input/ownership/call count lost")
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.begin() || state.result() != want {
+		t.Fatal("cached replay reentered the close")
+	}
+}
+
+func TestOriginalCloseConcurrentPositiveWaitsForOriginal(t *testing.T) {
+	testOriginalCloseConcurrent(t, 1, syscall.Errno(997))
+}
+
+func TestOriginalCloseConcurrentFailureKeepsOriginal(t *testing.T) {
+	testOriginalCloseConcurrent(t, 0, syscall.Errno(6))
+}
+
+func TestOriginalClosePanicCutsNeverCacheDefaultNil(t *testing.T) {
+	for cut := 0; cut < 4; cut++ {
+		var state originalFileCloseState
+		owned, history := 42, 42
+		panicked := false
+		func() {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			defer func() {
+				if recover() != nil {
+					state.refuse(errOriginalCloseUnknown)
+					panicked = true
+				}
+			}()
+			if !state.begin() {
+				t.Fatal("first entry refused")
+			}
+			for phase := 0; phase < 4; phase++ {
+				if phase == cut {
+					panic("cancel/join/raw-return/prepublication cut")
+				}
+				if phase == 2 {
+					owned = 0 // A real positive prefix, still not a nil publication.
+				}
+			}
+			state.publishClosed()
+		}()
+		state.mu.Lock()
+		if !panicked || state.begin() || state.publishClosed() || state.result() == nil || history != 42 || cut < 3 && owned != 42 {
+			t.Fatal("panic reset original state or defaulted to success", cut)
+		}
+		state.mu.Unlock()
+	}
+}
+
+func TestOriginalClosePositiveReplayCannotChangeResult(t *testing.T) {
+	var state originalFileCloseState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.begin() || !state.publishClosed() || state.result() != nil {
+		t.Fatal("positive original completion")
+	}
+	state.refuse(syscall.Errno(6))
+	if state.begin() || state.publishClosed() || state.result() != nil {
+		t.Fatal("completed result changed on replay")
+	}
+}
+
+func TestOriginalClosePanicWaiterReceivesCachedFailure(t *testing.T) {
+	var state originalFileCloseState
+	entered := make(chan struct{})
+	allowPanic := make(chan struct{})
+	panicked := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		defer func() {
+			if recover() != nil {
+				state.refuse(errOriginalCloseUnknown)
+				close(panicked)
+			}
+		}()
+		state.begin()
+		close(entered)
+		<-allowPanic
+		panic("original close continuation")
+	}()
+	<-entered
+	go func() {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if state.begin() {
+			result <- nil
+			return
+		}
+		result <- state.result()
+	}()
+	select {
+	case <-result:
+		t.Error("waiter escaped before original panic settled")
+	default:
+	}
+	close(allowPanic)
+	select {
+	case <-panicked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("original panic not settled")
+	}
+	select {
+	case err := <-result:
+		if err != errOriginalCloseUnknown {
+			t.Fatal("waiter saw default nil or new attempt", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter did not observe original cached failure")
+	}
+}

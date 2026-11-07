@@ -1,0 +1,222 @@
+--- /dev/null
++++ b/pkg/driver/wsl2/import_args_windows_test.go
+@@ -0,0 +1,48 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"slices"
++	"testing"
++)
++
++func TestWSLImportArgs(t *testing.T) {
++	tests := []struct {
++		name        string
++		instanceDir string
++		distroName  string
++		want        []string
++	}{
++		{
++			name:        "owned distribution",
++			instanceDir: `C:\Users\test\.rdorbwin\lima\orbwin`,
++			distroName:  "lima-orbwin",
++			want: []string{
++				"wsl.exe", "--import", "lima-orbwin",
++				`C:\Users\test\.rdorbwin\lima\orbwin`,
++				`C:\Users\test\.rdorbwin\lima\orbwin\basedisk`,
++				"--version", "2",
++			},
++		},
++		{
++			name:        "spaces and Unicode remain single arguments",
++			instanceDir: `D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin`,
++			distroName:  "lima-orbwin-test",
++			want: []string{
++				"wsl.exe", "--import", "lima-orbwin-test",
++				`D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin`,
++				`D:\OrbWin 用户 Data\.rdorbwin\lima\orbwin\basedisk`,
++				"--version", "2",
++			},
++		},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			if got := wslImportArgs(tt.instanceDir, tt.distroName); !slices.Equal(got, tt.want) {
++				t.Fatalf("WSL import arguments = %#v, want %#v", got, tt.want)
++			}
++		})
++	}
++}
+--- /dev/null
++++ b/pkg/driver/wsl2/import_args_windows.go
+@@ -0,0 +1,23 @@
++// SPDX-FileCopyrightText: Copyright The Lima Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package wsl2
++
++import (
++	"path/filepath"
++
++	"github.com/lima-vm/lima/v2/pkg/limatype/filenames"
++)
++
++// wslImportArgs selects WSL 2 for this new distribution without changing the host default.
++func wslImportArgs(instanceDir, distroName string) []string {
++	return []string{
++		"wsl.exe",
++		"--import",
++		distroName,
++		instanceDir,
++		filepath.Join(instanceDir, filenames.BaseDiskLegacy),
++		"--version",
++		"2",
++	}
++}
+--- a/pkg/driver/wsl2/vm_windows.go
++++ b/pkg/driver/wsl2/vm_windows.go
+@@ -49,15 +49,9 @@ func startVM(ctx context.Context, distroName string) error {
+ func initVM(ctx context.Context, instanceDir, distroName string) error {
+ 	baseDisk := filepath.Join(instanceDir, filenames.BaseDiskLegacy)
+ 	logrus.Infof("Importing distro from %#q to %#q", baseDisk, instanceDir)
+-	out, err := executil.RunUTF16leCommand([]string{
+-		"wsl.exe",
+-		"--import",
+-		distroName,
+-		instanceDir,
+-		baseDisk,
+-	}, executil.WithContext(ctx))
++	out, err := executil.RunUTF16leCommand(wslImportArgs(instanceDir, distroName), executil.WithContext(ctx))
+ 	if err != nil {
+-		return fmt.Errorf("failed to run `wsl.exe --import %s %s %s`: %w (out=%#q)",
++		return fmt.Errorf("failed to run `wsl.exe --import %s %s %s --version 2`: %w (out=%#q)",
+ 			distroName, instanceDir, baseDisk, err, out)
+ 	}
+ 	return nil
+--- a/pkg/limayaml/defaults.go
++++ b/pkg/limayaml/defaults.go
+@@ -1,5 +1,6 @@
+ // SPDX-FileCopyrightText: Copyright The Lima Authors
+ // SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: resolve the Windows host-template home after native projection.
+ 
+ package limayaml
+ 
+@@ -53,7 +54,7 @@ const (
+ var (
+ 	IPv4loopback1 = net.IPv4(127, 0, 0, 1)
+ 
+-	userHomeDir = Must(os.UserHomeDir())
++	userHomeDir = initialHostHome()
+ 	currentUser = Must(user.Current())
+ )
+ 
+@@ -975,6 +976,10 @@ func executeHostTemplate(format, instDir string, param map[string]string) (bytes
+ 	tmpl, err := template.New("").Parse(format)
+ 	if err == nil {
+ 		limaHome, _ := dirnames.LimaDir()
++		hostHome, homeErr := hostTemplateHome(userHomeDir)
++		if homeErr != nil {
++			return bytes.Buffer{}, fmt.Errorf("resolve host template home: %w", homeErr)
++		}
+ 		globalTempDir := "/tmp"
+ 		if runtime.GOOS == "windows" {
+ 			// On Windows the global temp directory "%SystemRoot%\Temp" (normally "C:\Windows\Temp")
+@@ -987,7 +992,7 @@ func executeHostTemplate(format, instDir string, param map[string]string) (bytes
+ 			// TODO: add hostname fields for the host and the guest
+ 			"UID":           currentUser.Uid,
+ 			"User":          currentUser.Username,
+-			"Home":          userHomeDir,
++			"Home":          hostHome,
+ 			"Param":         param,
+ 			"GlobalTempDir": globalTempDir,
+ 			"TempDir":       os.TempDir(),
+--- /dev/null
++++ b/pkg/limayaml/host_home_test.go
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin regression: only stdlib environment DATA, no Lima/native initializers.
++
++package limayaml
++
++import (
++	"runtime"
++	"testing"
++)
++
++func TestHostHomeWindowsDefersUntilProjectionAndDoesNotCache(t *testing.T) {
++	if runtime.GOOS != "windows" {
++		t.Skip("Windows environment contract")
++	}
++	t.Setenv("USERPROFILE", "")
++	if initialHostHome() != "" {
++		t.Fatal("Windows eager home captured")
++	}
++	if _, err := hostTemplateHome("stale inherited home"); err == nil {
++		t.Fatal("missing projection silently used legacy value")
++	}
++	for _, home := range []string{`C:\owned-one\home`, `D:\owned-two\home`} {
++		t.Setenv("USERPROFILE", home)
++		actual, err := hostTemplateHome("stale inherited home")
++		if err != nil || actual != home {
++			t.Fatal("current projection was not observed", actual, err)
++		}
++		if initialHostHome() != "" {
++			t.Fatal("Windows eager path queried projected environment")
++		}
++	}
++	t.Setenv("USERPROFILE", "")
++	if _, err := hostTemplateHome("previous complete value"); err == nil {
++		t.Fatal("removed projection reused a previous home")
++	}
++}
++
++func TestHostHomeOtherHostsKeepEagerCache(t *testing.T) {
++	if runtime.GOOS == "windows" {
++		t.Skip("non-Windows upstream behavior")
++	}
++	t.Setenv("HOME", "/ordinary-initial-home")
++	cached := initialHostHome()
++	t.Setenv("HOME", "/later-host-home")
++	actual, err := hostTemplateHome(cached)
++	if err != nil || actual != "/ordinary-initial-home" {
++		t.Fatal("upstream cached home behavior changed", actual, err)
++	}
++}
+--- /dev/null
++++ b/pkg/limayaml/host_home.go
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: Apache-2.0
++// OrbWin adaptation: defer the Windows host home until native environment projection.
++
++package limayaml
++
++import (
++	"os"
++	"runtime"
++)
++
++// Preserve upstream's eager cached home on other hosts. A Windows fixed-role
++// process cannot use inherited USERPROFILE before its native setup admission.
++func initialHostHome() string {
++	if runtime.GOOS == "windows" {
++		return ""
++	}
++	home, err := os.UserHomeDir()
++	if err != nil {
++		panic(err)
++	}
++	return home
++}
++
++// Ordinary template DATA only. The owning Go service projects the Windows
++// environment before calling the actual template evaluator. Failure is an
++// error, never an inherited fallback, cached value or native capability.
++func hostTemplateHome(legacy string) (string, error) {
++	if runtime.GOOS == "windows" {
++		return os.UserHomeDir()
++	}
++	return legacy, nil
++}

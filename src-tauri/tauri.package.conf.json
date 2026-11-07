@@ -6,7 +6,13 @@
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"],
     "shortDescription": "An isolated Windows container development environment",
-    "resources": { "../artifacts/package/runtime/": "runtime/" },
+    "resources": {
+      "../artifacts/package/runtime/": "runtime/",
+      "../artifacts/package/orbwin-cli.exe": "orbwin-cli.exe",
+      "../artifacts/package/orbwin-docker.exe": "orbwin-docker.exe",
+      "../artifacts/package/cli-manifest.json": "cli-manifest.json",
+      "../artifacts/package/completions/OrbWin.ps1": "completions/OrbWin.ps1"
+    },
     "windows": {
       "allowDowngrades": false,
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
@@ -15,6 +21,7 @@
         "startMenuFolder": "OrbWin",
         "compression": "zlib",
         "installerHooks": "installer-hooks.nsh",
+        "template": "installer-template.nsi",
         "languages": ["English"],
         "customLanguageFiles": { "English": "installer-language.nsh" }
       }

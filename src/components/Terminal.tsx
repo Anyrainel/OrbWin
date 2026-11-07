@@ -178,7 +178,9 @@ export function Terminal({
         if (mounted.current && !pending) setMessage(String(error));
       });
     setMessage(
-      "Disconnect requested. The workload remains running; an exec process may remain inside it.",
+      shell === "debug"
+        ? "Disconnect requested. The target remains running. Disposable tools expire within 20 seconds if the client cannot clean them up immediately."
+        : "Disconnect requested. The workload remains running; an exec process may remain inside it.",
     );
   }
   return (
@@ -194,6 +196,9 @@ export function Terminal({
           >
             <option value="sh">/bin/sh</option>
             <option value="bash">/bin/bash</option>
+            {!pod && (
+              <option value="debug">Debug tools (separate container)</option>
+            )}
           </select>
         </label>
         <button
@@ -209,11 +214,25 @@ export function Terminal({
           </button>
         )}
       </div>
+      {shell === "debug" && (
+        <p>
+          Starts disposable Alpine/BusyBox tools sharing this exact container's
+          processes and network. The target needs no shell. Tools can access
+          target files at /proc/1/root; edits there affect its data. Requires
+          the bundled tools image, loaded offline when needed. Closing removes
+          only the tools container; if the client is lost, its tools lease
+          expires within 20 seconds.
+        </p>
+      )}
       <p role="status">
         {message ||
           (connected
-            ? "Connected to the selected container. Exit the shell to end the exec process."
-            : "Open an interactive shell in this container. The image must contain the selected shell.")}
+            ? shell === "debug"
+              ? "Connected to disposable debug tools for the selected target. Exit the shell to remove the tools."
+              : "Connected to the selected container. Exit the shell to end the exec process."
+            : shell === "debug"
+              ? "Open diagnostic tools for the exact running target. No packages are installed in the target."
+              : "Open an interactive shell in this container. The image must contain the selected shell.")}
       </p>
       <div
         className="terminal-host"

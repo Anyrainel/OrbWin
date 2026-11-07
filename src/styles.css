@@ -605,6 +605,23 @@ main {
   font-size: 11px;
   color: var(--muted);
 }
+.project-controls select {
+  min-width: 0;
+  max-width: 100%;
+}
+.operation-review-details {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.operation-review-details summary {
+  cursor: pointer;
+}
+.operation-review-details dd {
+  margin: 3px 0 10px;
+}
+.operation-review-details p {
+  white-space: pre-wrap;
+}
 .project-controls summary {
   cursor: pointer;
 }
@@ -636,6 +653,7 @@ main {
   margin: 16px 0;
 }
 .form-field input,
+.form-field select,
 .form-field textarea {
   width: 100%;
   background: var(--input-bg);
@@ -643,6 +661,16 @@ main {
   border: 1px solid var(--border-input);
   border-radius: 5px;
   padding: 8px;
+}
+.form-field .file-editor {
+  min-height: 280px;
+  white-space: pre;
+  tab-size: 2;
+}
+.compose-remember input[type="checkbox"] {
+  width: auto;
+  margin-right: 7px;
+  accent-color: var(--accent);
 }
 .form-field textarea {
   min-height: 90px;

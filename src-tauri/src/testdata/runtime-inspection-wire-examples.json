@@ -1,0 +1,306 @@
+[
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "fresh",
+    "reason": "initial-absence-observed",
+    "runtime": "absent",
+    "image": "unknown",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "interrupted",
+    "reason": "initialized-uncommitted",
+    "runtime": "uncommitted",
+    "image": "same",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "interrupted",
+    "reason": "renamed-not-committed",
+    "runtime": "uncommitted",
+    "image": "same",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "committed",
+    "reason": "committed-receipt",
+    "runtime": "committed",
+    "image": "same",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "unsupported-version",
+    "reason": "different-image",
+    "runtime": "committed",
+    "image": "different",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "conflict",
+    "reason": "namespace-conflict",
+    "runtime": "unknown",
+    "image": "unknown",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "busy",
+    "reason": "owner-busy",
+    "runtime": "unknown",
+    "image": "unknown",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  },
+  {
+    "schema": 2,
+    "evidence": "bounded-observation",
+    "scope": "product",
+    "phase": "unknown",
+    "reason": "observation-changed",
+    "runtime": "unknown",
+    "image": "unknown",
+    "connection": "not-checked",
+    "clients": "not-checked",
+    "actions": [
+      {
+        "action": "prepare-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "resume-setup",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "start-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "upgrade-engine",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      },
+      {
+        "action": "review-private-clients",
+        "state": "unsupported",
+        "reason": "route-not-enabled"
+      }
+    ]
+  }
+]

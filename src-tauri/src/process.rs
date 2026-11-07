@@ -8,7 +8,7 @@ use tokio::{io::AsyncReadExt, process::Command, time::timeout};
 
 const LIMIT: u64 = 128 * 1024;
 
-fn decode(bytes: &[u8]) -> String {
+pub(crate) fn decode(bytes: &[u8]) -> String {
     // WSL emits UTF-16LE when redirected on Windows, with or without a BOM.
     let utf16 =
         bytes.starts_with(&[0xff, 0xfe]) || (bytes.len() > 3 && bytes[1] == 0 && bytes[3] == 0);
@@ -30,6 +30,30 @@ fn decode(bytes: &[u8]) -> String {
 
 pub async fn read_command(binary: &Path, args: &[&str]) -> Result<String, String> {
     read_with_deadline(binary, args, Duration::from_secs(10)).await
+}
+
+// Closed cached SDK diagnostics use the atomic transient owner. OS-supplied
+// WSL tools keep their separate system-code admission/runner contract.
+pub(crate) async fn read_cached(
+    binary: &crate::runtime_cache::CachedExecutable,
+    args: &[&str],
+) -> Result<String, String> {
+    let environment = std::env::vars_os()
+        .filter(|(key, _)| {
+            !matches!(
+                key.to_string_lossy().to_ascii_uppercase().as_str(),
+                "DOCKER_CONTEXT" | "DOCKER_TLS_VERIFY" | "DOCKER_CERT_PATH"
+            )
+        })
+        .collect();
+    crate::client_worker::read(
+        binary.clone(),
+        args.iter().map(std::ffi::OsString::from).collect(),
+        environment,
+        None,
+        Duration::from_secs(10),
+    )
+    .await
 }
 
 async fn bounded_read(reader: impl tokio::io::AsyncRead + Unpin) -> Result<Vec<u8>, String> {
@@ -63,6 +87,11 @@ async fn read_with_deadline(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    read_prepared_command(command, deadline).await
+}
+
+async fn read_prepared_command(mut command: Command, deadline: Duration) -> Result<String, String> {
+    command.kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     let mut child = command
@@ -93,7 +122,10 @@ async fn read_with_deadline(
         Err(_) => {
             let _ = child.kill().await;
             let _ = child.wait().await;
-            Err("Diagnostic timed out after 10 seconds".into())
+            Err(format!(
+                "Diagnostic timed out after {} ms",
+                deadline.as_millis()
+            ))
         }
     }
 }
@@ -172,5 +204,55 @@ mod tests {
         .unwrap_err();
         assert!(error.contains("expected failure"));
         assert!(error.contains('7'));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn native_timeout_reaps_the_acknowledged_process() {
+        let fixture = crate::process_fixture::Fixture::new();
+        let command = fixture.command("sleep");
+        let task = tokio::spawn(read_prepared_command(
+            command.into(),
+            Duration::from_secs(2),
+        ));
+        let handle = crate::process_fixture::retain_running_process(&fixture).await;
+        let error = task.await.unwrap().unwrap_err();
+        assert!(error.contains("2000 ms"), "{error}");
+        crate::process_fixture::assert_exited(&handle);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn native_cancellation_kills_the_acknowledged_process() {
+        let fixture = crate::process_fixture::Fixture::new();
+        let task = tokio::spawn(read_prepared_command(
+            fixture.command("sleep").into(),
+            Duration::from_secs(15),
+        ));
+        let handle = crate::process_fixture::retain_running_process(&fixture).await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        crate::process_fixture::assert_exited(&handle);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn native_output_limit_and_failure_status() {
+        let output = crate::process_fixture::Fixture::new();
+        let start = std::time::Instant::now();
+        let error = read_prepared_command(output.command("output").into(), Duration::from_secs(10))
+            .await
+            .unwrap_err();
+        assert!(error.contains("size limit"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(8));
+        let failure = crate::process_fixture::Fixture::new();
+        let error =
+            read_prepared_command(failure.command("failure").into(), Duration::from_secs(10))
+                .await
+                .unwrap_err();
+        assert!(
+            error.contains("native expected failure") && error.contains('7'),
+            "{error}"
+        );
     }
 }

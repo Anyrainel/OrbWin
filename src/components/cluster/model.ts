@@ -42,9 +42,7 @@ export function parseList(output: string): K8sObject[] {
     !Array.isArray(data.items) ||
     data.items.some(
       (item) =>
-        !item?.metadata?.uid ||
-        !item.metadata.name ||
-        !item.metadata.namespace,
+        !item?.metadata?.uid || !item.metadata.name || !item.metadata.namespace,
     )
   )
     throw new Error("Cluster returned an invalid resource list.");
@@ -83,11 +81,15 @@ export function podCounts(pod: K8sObject): {
   restarts: number;
 } {
   const statuses: Json[] = pod.status?.containerStatuses ?? [];
-  const total = (pod.spec?.containers as unknown[] | undefined)?.length ?? statuses.length;
+  const total =
+    (pod.spec?.containers as unknown[] | undefined)?.length ?? statuses.length;
   return {
     ready: statuses.filter((s) => s.ready).length,
     total,
-    restarts: statuses.reduce((sum, s) => sum + (Number(s.restartCount) || 0), 0),
+    restarts: statuses.reduce(
+      (sum, s) => sum + (Number(s.restartCount) || 0),
+      0,
+    ),
   };
 }
 export function podHealth(pod: K8sObject): Health {
@@ -122,7 +124,8 @@ export function podHealth(pod: K8sObject): Health {
       return { label: terminated.reason ?? "Error", tone: "bad" };
   }
   const reason: string | undefined = pod.status?.reason;
-  if (reason) return { label: reason, tone: BAD_REASONS.test(reason) ? "bad" : "warn" };
+  if (reason)
+    return { label: reason, tone: BAD_REASONS.test(reason) ? "bad" : "warn" };
   if (phase === "Succeeded") return { label: "Completed", tone: "idle" };
   if (phase === "Failed") return { label: "Failed", tone: "bad" };
   if (phase === "Pending") return { label: "Pending", tone: "warn" };
@@ -152,7 +155,8 @@ export function deploymentHealth(d: K8sObject): Health {
   const conditions: Json[] = d.status?.conditions ?? [];
   if (
     conditions.some(
-      (c) => c.type === "Progressing" && c.reason === "ProgressDeadlineExceeded",
+      (c) =>
+        c.type === "Progressing" && c.reason === "ProgressDeadlineExceeded",
     )
   )
     return { label: "Not progressing", tone: "bad" };
@@ -204,11 +208,22 @@ export function podPorts(pod: K8sObject): (PortInfo & { container: string })[] {
       });
   return out;
 }
-export function forwardablePorts(kind: ClusterKind, object: K8sObject): PortInfo[] {
+export function forwardablePorts(
+  kind: ClusterKind,
+  object: K8sObject,
+): PortInfo[] {
   const ports =
-    kind === "pods" ? podPorts(object) : kind === "services" ? servicePorts(object) : [];
+    kind === "pods"
+      ? podPorts(object)
+      : kind === "services"
+        ? servicePorts(object)
+        : [];
   return ports.filter(
-    (p) => p.protocol === "TCP" && Number.isInteger(p.port) && p.port > 0 && p.port < 65536,
+    (p) =>
+      p.protocol === "TCP" &&
+      Number.isInteger(p.port) &&
+      p.port > 0 &&
+      p.port < 65536,
   );
 }
 export function portText(p: PortInfo): string {
@@ -235,7 +250,9 @@ export function summary(kind: ClusterKind, object: K8sObject): string {
       return `${ready}/${desired} ready`;
     }
     default: {
-      const size = object.status?.capacity?.storage ?? object.spec?.resources?.requests?.storage;
+      const size =
+        object.status?.capacity?.storage ??
+        object.spec?.resources?.requests?.storage;
       return `${claimHealth(object).label}${size ? ` · ${size}` : ""}`;
     }
   }
@@ -250,7 +267,9 @@ export function searchText(kind: ClusterKind, object: K8sObject): string {
     object.status?.podIP,
     object.spec?.nodeName,
     ...images(object),
-    ...Object.entries(object.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`),
+    ...Object.entries(object.metadata.labels ?? {}).map(
+      ([k, v]) => `${k}=${v}`,
+    ),
   ]
     .filter(Boolean)
     .join("\n")
@@ -274,17 +293,30 @@ export function groupByNamespace(
     .map(([ns, list]) => [
       ns,
       list.sort((a, b) =>
-        a.metadata.name < b.metadata.name ? -1 : a.metadata.name > b.metadata.name ? 1 : 0,
+        a.metadata.name < b.metadata.name
+          ? -1
+          : a.metadata.name > b.metadata.name
+            ? 1
+            : 0,
       ),
     ]);
 }
 
 // kubectl port-forward prints "Forwarding from 127.0.0.1:PORT -> REMOTE".
-export function forwardUrls(output: string): { local: number; remote: number }[] {
-  const found: { local: number; remote: number }[] = [];
+export function forwardUrls(
+  output: string,
+): { local: number; remote: number }[] {
+  const found = new Map<number, number | null>();
   for (const match of output.matchAll(
-    /Forwarding from 127\.0\.0\.1:(\d+) -> (\d+)/g,
-  ))
-    found.push({ local: Number(match[1]), remote: Number(match[2]) });
-  return found;
+    /^Forwarding from 127\.0\.0\.1:(\d{1,5}) -> (\d{1,5})\r?$/gm,
+  )) {
+    const local = Number(match[1]),
+      remote = Number(match[2]);
+    if (local < 1 || local > 65535 || remote < 1 || remote > 65535) continue;
+    if (found.has(local) && found.get(local) !== remote) found.set(local, null);
+    else if (!found.has(local)) found.set(local, remote);
+  }
+  return [...found].flatMap(([local, remote]) =>
+    remote === null ? [] : [{ local, remote }],
+  );
 }

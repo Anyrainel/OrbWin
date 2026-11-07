@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "lockSHA256": "33182ccdd2a3a603c5793af424ebdfd447da63182af5a60dc908c6f9ce788687",
+  "module": "github.com/Microsoft/go-winio",
+  "version": "v0.6.4",
+  "upstreamZipSHA256": "0bb0285b68150970584752c9792137af693579c51ae5ff9c082d031f5b9cfdf1",
+  "patchedProjectionSHA256": "b2eed5d8471fd48e5f6ee850ccc371a3484e3fd76303c2233880ea8048afabc7",
+  "patchSHA256": "6d7c88fdbcfe33232595545584469fd8d40a9bbed40473495a79125ce8f87b14",
+  "recipeHashes": {
+    "scripts/winio-build-input.mjs": "b0a437c6e40c78e6a1cf57001484b14603c18317fddaae644369d7ae7c4071c0",
+    "scripts/winio-build-input-fs.mjs": "14f8b6ac127210319035fcbb2aa604a9efb49e88c98db622221569fdabff2289",
+    "scripts/lima-wsl2-build-input.mjs": "6af3c404278d82782eac93bcdeaaae394d8d903473527d734e72c4c709f59f73",
+    "scripts/build-backend.mjs": "fea3c660c560d5797acc048a30fdda01f5b27cbf9c8e75d99c20806189cfcdbd",
+    "scripts/build-identity.mjs": "b72ba71b16c067a6194f0a8707ff42d1cea8952fa7643826b8fbdff792f6fd77",
+    "scripts/collect-notices.mjs": "e8064dc09871fd4e645066e86e0c18b21ead69fad8bdf572296158f47e143bc5"
+  },
+  "offerFiles": {
+    "upstream.zip": "0bb0285b68150970584752c9792137af693579c51ae5ff9c082d031f5b9cfdf1",
+    "winio-custody.patch": "6d7c88fdbcfe33232595545584469fd8d40a9bbed40473495a79125ce8f87b14",
+    "LICENSE": "cf248820bf1178370bb4f1670a59f8748d46bc96d0f64080cd631511c6046409",
+    "README.md": "460ffeaaaef37e3ef667a4479bb9e920d69878b0675661e87a8736b31af068eb",
+    "manifest.json": "cb6430f5ac9269f96417e2cf7c074591e68041f55ad925cb2eea88b0344dc893"
+  },
+  "reviewPeerSHA256": "d33588322814f90603b4553cb7d322b38ed1aa09275b022674c032f8598445d8",
+  "sourceReceiptSHA256": "a1c70600da2b7d2ea834935e2eb139b070a504de7aa3cc1ccc9819295ff48d19"
+}

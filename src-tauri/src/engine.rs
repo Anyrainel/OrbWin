@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const ENDPOINT: &str = "npipe:////./pipe/docker-rancher-desktop-orbwin";
-
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Identity {
@@ -22,99 +21,46 @@ struct Identity {
 #[derive(Clone)]
 pub(crate) struct Target {
     identity: Identity,
-    pub(crate) docker: PathBuf,
+    pub(crate) docker: crate::runtime_cache::CachedExecutable,
+    _credentials: crate::runtime_cache::CachedExecutable,
     pub(crate) config: PathBuf,
 }
 impl Target {
     pub(crate) fn daemon_id(&self) -> &str {
         &self.identity.daemon_id
     }
-    pub(crate) async fn session(&self) -> Result<PathBuf, String> {
-        tokio::task::spawn_blocking(|| {
-            use sha2::{Digest, Sha256};
-            let path = crate::runtime::backend_dir().join("orbwin-session.exe");
-            let manifest: serde_json::Value = serde_json::from_slice(
-                &std::fs::read(crate::runtime::backend_dir().join("session-manifest.json"))
-                    .map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            for (name, source) in [
-                (
-                    "main.go",
-                    include_bytes!("../../backend-tools/session/main.go").as_slice(),
-                ),
-                (
-                    "go.mod",
-                    include_bytes!("../../backend-tools/session/go.mod").as_slice(),
-                ),
-                (
-                    "kube.go",
-                    include_bytes!("../../backend-tools/session/kube.go").as_slice(),
-                ),
-                (
-                    "publication.go",
-                    include_bytes!("../../backend-tools/session/publication.go").as_slice(),
-                ),
-                (
-                    "files.go",
-                    include_bytes!("../../backend-tools/session/files.go").as_slice(),
-                ),
-                (
-                    "go.sum",
-                    include_bytes!("../../backend-tools/session/go.sum").as_slice(),
-                ),
-            ] {
-                if manifest["sources"][name] != format!("{:x}", Sha256::digest(source)) {
-                    return Err(
-                        "Session helper source changed. Rebuild it before opening a terminal."
-                            .into(),
-                    );
-                }
-            }
-            let bytes =
-                std::fs::read(&path).map_err(|e| format!("Build the session helper first: {e}"))?;
-            if bytes.len() > 64 * 1024 * 1024
-                || manifest["binarySha256"] != format!("{:x}", Sha256::digest(bytes))
-            {
-                return Err("Session helper binary differs from its build manifest.".into());
-            }
-            Ok(path)
-        })
-        .await
-        .map_err(|e| e.to_string())?
+    pub(crate) async fn session(&self) -> Result<crate::runtime_cache::CachedExecutable, String> {
+        session_binary().await
     }
     pub(crate) fn home(&self) -> &std::path::Path {
         &self.identity.home
     }
-    pub(crate) async fn rdd(&self) -> Result<PathBuf, String> {
+    pub(crate) async fn client_snapshot(
+        &self,
+    ) -> Result<crate::client_config::ClientConfigSnapshot, String> {
+        let docker = self.docker.clone();
+        let credentials = self._credentials.clone();
+        tokio::task::spawn_blocking(move || crate::client_config::reader(docker, credentials))
+            .await
+            .map_err(|_| "Private client configuration admission did not complete.".to_string())?
+            .map_err(|e| e.to_string())
+    }
+    pub(crate) async fn rdd(&self) -> Result<crate::runtime_cache::CachedExecutable, String> {
         let target = self.clone();
         tokio::task::spawn_blocking(move || target.verified_rdd())
             .await
             .map_err(|e| e.to_string())?
     }
-    fn verified_rdd(&self) -> Result<PathBuf, String> {
-        use sha2::{Digest, Sha256};
-        let path = crate::runtime::backend_dir().join("rdd.exe");
-        use std::io::Read;
-        let mut file = std::fs::File::open(&path)
-            .map_err(|e| format!("Cannot read owned backend binary: {e}"))?;
-        if file.metadata().map_err(|e| e.to_string())?.len() > 512 * 1024 * 1024 {
-            return Err("Backend binary exceeds the development size limit.".into());
-        }
-        let mut hash = Sha256::new();
-        let mut buffer = [0u8; 65536];
-        loop {
-            let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            hash.update(&buffer[..n]);
-        }
-        if format!("{:x}", hash.finalize()) != self.identity.binary_sha256 {
-            return Err("Backend binary no longer matches its qualified identity. Rebuild and requalify before lifecycle changes.".into());
-        }
+    fn verified_rdd(&self) -> Result<crate::runtime_cache::CachedExecutable, String> {
+        crate::runtime::require_component_pin("rdd.exe", &self.identity.binary_sha256)?;
+        // The cache hashes source bytes against this independent pin once,
+        // then continuously retains the immutable native image/namespace.
         self.verify_registration()?;
-        Ok(path)
+        crate::runtime_cache::prepare(
+            crate::runtime_cache::VerifiedCacheSource::for_rdd_qualified_identity(
+                &self.identity.binary_sha256,
+            )?,
+        )
     }
     #[cfg(windows)]
     fn verify_registration(&self) -> Result<(), String> {
@@ -152,6 +98,56 @@ impl Target {
         Err("WSL lifecycle requires Windows.".into())
     }
 }
+
+// Shared source/binary attestation is independent of engine identity. Fixed
+// host-only diagnostics may use the same SDK while the engine is unavailable;
+// workload callers must still obtain and verify their Target before dispatch.
+pub(crate) async fn session_binary() -> Result<crate::runtime_cache::CachedExecutable, String> {
+    tokio::task::spawn_blocking(|| {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let manifest_path = crate::runtime::backend_dir().join("session-manifest.json");
+        let mut bytes = Vec::new();
+        std::fs::File::open(manifest_path)
+            .map_err(|e| e.to_string())?
+            .take((1 << 20) + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 1 << 20 {
+            return Err("Session helper manifest exceeds its size limit.".into());
+        }
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        crate::runtime::require_component_pin(
+            "orbwin-session.exe",
+            manifest["binarySha256"]
+                .as_str()
+                .ok_or("Session helper manifest has no binary digest.")?,
+        )?;
+        let expected_sources = include!(concat!(env!("OUT_DIR"), "/session_sources.rs"));
+        if manifest["sources"].as_object().map(|sources| sources.len())
+            != Some(expected_sources.len())
+        {
+            return Err(
+                "Session helper source inventory changed. Rebuild it before continuing.".into(),
+            );
+        }
+        for (name, source) in expected_sources {
+            if manifest["sources"][name] != format!("{:x}", Sha256::digest(source)) {
+                return Err("Session helper source changed. Rebuild it before continuing.".into());
+            }
+        }
+        crate::runtime_cache::prepare(
+            crate::runtime_cache::VerifiedCacheSource::for_session_verified_manifest(
+                manifest["binarySha256"]
+                    .as_str()
+                    .ok_or("Session helper manifest has no binary digest.")?,
+            )?,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 pub(crate) fn target() -> Result<Target, String> {
     let read = |path| {
         std::fs::read(path).map_err(|e| format!("Owned backend evidence is unavailable: {e}"))
@@ -180,17 +176,183 @@ pub(crate) fn target() -> Result<Target, String> {
         config: home.join(".rdorbwin/docker"),
         identity,
         docker: crate::runtime::docker()?,
+        _credentials: crate::runtime::credentials()?,
     })
 }
 
 pub(crate) async fn command(target: &Target, args: &[&str]) -> Result<String, String> {
-    let config = target
-        .config
-        .to_str()
-        .ok_or("Invalid client configuration path")?;
-    let mut scoped = vec!["--config", config, "--host", ENDPOINT];
-    scoped.extend_from_slice(args);
-    process::read_command(&target.docker, &scoped).await
+    let snapshot = target.client_snapshot().await?;
+    let environment = docker_environment(target, &snapshot)?;
+    let mut scoped: Vec<std::ffi::OsString> = vec![
+        "--config".into(),
+        snapshot.path().as_os_str().to_owned(),
+        "--host".into(),
+        ENDPOINT.into(),
+    ];
+    scoped.extend(args.iter().map(std::ffi::OsString::from));
+    crate::client_worker::read(
+        target.docker.clone(),
+        scoped,
+        environment,
+        Some(snapshot),
+        std::time::Duration::from_secs(10),
+    )
+    .await
+}
+
+fn docker_environment(
+    target: &Target,
+    snapshot: &crate::client_config::ClientConfigSnapshot,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    docker_environment_for_paths(target, snapshot.path(), snapshot.buildx_path())
+}
+
+pub(crate) fn docker_environment_for_paths(
+    target: &Target,
+    config: &std::path::Path,
+    buildx: &std::path::Path,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    docker_environment_for_sources(
+        &target.docker,
+        &target._credentials,
+        ENDPOINT,
+        config,
+        buildx,
+    )
+}
+
+fn docker_environment_for_sources(
+    docker: &crate::runtime_cache::CachedExecutable,
+    credentials: &crate::runtime_cache::CachedExecutable,
+    endpoint: &str,
+    config: &std::path::Path,
+    buildx: &std::path::Path,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>, String> {
+    use std::ffi::OsString;
+    credentials.check_held_origin()?;
+    docker.check_held_origin()?;
+    let mut paths = vec![
+        credentials
+            .parent()
+            .ok_or("Held credential helper directory unavailable")?
+            .to_path_buf(),
+        docker
+            .parent()
+            .ok_or("Held Docker directory unavailable")?
+            .to_path_buf(),
+    ];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(paths)
+        .map_err(|_| "Cannot construct held client helper search path")?;
+    // Replaced selectors include plugin discovery and buildx state. Inherited
+    // values cannot redirect this explicitly targeted diagnostic.
+    let overrides: Vec<(OsString, OsString)> = vec![
+        ("PATH".into(), path),
+        // Go's Windows helper lookup otherwise checks the working directory
+        // before PATH. Pin the suffix search so the retained helper wins.
+        ("NoDefaultCurrentDirectoryInExePath".into(), "1".into()),
+        ("PATHEXT".into(), ".EXE".into()),
+        ("DOCKER_HOST".into(), endpoint.into()),
+        ("DOCKER_CONFIG".into(), config.as_os_str().to_owned()),
+        ("BUILDX_CONFIG".into(), buildx.as_os_str().to_owned()),
+        (
+            "ORBWIN_DOCKER_MANAGED_PLUGINS".into(),
+            docker
+                .parent()
+                .ok_or("Cached Docker directory unavailable")?
+                .join("docker-cli-plugins")
+                .into_os_string(),
+        ),
+    ];
+    Ok(scoped_environment(std::env::vars_os(), overrides))
+}
+
+// Setup has no recorded Target until provisioning and daemon identity checks
+// finish. Admit only the two fixed setup endpoints, read info with a real held
+// private snapshot, and leave all identity/publication decisions to setup.
+fn setup_endpoint(endpoint: &str) -> Result<(), String> {
+    if endpoint == ENDPOINT || endpoint == "npipe:////./pipe/docker-rancher-desktop-orbwin-proof" {
+        Ok(())
+    } else {
+        Err("Setup info requires the fixed OrbWin or qualification endpoint.".into())
+    }
+}
+
+pub(crate) async fn setup_info(
+    docker: crate::runtime_cache::CachedExecutable,
+    credentials: crate::runtime_cache::CachedExecutable,
+    snapshot: crate::client_config::ClientConfigSnapshot,
+    endpoint: &str,
+) -> Result<serde_json::Value, String> {
+    setup_endpoint(endpoint)?;
+    snapshot.check().map_err(|error| error.to_string())?;
+    let environment = docker_environment_for_sources(
+        &docker,
+        &credentials,
+        endpoint,
+        snapshot.path(),
+        snapshot.buildx_path(),
+    )?;
+    let args = vec![
+        "--config".into(),
+        snapshot.path().as_os_str().to_owned(),
+        "--host".into(),
+        endpoint.into(),
+        "info".into(),
+        "--format".into(),
+        "{{json .}}".into(),
+    ];
+    let raw = crate::client_worker::read(
+        docker,
+        args,
+        environment,
+        Some(snapshot),
+        std::time::Duration::from_secs(10),
+    )
+    .await?;
+    let info: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|_| "Setup received an invalid engine info response.".to_string())?;
+    validate_setup_info(&info)?;
+    Ok(info)
+}
+
+fn validate_setup_info(info: &serde_json::Value) -> Result<(), String> {
+    if info["OSType"] != "linux" || !info["ID"].as_str().is_some_and(|id| !id.is_empty()) {
+        return Err("Setup endpoint did not return a Linux engine with a daemon ID. No identity was published.".into());
+    }
+    Ok(())
+}
+
+fn scoped_environment(
+    inherited: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+    overrides: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    let mut values: Vec<_> = inherited
+        .into_iter()
+        .filter(|(key, _)| {
+            !matches!(
+                key.to_string_lossy().to_ascii_uppercase().as_str(),
+                "PATH"
+                    | "NODEFAULTCURRENTDIRECTORYINEXEPATH"
+                    | "PATHEXT"
+                    | "DOCKER_HOST"
+                    | "DOCKER_CONFIG"
+                    | "DOCKER_CONTEXT"
+                    | "DOCKER_TLS_VERIFY"
+                    | "DOCKER_CERT_PATH"
+                    | "DOCKER_API_VERSION"
+                    | "DOCKER_AUTH_CONFIG"
+                    | "BUILDKIT_HOST"
+                    | "BUILDX_BUILDER"
+                    | "BUILDX_CONFIG"
+                    | "ORBWIN_DOCKER_MANAGED_PLUGINS"
+            )
+        })
+        .collect();
+    values.extend(overrides);
+    values
 }
 
 pub(crate) async fn check(target: &Target) -> Result<serde_json::Value, String> {
@@ -211,7 +373,7 @@ pub(crate) struct Publication {
 }
 pub(crate) async fn publications(target: &Target) -> Result<Vec<Publication>, String> {
     let helper = target.session().await?;
-    let raw = process::read_command(&helper, &["port-status", target.daemon_id()]).await?;
+    let raw = process::read_cached(&helper, &["port-status", target.daemon_id()]).await?;
     serde_json::from_str(&raw).map_err(|e| format!("Invalid publication snapshot: {e}"))
 }
 pub(crate) async fn publication_failure(target: &Target) -> Result<Option<String>, String> {
@@ -294,6 +456,8 @@ pub async fn status() -> Status {
 pub struct DiskInfo {
     path: String,
     file_length_bytes: u64,
+    host_capacity: Option<crate::host_capacity::HostCapacity>,
+    host_capacity_error: Option<String>,
 }
 pub async fn disk_info() -> Result<DiskInfo, String> {
     let target = target()?;
@@ -315,9 +479,15 @@ pub async fn disk_info() -> Result<DiskInfo, String> {
         if !metadata.is_file() {
             return Err("The owned virtual disk is not a regular file.".into());
         }
+        let (host_capacity, host_capacity_error) = match crate::host_capacity::query(&base) {
+            Ok(value) => (Some(value), None),
+            Err(error) => (None, Some(error)),
+        };
         Ok(DiskInfo {
             path: path.display().to_string(),
             file_length_bytes: metadata.len(),
+            host_capacity,
+            host_capacity_error,
         })
     })
     .await
@@ -390,7 +560,86 @@ pub async fn inventory() -> Result<Inventory, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn managed_diagnostic_environment_replaces_case_insensitive_selectors() {
+        use std::ffi::OsString;
+        let inherited = [
+            ("docker_host", "foreign"),
+            ("Docker_Context", "foreign"),
+            ("Docker_Auth_Config", "foreign"),
+            ("ORBWIN_DOCKER_MANAGED_PLUGINS", "foreign"),
+            ("BUILDX_CONFIG", "foreign"),
+            ("Path", "foreign"),
+            ("NoDefaultCurrentDirectoryInExePath", "foreign"),
+            ("pathext", ".CMD"),
+            ("=C:", "C:\\work"),
+            ("APP_TEST", "keep"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let result = super::scoped_environment(
+            inherited,
+            vec![
+                ("DOCKER_HOST".into(), "owned".into()),
+                ("PATH".into(), "held".into()),
+            ],
+        );
+        assert_eq!(
+            result,
+            vec![
+                ("=C:".into(), "C:\\work".into()),
+                ("APP_TEST".into(), "keep".into()),
+                ("DOCKER_HOST".into(), "owned".into()),
+                ("PATH".into(), "held".into()),
+            ]
+        );
+    }
+    #[tokio::test]
+    #[ignore = "read-only capacity of the existing owned data volume"]
+    async fn owned_host_capacity() {
+        assert_eq!(std::env::var("ORBWIN_QUALIFY_OWNED").as_deref(), Ok("1"));
+        let value = super::disk_info().await.unwrap();
+        let data = serde_json::to_value(value).unwrap();
+        assert!(data["hostCapacityError"].is_null(), "{data}");
+        let host = &data["hostCapacity"];
+        let available = host["availableBytes"].as_u64().unwrap();
+        let total = host["totalBytes"].as_u64().unwrap();
+        let free = host["freeBytes"].as_u64().unwrap();
+        assert!(total > 0 && available <= total && available <= free);
+        assert!(data["fileLengthBytes"].as_u64().unwrap() > 0);
+        let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../artifacts/qualification/p2-host-capacity-native-20261025.json");
+        std::fs::write(file, serde_json::to_vec_pretty(&data).unwrap()).unwrap();
+    }
     use super::*;
+    #[test]
+    fn setup_info_accepts_only_owned_or_fixed_proof_endpoint_and_linux_identity() {
+        assert!(setup_endpoint(ENDPOINT).is_ok());
+        assert!(setup_endpoint("npipe:////./pipe/docker-rancher-desktop-orbwin-proof").is_ok());
+        for endpoint in [
+            "",
+            "unix:///var/run/docker.sock",
+            "tcp://127.0.0.1:2375",
+            "npipe:////./pipe/docker_engine",
+            "npipe:////./pipe/docker-rancher-desktop-orbwin-other",
+        ] {
+            assert!(setup_endpoint(endpoint).is_err());
+        }
+        assert!(validate_setup_info(
+            &serde_json::json!({"ID":"observed-daemon", "OSType":"linux"})
+        )
+        .is_ok());
+        for info in [
+            serde_json::Value::Null,
+            serde_json::json!([]),
+            serde_json::json!({"OSType":"linux"}),
+            serde_json::json!({"ID":"", "OSType":"linux"}),
+            serde_json::json!({"ID":1, "OSType":"linux"}),
+            serde_json::json!({"ID":"observed", "OSType":"windows"}),
+        ] {
+            assert!(validate_setup_info(&info).is_err());
+        }
+    }
     #[test]
     fn rejects_foreign_or_non_linux_daemons() {
         assert!(validate_info(

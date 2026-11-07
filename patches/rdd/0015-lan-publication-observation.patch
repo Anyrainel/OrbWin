@@ -1,0 +1,414 @@
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows.go b/rdd/pkg/socketbridge/docker_ports_windows.go
+--- a/rdd/pkg/socketbridge/docker_ports_windows.go
++++ b/rdd/pkg/socketbridge/docker_ports_windows.go
+@@ -301,6 +301,10 @@ func withPortLifecycle(next http.Handler, transport http.RoundTripper, published
+ 		generation = generations[0]
+ 	}
+ 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/orbwin/port-status/v2/") {
++			publicationStatusV2(w, r, transport, published, generation)
++			return
++		}
+ 		if r.Method == http.MethodGet && r.URL.Path == "/orbwin/port-status" {
+ 			publicationStatus(w, r, transport, published)
+ 			return
+diff --git a/rdd/pkg/socketbridge/publication_v2_windows.go b/rdd/pkg/socketbridge/publication_v2_windows.go
+new file mode 100644
+--- /dev/null
++++ b/rdd/pkg/socketbridge/publication_v2_windows.go
+@@ -0,0 +1,155 @@
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package socketbridge
++
++import (
++	"encoding/hex"
++	"encoding/json"
++	"net"
++	"net/http"
++	"reflect"
++	"sort"
++	"strconv"
++	"strings"
++	"time"
++)
++
++// Additive owned publication observation. The original v1 endpoint and Docker lifecycle
++// behavior are untouched. Stable double observation is not a reservation/CAS.
++type publicationV2Container struct {
++	ID    string
++	State *struct {
++		Running, Paused, Restarting, Dead *bool
++		StartedAt                         string
++	}
++	HostConfig struct {
++		NetworkMode  string
++		PortBindings map[string][]dockerBinding
++	}
++	NetworkSettings struct{ Ports map[string][]dockerBinding }
++}
++type publicationV2Binding struct {
++	ContainerPort uint16 `json:"containerPort"`
++	HostPort      uint16 `json:"hostPort"`
++	Protocol      string `json:"protocol"`
++	Generation    uint64 `json:"generation"`
++	Published     bool   `json:"published"`
++}
++
++func (c publicationV2Container) valid(id string) bool {
++	if c.ID != id || c.State == nil || c.State.Running == nil || c.State.Paused == nil || c.State.Restarting == nil || c.State.Dead == nil || !*c.State.Running || *c.State.Paused || *c.State.Restarting || *c.State.Dead || c.HostConfig.NetworkMode == "none" || c.HostConfig.NetworkMode == "host" {
++		return false
++	}
++	started, e := time.Parse(time.RFC3339Nano, c.State.StartedAt)
++	return e == nil && !started.IsZero()
++}
++func samplePublicationV2(c publicationV2Container, published PortPublication, generation PortGeneration) ([]publicationV2Binding, bool) {
++	if published == nil || generation == nil || len(c.NetworkSettings.Ports) > 256 || len(c.HostConfig.PortBindings) > 256 {
++		return nil, false
++	}
++	result := make([]publicationV2Binding, 0)
++	seen := make(map[string]bool)
++	count := 0
++	for _, bindings := range c.HostConfig.PortBindings {
++		count += len(bindings)
++		if count > 256 {
++			return nil, false
++		}
++	}
++	count = 0
++	for key, bindings := range c.NetworkSettings.Ports {
++		count += len(bindings)
++		if count > 256 {
++			return nil, false
++		}
++		protocol, e := portProtocol(key)
++		if e != nil {
++			return nil, false
++		}
++		container, e := strconv.ParseUint(strings.Split(key, "/")[0], 10, 16)
++		if e != nil || container == 0 {
++			return nil, false
++		}
++		for _, b := range bindings {
++			if ip := net.ParseIP(b.HostIP); ip != nil && ip.To4() == nil {
++				continue
++			}
++			if hostBinding(b) != nil {
++				return nil, false
++			}
++			host, e := strconv.ParseUint(b.HostPort, 10, 16)
++			if e != nil || host == 0 || strconv.FormatUint(host, 10) != b.HostPort {
++				return nil, false
++			}
++			match := false
++			for _, configured := range c.HostConfig.PortBindings[key] {
++				if configured.HostPort == b.HostPort && hostBinding(configured) == nil {
++					match = true
++				}
++			}
++			identity := protocol + "/" + b.HostPort
++			if !match || seen[identity] || len(result) >= 256 {
++				return nil, false
++			}
++			seen[identity] = true
++			active := published(protocol, b.HostPort)
++			epoch := generation(protocol, b.HostPort)
++			if active && epoch == 0 {
++				return nil, false
++			}
++			result = append(result, publicationV2Binding{uint16(container), uint16(host), protocol, epoch, active})
++		}
++	}
++	sort.Slice(result, func(i, j int) bool {
++		if result[i].Protocol != result[j].Protocol {
++			return result[i].Protocol < result[j].Protocol
++		}
++		return result[i].HostPort < result[j].HostPort
++	})
++	return result, true
++}
++func publicationStatusV2(w http.ResponseWriter, r *http.Request, transport http.RoundTripper, published PortPublication, generation PortGeneration) {
++	if transport == nil {
++		dockerError(w, 409, "Publication transport unavailable")
++		return
++	}
++	id := strings.TrimPrefix(r.URL.Path, "/orbwin/port-status/v2/")
++	decoded, e := hex.DecodeString(id)
++	if e != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != id || r.URL.RawQuery != "" {
++		dockerError(w, 400, "Exact canonical full container ID required")
++		return
++	}
++	var first, second publicationV2Container
++	status, e := dockerRead(r.Context(), transport, "/containers/"+id+"/json", &first)
++	if e != nil || status != 200 || !first.valid(id) {
++		dockerError(w, 409, "Publication target unavailable or incomplete")
++		return
++	}
++	before, ok := samplePublicationV2(first, published, generation)
++	if !ok {
++		dockerError(w, 409, "Publication generation unavailable or ambiguous")
++		return
++	}
++	status, e = dockerRead(r.Context(), transport, "/containers/"+id+"/json", &second)
++	if e != nil || status != 200 || !second.valid(id) || !reflect.DeepEqual(first, second) {
++		dockerError(w, 409, "Publication target changed during observation")
++		return
++	}
++	after, ok := samplePublicationV2(second, published, generation)
++	if !ok || !reflect.DeepEqual(before, after) {
++		dockerError(w, 409, "Publication generation changed during observation")
++		return
++	}
++	result := struct {
++		Version      int                    `json:"version"`
++		ReadAt       string                 `json:"readAt"`
++		ContainerID  string                 `json:"containerId"`
++		StartedAt    string                 `json:"startedAt"`
++		Running      bool                   `json:"running"`
++		Publications []publicationV2Binding `json:"publications"`
++	}{2, time.Now().UTC().Format(time.RFC3339Nano), id, second.State.StartedAt, true, after}
++	w.Header().Set("Content-Type", "application/json")
++	w.Header().Set("Cache-Control", "no-store")
++	_ = json.NewEncoder(w).Encode(result)
++}
+diff --git a/rdd/pkg/socketbridge/publication_v2_windows_test.go b/rdd/pkg/socketbridge/publication_v2_windows_test.go
+new file mode 100644
+--- /dev/null
++++ b/rdd/pkg/socketbridge/publication_v2_windows_test.go
+@@ -0,0 +1,235 @@
++// SPDX-License-Identifier: Apache-2.0
++//go:build windows
++
++package socketbridge
++
++import (
++	"context"
++	"encoding/json"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++)
++
++const publicationFixtureID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
++
++func TestPublicationV2PreservesV1AndDockerRoutes(t *testing.T) {
++	transport := publicationFixtureTransport(func(r *http.Request) (*http.Response, error) {
++		if r.URL.Path != "/containers/json" {
++			t.Fatal("v1 route changed")
++		}
++		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[{"ID":"` + publicationFixtureID + `","Ports":[{"IP":"0.0.0.0","PublicPort":8080,"Type":"tcp"}]}]`))}, nil
++	})
++	forwarded := 0
++	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { forwarded++; w.WriteHeader(204) })
++	handler := withPortLifecycle(next, transport, func(string, string) bool { return true }, nil, func(string, string) uint64 { return 42 })
++	recorder := httptest.NewRecorder()
++	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/orbwin/port-status", nil))
++	if recorder.Code != 200 || strings.TrimSpace(recorder.Body.String()) != `[{"containerId":"`+publicationFixtureID+`","port":8080,"protocol":"tcp","published":true}]` {
++		t.Fatal("v1 response changed")
++	}
++	recorder = httptest.NewRecorder()
++	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/_ping", nil))
++	if forwarded != 1 || recorder.Code != 204 {
++		t.Fatal("ordinary Docker forwarding changed")
++	}
++}
++
++type publicationFixtureTransport func(*http.Request) (*http.Response, error)
++
++func (f publicationFixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
++func publicationFixture(t *testing.T) publicationV2Container {
++	t.Helper()
++	var c publicationV2Container
++	err := json.Unmarshal([]byte(`{"ID":"`+publicationFixtureID+`","State":{"Running":true,"Paused":false,"Restarting":false,"Dead":false,"StartedAt":"2026-10-25T01:00:00Z"},"HostConfig":{"NetworkMode":"bridge","PortBindings":{"80/tcp":[{"HostIp":"127.0.0.1","HostPort":"8080"}]}},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}]}}}`), &c)
++	if err != nil {
++		t.Fatal(err)
++	}
++	return c
++}
++func publicationFixtureHandler(t *testing.T, first, second publicationV2Container, published PortPublication, generation PortGeneration) (*httptest.ResponseRecorder, int) {
++	t.Helper()
++	reads := 0
++	transport := publicationFixtureTransport(func(r *http.Request) (*http.Response, error) {
++		if r.Method != http.MethodGet || r.URL.Host != "orbwin-guest" || r.URL.Path != "/containers/"+publicationFixtureID+"/json" || r.URL.RawQuery != "" {
++			t.Fatal("non-exact inspection")
++		}
++		reads++
++		value := first
++		if reads == 2 {
++			value = second
++		}
++		if reads > 2 {
++			t.Fatal("extra inspection")
++		}
++		data, err := json.Marshal(value)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
++	})
++	recorder := httptest.NewRecorder()
++	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("private route forwarded") })
++	handler := withPortLifecycle(next, transport, published, nil, generation)
++	handler.ServeHTTP(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil))
++	return recorder, reads
++}
++func TestPublicationV2ExactStableObservation(t *testing.T) {
++	c := publicationFixture(t)
++	for _, active := range []bool{false, true} {
++		recorder, reads := publicationFixtureHandler(t, c, c, func(protocol, port string) bool {
++			if protocol != "tcp" || port != "8080" {
++				t.Fatal("wrong listener")
++			}
++			return active
++		}, func(string, string) uint64 { return 42 })
++		if recorder.Code != 200 || reads != 2 || recorder.Header().Get("Cache-Control") != "no-store" {
++			t.Fatalf("status %d reads %d", recorder.Code, reads)
++		}
++		var value struct {
++			Version                        int
++			ReadAt, ContainerID, StartedAt string
++			Running                        bool
++			Publications                   []publicationV2Binding
++		}
++		if json.Unmarshal(recorder.Body.Bytes(), &value) != nil || value.Version != 2 || value.ContainerID != publicationFixtureID || value.StartedAt != c.State.StartedAt || !value.Running || len(value.Publications) != 1 || value.Publications[0].Published != active || value.Publications[0].Generation != 42 {
++			t.Fatal("lost exact incarnation/publication")
++		}
++		if stamp, err := time.Parse(time.RFC3339Nano, value.ReadAt); err != nil || time.Since(stamp) > time.Second {
++			t.Fatal("invalid observation time")
++		}
++	}
++}
++func TestPublicationV2RefusesChangedIncarnationOrGeneration(t *testing.T) {
++	for _, change := range []string{"restart", "recreate", "binding", "generation", "publication"} {
++		t.Run(change, func(t *testing.T) {
++			first, second := publicationFixture(t), publicationFixture(t)
++			if change == "restart" {
++				second.State.StartedAt = "2026-10-25T02:00:00Z"
++			}
++			if change == "recreate" {
++				second.ID = strings.Repeat("b", 64)
++			}
++			if change == "binding" {
++				second.NetworkSettings.Ports["80/tcp"][0].HostPort = "8081"
++			}
++			generations, publications := 0, 0
++			recorder, _ := publicationFixtureHandler(t, first, second, func(string, string) bool { publications++; return change != "publication" || publications == 1 }, func(string, string) uint64 {
++				generations++
++				if change == "generation" {
++					return uint64(generations)
++				}
++				return 42
++			})
++			if recorder.Code != 409 {
++				t.Fatalf("changed tuple accepted: %d", recorder.Code)
++			}
++		})
++	}
++}
++func TestPublicationV2RefusesIncompleteOrUnusableState(t *testing.T) {
++	for _, kind := range []string{"missing-state", "missing-running", "missing-paused", "missing-restarting", "missing-dead", "stopped", "paused", "restarting", "dead", "missing-start", "none", "host", "no-published-callback", "no-generation-callback", "zero-generation"} {
++		t.Run(kind, func(t *testing.T) {
++			c := publicationFixture(t)
++			yes, no := true, false
++			switch kind {
++			case "missing-state":
++				c.State = nil
++			case "missing-running":
++				c.State.Running = nil
++			case "missing-paused":
++				c.State.Paused = nil
++			case "missing-restarting":
++				c.State.Restarting = nil
++			case "missing-dead":
++				c.State.Dead = nil
++			case "stopped":
++				c.State.Running = &no
++			case "paused":
++				c.State.Paused = &yes
++			case "restarting":
++				c.State.Restarting = &yes
++			case "dead":
++				c.State.Dead = &yes
++			case "missing-start":
++				c.State.StartedAt = ""
++			case "none", "host":
++				c.HostConfig.NetworkMode = kind
++			}
++			var published PortPublication = func(string, string) bool { return true }
++			var generation PortGeneration = func(string, string) uint64 { return 42 }
++			if kind == "no-published-callback" {
++				published = nil
++			}
++			if kind == "no-generation-callback" {
++				generation = nil
++			}
++			if kind == "zero-generation" {
++				generation = func(string, string) uint64 { return 0 }
++			}
++			recorder, _ := publicationFixtureHandler(t, c, c, published, generation)
++			if recorder.Code != 409 {
++				t.Fatalf("incomplete state accepted: %d", recorder.Code)
++			}
++		})
++	}
++}
++func TestPublicationV2RefusesAmbiguousOrOversizedBindings(t *testing.T) {
++	for _, kind := range []string{"duplicate", "unconfigured", "noncanonical", "foreign-ip", "bad-protocol", "too-many-runtime", "too-many-configured", "too-many-keys"} {
++		t.Run(kind, func(t *testing.T) {
++			c := publicationFixture(t)
++			b := dockerBinding{HostIP: "0.0.0.0", HostPort: "8080"}
++			switch kind {
++			case "duplicate":
++				c.NetworkSettings.Ports["81/tcp"] = []dockerBinding{b}
++				c.HostConfig.PortBindings["81/tcp"] = []dockerBinding{b}
++			case "unconfigured":
++				delete(c.HostConfig.PortBindings, "80/tcp")
++			case "noncanonical":
++				c.NetworkSettings.Ports["80/tcp"][0].HostPort = "08080"
++			case "foreign-ip":
++				c.NetworkSettings.Ports["80/tcp"][0].HostIP = "192.168.1.2"
++			case "bad-protocol":
++				c.NetworkSettings.Ports["80/sctp"] = []dockerBinding{b}
++			case "too-many-runtime":
++				c.NetworkSettings.Ports["80/tcp"] = make([]dockerBinding, 257)
++			case "too-many-configured":
++				c.HostConfig.PortBindings["80/tcp"] = make([]dockerBinding, 257)
++			case "too-many-keys":
++				for i := 0; i < 257; i++ {
++					c.NetworkSettings.Ports[strings.Repeat("x", i+1)] = nil
++				}
++			}
++			recorder, _ := publicationFixtureHandler(t, c, c, func(string, string) bool { return true }, func(string, string) uint64 { return 42 })
++			if recorder.Code != 409 {
++				t.Fatalf("ambiguous bindings accepted: %d", recorder.Code)
++			}
++		})
++	}
++}
++func TestPublicationV2RejectsAliasesAndPropagatesCancellation(t *testing.T) {
++	calls := 0
++	transport := publicationFixtureTransport(func(r *http.Request) (*http.Response, error) { calls++; return nil, r.Context().Err() })
++	for _, suffix := range []string{"name", strings.Repeat("A", 64), publicationFixtureID + "/extra", publicationFixtureID + "?all=true"} {
++		recorder := httptest.NewRecorder()
++		publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+suffix, nil), transport, nil, nil)
++		if recorder.Code != 400 || calls != 0 {
++			t.Fatal("invalid identity reached transport")
++		}
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	cancel()
++	recorder := httptest.NewRecorder()
++	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil).WithContext(ctx), transport, nil, nil)
++	if recorder.Code != 409 || calls != 1 {
++		t.Fatal("cancelled read not contained")
++	}
++	recorder = httptest.NewRecorder()
++	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil), nil, nil, nil)
++	if recorder.Code != 409 {
++		t.Fatal("missing transport accepted")
++	}
++}

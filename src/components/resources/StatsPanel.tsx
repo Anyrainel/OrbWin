@@ -1,44 +1,50 @@
 import { useEffect, useRef, useState } from "react";
 import * as backend from "../../backend";
-import { append, percent } from "./model";
-
-type Sample = { cpu?: number; memory?: number; raw: Record<string, unknown> };
-const limit = 60;
-const interval = 3000;
+import { append } from "./model";
+import { containDialogTab } from "../shell/dialog-focus";
+import { ActivitySampler } from "./activity-sampler";
+import {
+  formatBytes,
+  parseStats,
+  sampleLimit,
+  samplingIntervals,
+  type StatsSample,
+} from "./stats-model";
 
 function Sparkline({
   label,
   values,
+  percent = false,
 }: {
   label: string;
-  values: (number | undefined)[];
+  values: number[];
+  percent?: boolean;
 }) {
-  const known = values.filter((value): value is number => value !== undefined);
-  const latest = known.at(-1);
-  // CPU can exceed 100% on multiple cores; scale to the larger of both.
-  const top = Math.max(100, ...known);
+  const format = percent
+    ? (value: number) => `${value.toFixed(1)}%`
+    : formatBytes;
+  const latest = values.at(-1);
+  const peak = Math.max(0, ...values);
+  const top = Math.max(percent ? 100 : 1, peak);
   const points = values
-    .map((value, index) =>
-      value === undefined
-        ? null
-        : // Right-aligned so the newest sample is always at the edge.
-          `${((limit - values.length + index) / (limit - 1)) * 120},${30 - (value / top) * 28}`,
+    .map(
+      (value, index) =>
+        `${((sampleLimit - values.length + index) / (sampleLimit - 1)) * 120},${30 - (value / top) * 28}`,
     )
-    .filter(Boolean)
     .join(" ");
   return (
     <figure className="sparkline">
       <figcaption>
         <span>{label}</span>
-        <strong>{latest === undefined ? "—" : `${latest.toFixed(1)}%`}</strong>
+        <strong>{latest === undefined ? "—" : format(latest)}</strong>
       </figcaption>
       <svg
         viewBox="0 0 120 32"
         preserveAspectRatio="none"
         role="img"
         aria-label={
-          known.length
-            ? `${label}: latest ${latest!.toFixed(1)}%, peak ${Math.max(...known).toFixed(1)}% over ${known.length} samples`
+          values.length
+            ? `${label}: latest ${format(latest!)}, peak ${format(peak)} over ${values.length} samples`
             : `${label}: no samples yet`
         }
       >
@@ -49,118 +55,227 @@ function Sparkline({
   );
 }
 
-// Polls `docker stats --no-stream` while visible. History lives only in this
-// component (bounded to `limit` samples) and resets when the target changes.
-export function StatsPanel({ target }: { target: string }) {
-  const [samples, setSamples] = useState<Sample[]>([]);
+// A target change gets a fresh polling owner and bounded, view-local history.
+export function StatsPanel({ target }: { target?: string }) {
+  return <StatsView key={target ?? "engine"} target={target} />;
+}
+function StatsView({ target }: { target?: string }) {
+  const [samples, setSamples] = useState<StatsSample[]>([]);
   const [message, setMessage] = useState("");
   const [pending, setPending] = useState(false);
   const [live, setLive] = useState(true);
-  const active = useRef(false);
-  const controller = useRef<AbortController | null>(null);
-  async function read() {
-    if (active.current) return;
-    active.current = true;
-    setPending(true);
-    const abort = new AbortController();
-    controller.current = abort;
-    let output = "";
-    try {
-      const outcome = await backend.run(
-        crypto.randomUUID(),
-        { kind: "stats", target },
-        (chunk) => {
-          output += chunk;
-        },
-        abort.signal,
-      );
-      if (abort.signal.aborted) return;
-      if (!outcome.success) return setMessage(outcome.message);
-      const raw = JSON.parse(output.trim().split("\n").at(-1) ?? "");
-      setSamples((history) =>
-        append(
-          history,
-          { cpu: percent(raw.CPUPerc), memory: percent(raw.MemPerc), raw },
-          limit,
-        ),
-      );
-      setMessage("");
-    } catch (error) {
-      if (!abort.signal.aborted)
-        setMessage(
-          error instanceof SyntaxError
-            ? "The engine returned an unreadable stats sample."
-            : String(error),
+  const [interval, setIntervalMs] = useState(5000);
+  const [sampledAt, setSampledAt] = useState("");
+  const sampler = useRef<ActivitySampler<StatsSample> | null>(null);
+  useEffect(() => {
+    const owner = new ActivitySampler<StatsSample>(
+      async (signal) => {
+        let output = "";
+        let overflow = false;
+        const outcome = await backend.run(
+          crypto.randomUUID(),
+          target ? { kind: "stats", target } : { kind: "engineStats" },
+          (chunk, stream) => {
+            if (stream === "stderr") return;
+            if (output.length + chunk.length > 2 * 1024 * 1024) {
+              overflow = true;
+            } else output += chunk;
+          },
+          signal,
         );
-    } finally {
-      active.current = false;
-      setPending(false);
-    }
-  }
-  useEffect(() => {
-    // Deferred so a development double-mount cancels before reading.
-    const timer = window.setTimeout(() => void read(), 0);
+        if (overflow)
+          throw new Error(
+            "Stats exceeded the view's output limit. Narrow the selection.",
+          );
+        signal.throwIfAborted();
+        if (!outcome.success) throw new Error(outcome.message);
+        return parseStats(output, !target, target);
+      },
+      (event) => {
+        if (event.kind === "reading") {
+          setPending(true);
+          setMessage("");
+        } else if (event.kind === "cancelling") setMessage("Cancelling read…");
+        else if (event.kind === "cancelled") {
+          setPending(false);
+          setMessage("Read cancelled; previous samples retained.");
+        } else if (event.kind === "settled") setPending(false);
+        else if (event.kind === "error") setMessage(event.message);
+        else if (event.kind === "sample") {
+          setSamples((history) => append(history, event.sample, sampleLimit));
+          setSampledAt(new Date().toLocaleTimeString());
+          setMessage("");
+        }
+      },
+      {
+        defer: (callback) => {
+          const timer = window.setTimeout(callback, 0);
+          return () => window.clearTimeout(timer);
+        },
+        repeat: (callback, milliseconds) => {
+          const timer = window.setInterval(callback, milliseconds);
+          return () => window.clearInterval(timer);
+        },
+        visible: () => document.visibilityState === "visible",
+      },
+    );
+    sampler.current = owner;
     return () => {
-      window.clearTimeout(timer);
-      controller.current?.abort();
+      owner.dispose();
+      if (sampler.current === owner) sampler.current = null;
     };
-  }, [target]);
+  }, []);
   useEffect(() => {
-    if (!live) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void read();
-    }, interval);
-    return () => window.clearInterval(timer);
-  }, [target, live]);
-  const latest = samples.at(-1)?.raw;
+    sampler.current?.configure(live, interval);
+  }, [live, interval]);
   return (
-    <section className="stats-panel">
+    <section
+      className="stats-panel"
+      aria-label={target ? "Container activity" : "Engine container activity"}
+    >
       <div className="action-row">
         <label>
           <input
             type="checkbox"
             checked={live}
-            onChange={(e) => setLive(e.target.checked)}
+            onChange={(event) => setLive(event.target.checked)}
           />{" "}
-          Refresh every 3 seconds
+          Live sampling
+        </label>
+        <label>
+          Interval{" "}
+          <select
+            value={interval}
+            onChange={(event) => setIntervalMs(Number(event.target.value))}
+          >
+            {samplingIntervals.map((value) => (
+              <option key={value} value={value}>
+                {value / 1000} seconds
+              </option>
+            ))}
+          </select>
         </label>
         <button
           className="button"
           disabled={pending}
-          onClick={() => void read()}
+          onClick={() => void sampler.current?.read()}
         >
           Read current stats
         </button>
+        {pending && (
+          <button
+            className="button"
+            onClick={() => {
+              setLive(false);
+              sampler.current?.cancel();
+            }}
+          >
+            Cancel read
+          </button>
+        )}
       </div>
       <p role="status">
-        {message ||
-          (samples.length
-            ? `${samples.length} of ${limit} samples retained in this view only.`
-            : pending
-              ? "Reading stats…"
-              : "No samples yet.")}
+        {message
+          ? `${message} ${sampledAt ? `Charts retain the last successful sample at ${sampledAt}.` : ""}`
+          : pending
+            ? "Reading stats…"
+            : samples.length
+              ? `Last sample ${sampledAt}. ${samples.length} of ${sampleLimit} samples retained in this view only.`
+              : "No samples yet."}
       </p>
-      <div className="sparklines">
-        <Sparkline label="CPU" values={samples.map((s) => s.cpu)} />
-        <Sparkline label="Memory" values={samples.map((s) => s.memory)} />
-      </div>
-      {latest && (
-        <dl className="detail-properties">
-          {(
-            [
-              ["Memory usage", latest.MemUsage],
-              ["Network I/O", latest.NetIO],
-              ["Block I/O", latest.BlockIO],
-              ["Processes", latest.PIDs],
-            ] as const
-          ).map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{String(value ?? "—")}</dd>
-            </div>
-          ))}
-        </dl>
+      {!target && (
+        <p>
+          Totals across {samples.at(-1)?.containers ?? "—"} running containers,
+          including Kubernetes. CPU can exceed 100% across cores. These totals
+          exclude the engine VM's own resource use.
+        </p>
       )}
+      <div className="sparklines">
+        <Sparkline
+          label="CPU"
+          values={samples.map((sample) => sample.cpu)}
+          percent
+        />
+        <Sparkline
+          label="Memory usage"
+          values={samples.map((sample) => sample.memory)}
+        />
+        <Sparkline
+          label="Network received"
+          values={samples.map((sample) => sample.networkIn)}
+        />
+        <Sparkline
+          label="Network sent"
+          values={samples.map((sample) => sample.networkOut)}
+        />
+        <Sparkline
+          label="Block read"
+          values={samples.map((sample) => sample.blockRead)}
+        />
+        <Sparkline
+          label="Block written"
+          values={samples.map((sample) => sample.blockWrite)}
+        />
+      </div>
+      <p>
+        Memory is current usage. I/O shows rounded cumulative counters, not
+        rates; container restarts or membership changes can lower totals.
+        Sampling pauses while this window is hidden. Closing this view discards
+        history.
+      </p>
     </section>
+  );
+}
+
+export function EngineActivity() {
+  const [open, setOpen] = useState(false);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dismiss = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open || !dialog.current) return;
+    const element = dialog.current;
+    element.showModal();
+    dismiss.current?.focus();
+    return () => {
+      element.close();
+      trigger.current?.focus();
+    };
+  }, [open]);
+  return (
+    <div>
+      <button
+        className="button"
+        ref={trigger}
+        aria-expanded={open}
+        aria-controls="engine-activity"
+        onClick={() => setOpen(true)}
+      >
+        Engine activity
+      </button>
+      {open && (
+        <dialog
+          ref={dialog}
+          id="engine-activity"
+          className="operation-dialog"
+          aria-labelledby="engine-activity-title"
+          onKeyDown={containDialogTab}
+          onCancel={(event) => {
+            event.preventDefault();
+            setOpen(false);
+          }}
+        >
+          <h2 id="engine-activity-title">Engine container activity</h2>
+          <button
+            ref={dismiss}
+            className="button"
+            onClick={() => setOpen(false)}
+          >
+            Close activity
+          </button>
+          <StatsPanel />
+        </dialog>
+      )}
+    </div>
   );
 }

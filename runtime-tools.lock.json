@@ -3,39 +3,126 @@
   "tools": [
     {
       "path": "bin/docker.exe",
-      "version": "29.9.2",
-      "url": "https://github.com/rancher-sandbox/rancher-desktop-docker-cli/releases/download/v29.9.2/docker-windows-amd64.exe",
-      "sha256": "459737f65198e0c7e5b5bd3bc91170ea30145dff38e069bc7abc9ada28ee0f13"
+      "version": "v29.9.2-rd-orbwin.1",
+      "sha256": "c1a06a809659ad54cbe9f3930ee98dee8320372fcedd4b3f5f43ce19f8fd797d",
+      "previousGeneratedSha256": "459737f65198e0c7e5b5bd3bc91170ea30145dff38e069bc7abc9ada28ee0f13",
+      "localSource": {
+        "name": "dockerCli",
+        "target": "windowsAmd64"
+      }
     },
     {
       "path": "docker-cli-plugins/docker-buildx.exe",
-      "version": "0.38.1",
-      "url": "https://github.com/docker/buildx/releases/download/v0.38.1/buildx-v0.38.1.windows-amd64.exe",
-      "sha256": "fd2e18501910dd535ea3aa7f69010b3cfdfba0f47aa27674124554386dfa26f3"
+      "version": "v0.38.1-orbwin.1",
+      "sha256": "ab095bf8c0b8ec3d2bf703858ac6e8f79528e8be55f9f3660c7214c68c685aa3",
+      "localSource": {
+        "name": "buildx",
+        "target": "windowsAmd64"
+      },
+      "previousGeneratedSha256": "fd2e18501910dd535ea3aa7f69010b3cfdfba0f47aa27674124554386dfa26f3"
     },
     {
       "path": "docker-cli-plugins/docker-compose.exe",
-      "version": "5.6.1",
-      "url": "https://github.com/docker/compose/releases/download/v5.6.1/docker-compose-windows-x86_64.exe",
-      "sha256": "91b1492f0a923427651e2b955739d732ac36b8191193bf4799e62f3e3525c4cd"
+      "version": "5.6.1-orbwin.2",
+      "sha256": "26e5a19bbfdf0abdb825f43e3caeae1856f6711b9ed7afa5d808c3665d2e7bab",
+      "previousGeneratedSha256": "8ae10b9ac12cf3bc5b8dc748a19561a844551f16c07354cac7f5480f420eae80",
+      "localSource": {
+        "name": "compose",
+        "target": "windowsAmd64"
+      }
     },
     {
       "path": "linux/docker",
-      "version": "29.9.2",
-      "url": "https://github.com/rancher-sandbox/rancher-desktop-docker-cli/releases/download/v29.9.2/docker-linux-amd64",
-      "sha256": "2b3470ed501ae182223ca6d7e43fd92260eeec5cbfeb502418dc5153d25531f9"
+      "version": "v29.9.2-rd-orbwin.1",
+      "sha256": "4a4b4c19ba2a7bdc0aaa5f0af7a7bf5ff9c4b1121a5c6a393419ef393b4e8b3c",
+      "previousGeneratedSha256": "2b3470ed501ae182223ca6d7e43fd92260eeec5cbfeb502418dc5153d25531f9",
+      "localSource": {
+        "name": "dockerCli",
+        "target": "linuxAmd64"
+      }
     },
     {
       "path": "linux/docker-compose",
-      "version": "5.6.1",
-      "url": "https://github.com/docker/compose/releases/download/v5.6.1/docker-compose-linux-x86_64",
-      "sha256": "47737f4236e6d3ccea7291995203f8f018058783b4c3a9469119811a0b5db8c0"
+      "version": "5.6.1-orbwin.2",
+      "sha256": "1bea79a771907dc66258bf4a5aa5f3ed31d34020ad2c069edc15bb56eaaf77ac",
+      "previousGeneratedSha256": "483c6e7ebcd41f661f16fd8a564206f72951b31fd15dadf4056eab006796d4ad",
+      "localSource": {
+        "name": "compose",
+        "target": "linuxAmd64"
+      }
     },
     {
       "path": "linux/docker-buildx",
-      "version": "0.38.1",
-      "url": "https://github.com/docker/buildx/releases/download/v0.38.1/buildx-v0.38.1.linux-amd64",
-      "sha256": "e25d5cd675092bb5d1d03632fdc46cdf3fede7b514dc5f023a105e00d3ce5ad4"
+      "version": "v0.38.1-orbwin.1",
+      "sha256": "6705d6c6dedfc045d01d96e1cb7550def41fd39bc4ece0553b21193d592cd159",
+      "localSource": {
+        "name": "buildx",
+        "target": "linuxAmd64"
+      },
+      "previousGeneratedSha256": "e25d5cd675092bb5d1d03632fdc46cdf3fede7b514dc5f023a105e00d3ce5ad4"
     }
-  ]
+  ],
+  "localSources": {
+    "dockerCli": {
+      "kind": "orbwin-docker-cli-v1",
+      "manifest": "artifacts/docker-cli/candidate-7fba8bb0-fc17-453f-97e9-60540d1ae244/docker-cli-manifest.json",
+      "manifestSha256": "d603e0c8900f2d9bbcdd808d3b5538d8b476271b0ecc8d2a8b3b7692aeaaa3a7"
+    },
+    "compose": {
+      "kind": "orbwin-compose-v1",
+      "recipe": "scripts/build-compose.mjs",
+      "repository": "https://github.com/docker/compose.git",
+      "tag": "v5.6.1",
+      "tagObject": "02f05e3787e5b2e83220923907bb014e6a36b359",
+      "commit": "6cbc19a3fd59e305fb814dca4d854a4fb67d2941",
+      "version": "v5.6.1-orbwin.2",
+      "manifestSha256": "d722130fda7e3de53c7f2aa5427eb544a1a09288a340e2ed4bf695a9f5091893",
+      "buildScript": "scripts/build-compose.mjs",
+      "buildScriptSha256": "6188a402b4a5210ee7bc9c97bab8f09e7e789bbdc0b064070f2937b031c99ad8",
+      "patch": "patches/compose/0001-explicit-local-dockerfile-read.patch",
+      "patchSha256": "4471013594081363973c1ad072aa53809cdf951f3f4efd1998eda5c793648766",
+      "goExecutableSha256": "83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d",
+      "goArchiveSha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff",
+      "upstreamLockSha256": "5b9b95e3bca14320f8ea17c6bcb6df92b0382a44e1649a8c4099407aaf06bfa7",
+      "dependencyPatch": "patches/compose/0002-http2-dependency-floor.patch",
+      "dependencyPatchSha256": "2794b78f3fc23ead824a4f46693500785a866c0a446442cb413e236f3fa04c5f",
+      "recipeDependencies": {
+        "scripts/tool-candidate-build.mjs": "86ab5e4cb5c6393cdbb23c7bb426347087f0c351c6a65e0cda7e1c887f0e735a",
+        "scripts/build-output.mjs": "1598e413ac02a5e00cf13e5b277915fce91a0ea45c351aada5fbec95bc2facb0"
+      },
+      "manifest": "artifacts/coherent-compose-20261106-1/compose-manifest.json",
+      "sourceDirectory": ".upstream/compose"
+    },
+    "buildx": {
+      "kind": "orbwin-buildx-v1",
+      "recipe": "scripts/build-buildx.mjs",
+      "repository": "https://github.com/docker/buildx",
+      "tag": "v0.38.1",
+      "commit": "0dbe87f36ed472fe36b6796c3f70b4210a731fc5",
+      "module": "github.com/docker/buildx",
+      "moduleVersion": "v0.38.1",
+      "moduleSum": "h1:7J7nReQndOnDTUFjun6otmQqehoi9sCOvRwFjkngYlc=",
+      "goModSum": "h1:4lEDxmaYDJ17HtXTND9A53BaDoHCJbk5WUgcmfipN7Q=",
+      "sourceZipSha256": "4cd8755c2468a8a226cdb22bbbf18aee4a876d98f3d4f38e34f2a5f519f9b8ee",
+      "sourceDirectory": "artifacts/buildx/source",
+      "version": "v0.38.1-orbwin.1",
+      "buildScript": "scripts/build-buildx.mjs",
+      "buildScriptSha256": "2636a272a66d31a6be6999f87a4b05c89eb4364ea2be0e5b6d54da85b1705877",
+      "patch": "patches/buildx/0001-http2-dependency-floor.patch",
+      "patchSha256": "496f3d23feb5c5e13a27883062a11b07a14c6ffbceb5242c944dde5917e52cf5",
+      "goExecutableSha256": "83b7ba66215e696414fa49462d0db2da4f4cf15c7bebd42f0b189fa04866999d",
+      "goArchiveSha256": "f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff",
+      "upstreamLockSha256": "5b9b95e3bca14320f8ea17c6bcb6df92b0382a44e1649a8c4099407aaf06bfa7",
+      "provenanceScript": "scripts/buildx-provenance.mjs",
+      "provenanceScriptSha256": "b163f3e35441efdbedade6b8d1545129330308d15a8ed85cb6989bd6b9097eb6",
+      "sourceBaseline": "patches/buildx/source-baseline.json",
+      "sourceBaselineSha256": "8a7819c50bbf9f36375d97f907d0c5911b535bfebbd2c388a81fd8bd2844f28c",
+      "manifestSha256": "b824de412af0df653634d6d8c6866e0dd216dc66ee53e1879aa3e87d327c52ae",
+      "recipeDependencies": {
+        "scripts/tool-candidate-build.mjs": "86ab5e4cb5c6393cdbb23c7bb426347087f0c351c6a65e0cda7e1c887f0e735a",
+        "scripts/build-output.mjs": "1598e413ac02a5e00cf13e5b277915fce91a0ea45c351aada5fbec95bc2facb0"
+      },
+      "manifest": "artifacts/coherent-buildx-20261106-1/buildx-manifest.json"
+    }
+  }
 }

@@ -3,6 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import * as backend from "../../backend";
 import { retryBusyRead } from "../../model/read-retry";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
+import { ClientRecovery } from "./ClientRecovery";
 
 type Saved = { server: string; username: string };
 export function Registries() {
@@ -15,6 +16,7 @@ export function Registries() {
   const [busy, setBusy] = useState<"login" | "forget" | null>(null);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<Saved | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const active = useRef<AbortController | null>(null);
   const read = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -126,7 +128,7 @@ export function Registries() {
   }
   function login(event: FormEvent) {
     event.preventDefault();
-    if (!desktop || busy || !username || !secret) return;
+    if (!desktop || busy || recoveryBusy || !username || !secret) return;
     void perform({ kind: "registryLogin", server, username, secret });
   }
   return (
@@ -149,7 +151,7 @@ export function Registries() {
         </p>
       )}
       <form className="registry-form" onSubmit={login}>
-        <fieldset disabled={!desktop || busy !== null}>
+        <fieldset disabled={!desktop || busy !== null || recoveryBusy}>
           <label>
             Registry
             <input
@@ -242,7 +244,7 @@ export function Registries() {
                 <td>
                   <button
                     className="button danger"
-                    disabled={busy !== null}
+                    disabled={busy !== null || recoveryBusy}
                     onClick={() => setConfirm(item)}
                     aria-label={`Forget OrbWin credentials for ${item.server}`}
                   >
@@ -254,6 +256,7 @@ export function Registries() {
           </tbody>
         </table>
       )}
+      <ClientRecovery disabled={busy !== null} onBusy={setRecoveryBusy} />
       {confirm && (
         <ConfirmDialog
           title={`Forget credentials for ${confirm.server}?`}

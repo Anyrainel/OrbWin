@@ -8,6 +8,7 @@ import {
 } from "react";
 import * as backend from "../../backend";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SetupDecisionDialog } from "./SetupDecisionDialog";
 import { useToast } from "./Toasts";
 
 // One shared lifecycle client for the sidebar switch, first-run screen,
@@ -75,6 +76,13 @@ export function EngineLifecycleProvider({
   const [confirm, setConfirm] = useState<
     "setup" | "stop" | "restart" | "reconnect" | "prepareUpdate" | null
   >(null);
+  const [decision, setDecision] = useState<
+    (backend.SetupDecision & { operation: string }) | null
+  >(null);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  const [decisionError, setDecisionError] = useState("");
+  const operation = useRef<string | null>(null);
+  const decisionSending = useRef(false);
   const active = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const settled = useRef(onSettled);
@@ -120,8 +128,10 @@ export function EngineLifecycleProvider({
       for (const step of steps) {
         if (abort.signal.aborted) break;
         setStage(step.stage);
+        const id = crypto.randomUUID();
+        operation.current = id;
         const reply = await backend.run(
-          crypto.randomUUID(),
+          id,
           next === "setup"
             ? { kind: "setup" }
             : next === "prepareUpdate"
@@ -129,6 +139,14 @@ export function EngineLifecycleProvider({
               : { kind: "engine", running: step.running },
           (chunk) => setOutput((previous) => (previous + chunk).slice(-65536)),
           abort.signal,
+          (pending) => {
+            if (operation.current !== id || abort.signal.aborted) return;
+            decisionSending.current = false;
+            setDecisionError("");
+            setDecisionBusy(false);
+            setDecision({ ...pending, operation: id });
+            setStage("Waiting for your setup choice…");
+          },
         );
         outcome = {
           action: next,
@@ -154,6 +172,11 @@ export function EngineLifecycleProvider({
         message: String(error),
       };
     } finally {
+      operation.current = null;
+      decisionSending.current = false;
+      setDecision(null);
+      setDecisionBusy(false);
+      setDecisionError("");
       setStage("Refreshing engine status…");
       try {
         await settled.current();
@@ -209,11 +232,54 @@ export function EngineLifecycleProvider({
     requestPrepareUpdate: () => {
       if (!active.current) setConfirm("prepareUpdate");
     },
-    cancel: () => controller.current?.abort(),
+    cancel: () => (decision ? leaveDecision() : controller.current?.abort()),
   };
+  async function continueDecision() {
+    if (
+      !decision ||
+      decisionSending.current ||
+      operation.current !== decision.operation
+    )
+      return;
+    const pending = decision;
+    decisionSending.current = true;
+    setDecisionBusy(true);
+    setDecisionError("");
+    try {
+      await backend.continueSetup(pending.operation, pending.nonce);
+      if (operation.current === pending.operation) {
+        setDecision(null);
+        setStage("Continuing the original setup…");
+      }
+    } catch {
+      if (operation.current === pending.operation)
+        setDecisionError(
+          "This setup decision could not be delivered. Leave setup and check its status before retrying.",
+        );
+    } finally {
+      if (operation.current === pending.operation) {
+        decisionSending.current = false;
+        setDecisionBusy(false);
+      }
+    }
+  }
+  function leaveDecision() {
+    if (!decision || operation.current !== decision.operation) return;
+    setDecision(null);
+    setStage("Leaving setup…");
+    controller.current?.abort();
+  }
   return (
     <Context.Provider value={value}>
       {children}
+      {decision && (
+        <SetupDecisionDialog
+          busy={decisionBusy}
+          error={decisionError}
+          onContinue={() => void continueDecision()}
+          onLeave={leaveDecision}
+        />
+      )}
       {confirm && (
         <ConfirmDialog
           title={

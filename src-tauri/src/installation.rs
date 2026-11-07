@@ -1,10 +1,11 @@
-//! Explicit first-run CLI transaction. rdd is the sole guest orchestrator.
-//! Intent precedes startup; identity follows ownership and actual readiness.
-//! Cancellation retains data and may leave rdd converging: Resume is idempotent.
+//! Product setup delegates ownership, classification, publication and lifetime
+//! to the fixed Go role. The separate opted-in qualification path remains below.
+#[cfg(test)]
+use crate::process;
 use crate::{
     engine,
     operations::{self, Outcome, Output},
-    process, runtime,
+    runtime,
 };
 use std::path::{Path, PathBuf};
 use tauri::ipc::Channel;
@@ -13,6 +14,9 @@ use tokio::{process::Command, sync::oneshot};
 #[cfg(test)]
 #[path = "installation_qualification.rs"]
 mod qualification;
+
+#[path = "installation_preflight.rs"]
+mod private_authority_preflight;
 
 #[cfg(windows)]
 pub(crate) fn registration(home: &Path, name: &str) -> Result<bool, String> {
@@ -147,7 +151,7 @@ fn stage(output: &Channel<Output>, message: &str) -> Result<(), String> {
 }
 
 async fn rdd(
-    binary: &Path,
+    binary: &crate::runtime_cache::CachedExecutable,
     location: &SetupLocation,
     args: &[&str],
     input: Option<&[u8]>,
@@ -158,6 +162,7 @@ async fn rdd(
     if cancelled.try_recv().is_ok() {
         return Err("Setup cancelled before dispatch. Backend work may still be finishing from an earlier step.".into());
     }
+    binary.recheck()?;
     let home = runtime::cli_path(&location.directory.join("home"))?;
     let short = home.join(format!(".rd{}", location.instance));
     let mut command = Command::new(binary);
@@ -218,14 +223,233 @@ struct SetupLocation {
 pub(crate) async fn setup(
     output: &Channel<Output>,
     cancelled: &mut oneshot::Receiver<()>,
+    decisions: &operations::SetupDecisionControl,
 ) -> Result<Outcome, String> {
-    let location = SetupLocation {
-        directory: runtime::state_dir()?,
-        instance: "orbwin",
-        vm: "orbwin",
-        endpoint: engine::ENDPOINT,
+    setup_product(output, cancelled, decisions).await
+}
+
+async fn wait_setup_choice(
+    mut observer: crate::private_setup_client::SetupObserver,
+    nonce: String,
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+    decisions: &operations::SetupDecisionControl,
+    operation_deadline: std::time::Instant,
+) -> Result<(crate::private_setup_client::SetupObserver, bool), String> {
+    let mut response = decisions.pending(&nonce)?;
+    let mut leaving = output
+        .send(Output::SetupDecision {
+            reason: "prior-app-absent",
+            nonce,
+        })
+        .is_err();
+    let choice_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5 * 60);
+    let pause_deadline;
+    loop {
+        if leaving {
+            // The original write task is awaited even if its viewer disappears.
+            // No shared registry mutex is held across this blocking pipe I/O.
+            let work = tokio::task::spawn_blocking(move || {
+                let result = observer.request_pause();
+                (observer, result)
+            });
+            let (returned, result) = work.await.map_err(|_| {
+                "Setup pause delivery did not settle; check status before retrying.".to_owned()
+            })?;
+            observer = returned;
+            result?;
+            pause_deadline = operation_deadline
+                .min(std::time::Instant::now() + std::time::Duration::from_secs(75));
+            break;
+        }
+        match observer.poll(operation_deadline)? {
+            Some(crate::private_setup_client::ObservationData::SetupPaused) => {
+                return Ok((observer, false))
+            }
+            Some(_) => return Err("Unexpected event while waiting for a setup decision.".into()),
+            None => {}
+        }
+        tokio::select! {biased;
+            _=&mut *cancelled=>leaving=true,
+            _=tokio::time::sleep_until(tokio::time::Instant::from_std(choice_deadline.min(operation_deadline)))=>leaving=true,
+            reply=response.response()=>{
+                match reply {
+                    Ok(nonce)=>{
+                        // Once claimed, delivery may have effects. Never abort
+                        // or kill on cancellation while this original write runs.
+                        let work=tokio::task::spawn_blocking(move || {let result=observer.continue_original_setup(&nonce);(observer,result)});
+                        let (returned,result)=work.await.map_err(|_|"Setup decision delivery did not settle; the engine may continue starting. Check status.".to_owned())?;
+                        observer=returned;result?;return Ok((observer,true));
+                    }
+                    Err(_)=>leaving=true,
+                }
+            },
+            _=tokio::time::sleep(std::time::Duration::from_millis(100))=>{},
+        }
+    }
+    // Leave remains incomplete until the actual Go positive settlement event.
+    // EOF/deadline/malformed output is unknown, not a successful pause.
+    loop {
+        match observer.poll(pause_deadline)? {
+            Some(crate::private_setup_client::ObservationData::SetupPaused) => {
+                return Ok((observer, false))
+            }
+            Some(_) => {
+                return Err("Setup changed while pausing; check status before retrying.".into())
+            }
+            None => tokio::time::sleep(std::time::Duration::from_millis(100)).await,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SetupDetach {
+    Cancelled,
+    Deadline,
+}
+
+// Once birth is dispatched, cancellation must settle the ORIGINAL task. Never
+// abort it or drop its returned persistent observer before it actually returns.
+async fn settle_setup_birth<T: Send + 'static>(
+    mut birth: tokio::task::JoinHandle<Result<T, String>>,
+    cancelled: &mut oneshot::Receiver<()>,
+    deadline: std::time::Instant,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<(T, Option<SetupDetach>), String> {
+    let detached = if deadline <= std::time::Instant::now() {
+        Some(SetupDetach::Deadline)
+    } else {
+        tokio::select! {biased;
+            _=&mut *cancelled=>Some(SetupDetach::Cancelled),
+            _=tokio::time::sleep_until(tokio::time::Instant::from_std(deadline))=>Some(SetupDetach::Deadline),
+            result=&mut birth=>return result.map_err(|_|"Engine startup could not be confirmed. Its state is unknown. Check status and setup diagnostics before retrying.".to_owned())?.map(|value|(value,None)),
+        }
     };
-    setup_at(&location, output, cancelled).await
+    stop.store(true, std::sync::atomic::Ordering::Release);
+    let value=birth.await.map_err(|_|"Engine startup could not be confirmed after waiting stopped. Its state is unknown. Check status and setup diagnostics before retrying.".to_owned())??;
+    Ok((value, detached))
+}
+
+async fn setup_product(
+    output: &Channel<Output>,
+    cancelled: &mut oneshot::Receiver<()>,
+    decisions: &operations::SetupDecisionControl,
+) -> Result<Outcome, String> {
+    setup_admission_not_cancelled(cancelled)?;
+    stage(
+        output,
+        "Verifying bundled components before requesting OrbWin setup…",
+    )?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20 * 60);
+    // Only the existing executable cache/private host log are admitted here.
+    // Go alone selects/creates the engine home, fence, service and runtime record.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let preparing = stop.clone();
+    let birth = tokio::spawn(async move {
+        let (binary,log)=tokio::task::spawn_blocking(move || {
+        let (binary, _manifest) = runtime::backend()?;
+        if preparing.load(std::sync::atomic::Ordering::Acquire)
+            || std::time::Instant::now() >= deadline
+        {
+            return Err("Setup waiting stopped while checking the bundled components. Check status before retrying.".into());
+        }
+        let log = crate::runtime_cache::create_private_setup_log()?;
+        if preparing.load(std::sync::atomic::Ordering::Acquire)
+            || std::time::Instant::now() >= deadline
+        {
+            return Err(
+                "Setup waiting stopped while preparing the diagnostic log. Check status before retrying."
+                    .into(),
+            );
+        }
+        Ok::<_,String>((binary,log))
+      }).await.map_err(|_|"Setup cache preparation worker unavailable.".to_owned())??;
+        crate::private_setup_client::SetupObserver::start(binary, log).await
+    });
+    let (mut observer, detached) = settle_setup_birth(birth, cancelled, deadline, &stop).await?;
+    if detached.is_some() {
+        drop(observer); // EOF: pre-admission cancellation or post-admission DATA detach.
+        return Err("Setup observation was cancelled or timed out while process creation settled. The backend may be running or recovering; inspect status before retrying. Data and diagnostic logs are retained.".into());
+    }
+    loop {
+        // No mutex or blocking receive is held across the cancellation select.
+        match observer.poll(deadline) {
+            Ok(Some(crate::private_setup_client::ObservationData::StartupAdmitted)) => {
+                if stage(
+                    output,
+                    "Starting the engine. Guest components may take several minutes to download…",
+                )
+                .is_err()
+                {
+                    drop(observer);
+                    return Err("Setup viewer disconnected after dispatch. The backend may continue; inspect status and recovery before retrying. Data and logs are retained.".into());
+                }
+            }
+            Ok(Some(crate::private_setup_client::ObservationData::SetupIncomplete { stage })) => {
+                // DATA reports this observation attempt failed. Dropping the
+                // observer closes input only; the original child/cache custody
+                // remains with its sole actual-exit waiter. Never cancel/kill.
+                drop(observer);
+                return Err(stage.message().into());
+            }
+            Ok(Some(crate::private_setup_client::ObservationData::RuntimePublished)) => break,
+            Ok(Some(crate::private_setup_client::ObservationData::DecisionRequired { nonce })) => {
+                let (returned, continued) =
+                    wait_setup_choice(observer, nonce, output, cancelled, decisions, deadline)
+                        .await?;
+                observer = returned;
+                if !continued {
+                    return Ok(setup_paused_outcome(output));
+                }
+                stage(output,"Continuing the original setup. Guest components may take several minutes to download…")?;
+            }
+            Ok(Some(crate::private_setup_client::ObservationData::SetupPaused)) => {
+                return Ok(setup_paused_outcome(output));
+            }
+            Ok(None) => {}
+            Err(_) => {
+                drop(observer);
+                return Err("Setup observation was lost or timed out. The backend may be running or recovering; inspect status before retrying. Data and logs are retained.".into());
+            }
+        }
+        tokio::select! {biased;
+            _=&mut *cancelled=>{drop(observer);return Err("Setup observation cancelled. The engine may continue starting; inspect status and recovery before retrying. Data and logs are retained.".into())},
+            _=tokio::time::sleep(std::time::Duration::from_millis(100))=>{},
+        }
+    }
+    drop(observer); // Publication is DATA; this closes observation, never the service.
+    if stage(
+        output,
+        "Engine setup finished. Checking the desktop connection…",
+    )
+    .is_err()
+    {
+        return Err("The engine finished setup, but its window disconnected before the desktop connection check. Check engine status; data and logs were retained.".into());
+    }
+    let validation = async {
+        let target = tokio::task::spawn_blocking(engine::target)
+            .await
+            .map_err(|_| "The desktop connection check did not finish.".to_owned())??;
+        engine::check(&target).await
+    };
+    let checked = tokio::select! {biased;
+        _=&mut *cancelled=>return Err("The engine finished setup; the desktop connection check was cancelled. Engine data and logs were retained. Check status before retrying.".into()),
+        _=tokio::time::sleep_until(tokio::time::Instant::from_std(deadline))=>return Err("The engine finished setup; the desktop connection check timed out. Engine data and logs were retained. Check status before retrying.".into()),
+        result=validation=>result,
+    };
+    checked.map_err(|_|"The engine finished setup, but OrbWin could not check the desktop connection. Engine data and logs were retained. Open diagnostics; if private Docker settings need recovery, use Settings > Registries > Private Docker settings, then check status again.".to_owned())?;
+    Ok(Outcome {
+        success: true,
+        mutation: true,
+        interrupted: false,
+        exit_code: Some(0),
+        message: "OrbWin is ready. Closing the app leaves the backend running.".into(),
+    })
+}
+
+fn setup_paused_outcome(output: &Channel<Output>) -> Outcome {
+    let _ = output.send(Output::SetupPaused);
+    Outcome{success:false,mutation:true,interrupted:true,exit_code:Some(0),message:"Setup is paused. Existing files and logs were kept. Resume when you are ready, or open diagnostics.".into()}
 }
 
 pub(crate) async fn prepare_update(
@@ -283,7 +507,9 @@ pub(crate) async fn prepare_update(
         70,
     )
     .await?;
-    executable_released(&binary)?;
+    // The content-addressed cache remains retained and is never replaced by
+    // an installer. Test the packaged application resource being replaced.
+    executable_released(&runtime::backend_dir().join("rdd.exe"))?;
     Ok(Outcome {success:true,mutation:true,interrupted:false,exit_code:Some(0),message:"OrbWin is ready for application replacement. Close OrbWin, then run the installer or uninstaller. Engine data and registration are retained.".into()})
 }
 
@@ -299,11 +525,23 @@ fn executable_released(binary: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
 async fn setup_at(
     location: &SetupLocation,
     output: &Channel<Output>,
     cancelled: &mut oneshot::Receiver<()>,
 ) -> Result<Outcome, String> {
+    // Exact existing qualification scope; no product fallback reaches this writer.
+    if location.instance != "orbwin-proof"
+        || location.vm != "orbwin-proof"
+        || location.endpoint != "npipe:////./pipe/docker-rancher-desktop-orbwin-proof"
+    {
+        return Err(
+            "Only the explicit isolated qualification instance can use this setup transaction."
+                .into(),
+        );
+    }
+    setup_admission_not_cancelled(cancelled)?;
     stage(
         output,
         "Verifying bundled components and Windows Subsystem for Linux…",
@@ -312,7 +550,7 @@ async fn setup_at(
         .await
         .map_err(|e| e.to_string())??;
     let docker = runtime::docker()?;
-    runtime::credentials()?;
+    let credential_lease = runtime::credentials()?;
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
     process::read_command(
         &PathBuf::from(system).join("System32/wsl.exe"),
@@ -321,11 +559,7 @@ async fn setup_at(
     .await?;
     let directory = runtime::cli_path(&location.directory)?;
     let home = directory.join("home");
-    let short = home.join(format!(".rd{}", location.instance));
-    let service_dir = home.join(format!(
-        "AppData/Local/rancher-desktop-{}",
-        location.instance
-    ));
+    let service_paths = crate::backend_paths::read_setup(&binary, &home, location.instance).await?;
     let distro = format!("lima-{}", location.vm);
     std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     #[cfg(windows)]
@@ -395,7 +629,50 @@ async fn setup_at(
         )?;
     }
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-    runtime::configure_client(&short.join("docker"))?;
+    setup_admission_not_cancelled(cancelled)?;
+    // Admit the actual private client before any service change. Do not create
+    // a public master here: that would itself trigger legacy-import refusal.
+    // Existing public data remains untouched and requires explicit review.
+    let client_snapshot = {
+        let docker = docker.clone();
+        let credentials = credential_lease.clone();
+        tokio::task::spawn_blocking(move || crate::client_config::reader(docker, credentials))
+            .await
+            .map_err(|_| "Setup private client admission did not complete.".to_string())?
+            .map_err(|error| {
+                if error.kind == crate::client_config::ErrorKind::RequiresLegacyReview {
+                    "Existing OrbWin Docker settings require migration review before setup. Open Settings > Registries > Private Docker settings and choose Review previous OrbWin settings for import. The settings were retained and no service change was sent.".to_string()
+                } else {
+                    error.to_string()
+                }
+            })?
+    };
+    // The selected Windows candidate requires a private authority.init bound to
+    // its saved arguments. Observe it BEFORE any Stop/Create/Start, including
+    // Resume with a live old engine or an absent publication. This read neither
+    // initializes legacy state nor claims that future startup cannot fail.
+    // The separate fixed qualification instance retains its management-only
+    // upstream path; it is not a product authority or legacy migration bypass.
+    if location.instance == "orbwin" {
+        stage(output, "Checking the bundled backend's management authority compatibility before any service change…")?;
+        let observed = rdd(
+            &binary,
+            location,
+            &["--instance", "orbwin", "service", "private-authority-preflight", "--json"],
+            None,
+            output,
+            cancelled,
+            15,
+        )
+        .await
+        .map_err(|_| "The read-only authority compatibility check did not complete. No service change was sent; retain the existing engine and inspect setup diagnostics before resuming.".to_string())?;
+        // Missing authority files cannot erase a recorded engine or an actual
+        // owned WSL registration and authorize a fresh default configuration.
+        private_authority_preflight::validate(
+            &observed,
+            service_paths.args_file.exists() || prior.is_some() || registered,
+        )?;
+    }
     if prior
         .as_ref()
         .is_some_and(|old| old["binarySha256"] != manifest["binarySha256"])
@@ -407,12 +684,9 @@ async fn setup_at(
         match std::fs::OpenOptions::new().read(true).write(true).open(pipe) {
             Ok(connection) => {
                 drop(connection);
-                let actual = process::read_command(&docker, &[
-                    "--config", short.join("docker").to_str().ok_or("Invalid client path")?,
-                    "--host", location.endpoint, "info", "--format", "{{.ID}} {{.OSType}}"
-                ]).await?;
+                let actual = setup_engine_info(&docker, &credential_lease, &client_snapshot, location.endpoint, cancelled).await?;
                 let old = prior.as_ref().ok_or("Missing previous engine identity")?;
-                if actual.trim() != format!("{} linux", old["daemonId"].as_str().ok_or("Missing daemon ID")?) {
+                if actual["ID"].as_str() != Some(old["daemonId"].as_str().ok_or("Missing daemon ID")?) {
                     return Err("The live endpoint differs from the recorded Linux engine. No service change was sent.".into());
                 }
             }
@@ -432,7 +706,7 @@ async fn setup_at(
         )
         .await?;
     }
-    if !service_dir.join("args.json").exists() {
+    if !service_paths.args_file.exists() {
         stage(output, "Creating the private rdd service configuration…")?;
         rdd(
             &binary,
@@ -462,7 +736,7 @@ async fn setup_at(
     )
     .await?;
     // The management service is now ready. Read it explicitly without autostart.
-    let config = service_dir.join("config.yaml");
+    let config = service_paths.config;
     let existing = rdd(
         &binary,
         location,
@@ -558,21 +832,14 @@ async fn setup_at(
             "Provisioning did not create the expected owned guest. Logs were retained.".into(),
         );
     }
-    let client_config = short.join("docker");
-    let info = process::read_command(
+    let info = setup_engine_info(
         &docker,
-        &[
-            "--config",
-            client_config.to_str().ok_or("Invalid client config")?,
-            "--host",
-            location.endpoint,
-            "info",
-            "--format",
-            "{{json .}}",
-        ],
+        &credential_lease,
+        &client_snapshot,
+        location.endpoint,
+        cancelled,
     )
     .await?;
-    let info: serde_json::Value = serde_json::from_str(&info).map_err(|e| e.to_string())?;
     let id = info["ID"]
         .as_str()
         .filter(|id| !id.is_empty())
@@ -598,6 +865,10 @@ async fn setup_at(
             return Err("The existing daemon ID changed; no identity was replaced.".into());
         }
     }
+    // This request releases its actual generation reference before publication.
+    // Other independent readers may still own it; no global-reader quiescence
+    // is required or inferred. A last-owner native close fault is observable.
+    client_snapshot.close().map_err(|_| "Setup read the engine, but private client cleanup could not be confirmed. Existing data was retained and no new identity was published. Close and reopen OrbWin before resuming.".to_string())?;
     let record = serde_json::json!({"endpoint":location.endpoint,"home":home,"daemonId":id,"sourceCommit":manifest["sourceCommit"],"binarySha256":manifest["binarySha256"],"identityVerified":true});
     runtime::write_json(&identity, &record)?;
     stage(
@@ -613,9 +884,118 @@ async fn setup_at(
     })
 }
 
+async fn setup_engine_info(
+    docker: &crate::runtime_cache::CachedExecutable,
+    credentials: &crate::runtime_cache::CachedExecutable,
+    snapshot: &crate::client_config::ClientConfigSnapshot,
+    endpoint: &str,
+    cancelled: &mut oneshot::Receiver<()>,
+) -> Result<serde_json::Value, String> {
+    // Dropping the caller future signals cancellation to the detached atomic
+    // worker. Its snapshot clone remains owned through positive native release,
+    // including when this setup transaction has already returned cancellation.
+    tokio::select! {
+        biased;
+        _ = cancelled => Err("Setup cancelled during the engine identity read. No identity was published; inspect status before resuming.".into()),
+        info = engine::setup_info(docker.clone(), credentials.clone(), snapshot.clone(), endpoint) => info,
+    }
+}
+
+fn setup_admission_not_cancelled(cancelled: &mut oneshot::Receiver<()>) -> Result<(), String> {
+    if matches!(
+        cancelled.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ) {
+        Ok(())
+    } else {
+        Err("Setup cancelled before private client admission. Existing settings and engine data were retained; no service change was sent.".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn setup_birth_cancellation_awaits_original_result_before_detach() {
+        let (cancel, mut cancelled) = oneshot::channel();
+        let (release, ready) = oneshot::channel();
+        let (started, seen) = oneshot::channel();
+        let birth = tokio::spawn(async move {
+            started.send(()).unwrap();
+            ready.await.unwrap();
+            Ok::<_, String>("original birth result")
+        });
+        seen.await.unwrap();
+        cancel.send(()).unwrap();
+        let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = stopped.clone();
+        let settlement = tokio::spawn(async move {
+            settle_setup_birth(
+                birth,
+                &mut cancelled,
+                std::time::Instant::now() + std::time::Duration::from_secs(10),
+                &stop,
+            )
+            .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while !stopped.load(std::sync::atomic::Ordering::Acquire) {
+                tokio::task::yield_now().await
+            }
+        })
+        .await
+        .unwrap();
+        assert!(!settlement.is_finished());
+        release.send(()).unwrap();
+        assert_eq!(
+            settlement.await.unwrap().unwrap(),
+            ("original birth result", Some(SetupDetach::Cancelled))
+        );
+    }
+    #[tokio::test]
+    async fn setup_birth_deadline_still_settles_and_panic_is_unknown() {
+        let (_cancel, mut cancelled) = oneshot::channel();
+        let birth = tokio::spawn(async { Ok::<_, String>(17) });
+        assert_eq!(
+            settle_setup_birth(
+                birth,
+                &mut cancelled,
+                std::time::Instant::now(),
+                &std::sync::atomic::AtomicBool::new(false)
+            )
+            .await
+            .unwrap(),
+            (17, Some(SetupDetach::Deadline))
+        );
+        let (_cancel, mut cancelled) = oneshot::channel();
+        let birth = tokio::spawn(async {
+            panic!("inert birth panic");
+            #[allow(unreachable_code)]
+            Ok::<(), String>(())
+        });
+        assert!(settle_setup_birth(
+            birth,
+            &mut cancelled,
+            std::time::Instant::now() + std::time::Duration::from_secs(10),
+            &std::sync::atomic::AtomicBool::new(false)
+        )
+        .await
+        .unwrap_err()
+        .contains("unknown"));
+    }
+
+    #[test]
+    fn setup_private_admission_refuses_pending_or_disconnected_cancellation() {
+        let (sender, mut receiver) = oneshot::channel();
+        assert!(setup_admission_not_cancelled(&mut receiver).is_ok());
+        sender.send(()).unwrap();
+        assert!(setup_admission_not_cancelled(&mut receiver).is_err());
+        assert!(setup_admission_not_cancelled(&mut receiver).is_err());
+        let (sender, mut receiver) = oneshot::channel::<()>();
+        drop(sender);
+        assert!(setup_admission_not_cancelled(&mut receiver).is_err());
+    }
 
     #[cfg(windows)]
     #[test]

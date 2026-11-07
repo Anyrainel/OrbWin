@@ -1,0 +1,93 @@
+diff --git a/cli-plugins/manager/manager.go b/cli-plugins/manager/manager.go
+index bf39853..76748cd 100644
+--- a/cli-plugins/manager/manager.go
++++ b/cli-plugins/manager/manager.go
+@@ -43,6 +43,12 @@ func (e errPluginNotFound) Error() string {
+ //
+ // [ConfigFile.CLIPluginsExtraDirs]: https://pkg.go.dev/github.com/docker/cli@v26.1.4+incompatible/cli/config/configfile#ConfigFile.CLIPluginsExtraDirs
+ func getPluginDirs(cfg *configfile.ConfigFile) []string {
++	if directory, managed := os.LookupEnv("ORBWIN_DOCKER_MANAGED_PLUGINS"); managed {
++		// The product caller retains native leases for this fixed directory and
++		// its executables. Managed calls must not fall back to ambient plugins,
++		// including metadata and hooks. Unset preserves ordinary Docker behavior.
++		return orbwinManagedPluginDirs(directory)
++	}
+ 	var pluginDirs []string
+ 
+ 	if cfg != nil {
+@@ -233,3 +239,10 @@ func PluginRunCommand(dockerCli config.Provider, name string, rootcmd *cobra.Com
+ func IsPluginCommand(cmd *cobra.Command) bool {
+ 	return cmd.Annotations[metadata.CommandAnnotationPlugin] == "true"
+ }
++
++func orbwinManagedPluginDirs(directory string) []string {
++	if directory == "" || len(directory) > 32760 || !filepath.IsAbs(directory) || strings.ContainsAny(directory, "\x00\r\n") {
++		return nil
++	}
++	return []string{filepath.Clean(directory)}
++}
+diff --git a/cli-plugins/manager/manager_orbwin_test.go b/cli-plugins/manager/manager_orbwin_test.go
+new file mode 100644
+--- /dev/null
++++ b/cli-plugins/manager/manager_orbwin_test.go
+@@ -0,0 +1,60 @@
++package manager
++
++import (
++	"os"
++	"path/filepath"
++	"reflect"
++	"strings"
++	"testing"
++
++	"github.com/docker/cli/cli/config/configfile"
++)
++
++func TestOrbWinManagedPluginDirectoryClosesEveryAmbientFallback(t *testing.T) {
++	selected := filepath.Join(t.TempDir(), "selected", "..", "pinned")
++	cfg := &configfile.ConfigFile{CLIPluginsExtraDirs: []string{filepath.Join(t.TempDir(), "unreviewed")}}
++	t.Setenv("ORBWIN_DOCKER_MANAGED_PLUGINS", selected)
++	if got := getPluginDirs(cfg); !reflect.DeepEqual(got, []string{filepath.Clean(selected)}) {
++		t.Fatalf("managed plugin discovery escaped the selected directory: %v", got)
++	}
++	if got := getPluginDirs(nil); !reflect.DeepEqual(got, []string{filepath.Clean(selected)}) {
++		t.Fatalf("nil configuration restored an ambient fallback: %v", got)
++	}
++}
++
++func TestOrbWinInvalidManagedPluginDirectoryNeverFallsBack(t *testing.T) {
++	for _, tc := range []struct{ name, input string }{{"empty", ""}, {"relative", "relative"}, {"traversal", "../outside"}, {"nul", "bad\x00name"}, {"lf", "bad\nname"}, {"cr", filepath.Join(t.TempDir(), "bad\rname")}, {"overlong", filepath.Join(t.TempDir(), strings.Repeat("a", 32761))}} {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := orbwinManagedPluginDirs(tc.input); len(got) != 0 {
++				t.Fatalf("invalid managed route accepted: %v", got)
++			}
++			// OS environments cannot represent NUL and bound total UTF-16 length.
++			if strings.ContainsRune(tc.input, 0) || len(tc.input) > 32760 {
++				return
++			}
++			t.Setenv("ORBWIN_DOCKER_MANAGED_PLUGINS", tc.input)
++			if got := getPluginDirs(&configfile.ConfigFile{CLIPluginsExtraDirs: []string{t.TempDir()}}); len(got) != 0 {
++				t.Fatalf("invalid managed routing fell back: %v", got)
++			}
++		})
++	}
++}
++
++func TestOrbWinUnsetManagedPluginDirectoryPreservesUserExtensionMode(t *testing.T) {
++	previous, present := os.LookupEnv("ORBWIN_DOCKER_MANAGED_PLUGINS")
++	if err := os.Unsetenv("ORBWIN_DOCKER_MANAGED_PLUGINS"); err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() {
++		if present {
++			_ = os.Setenv("ORBWIN_DOCKER_MANAGED_PLUGINS", previous)
++		} else {
++			_ = os.Unsetenv("ORBWIN_DOCKER_MANAGED_PLUGINS")
++		}
++	})
++	extension := filepath.Join(t.TempDir(), "explicit-extension")
++	got := getPluginDirs(&configfile.ConfigFile{CLIPluginsExtraDirs: []string{extension}})
++	if len(got) < 2 || got[0] != extension {
++		t.Fatalf("ordinary upstream extension mode changed: %v", got)
++	}
++}

@@ -1,0 +1,3640 @@
+{
+  "schema": 1,
+  "module": "github.com/lima-vm/lima/v2",
+  "version": "v2.3.0-beta.1.0.20261005214905-0ae2df64800a",
+  "upstreamModuleSum": "h1:K7eqntsK4hwmmYGDBvvxx2gurUkU1HVyYmPJVDBQo5Y=",
+  "upstreamGoModSum": "h1:RXtitG7HwKeIjjpOizu06sHXr50szp1OJAB/iafmq3c=",
+  "upstreamZipSha256": "6b0ac633d8928014704a188ee3a6a40c7a3727d371503fe4702dd54864bcfc6c",
+  "upstreamZipBytes": 2346257,
+  "rddGoModSha256": "25bf5c59ead7811914389699996dd5c64d1f2ab5150f908981164d1f6df4aa2c",
+  "rddGoSumSha256": "e9ff6caed89c38d0e3896576b17c389472cc0cf42eb10363c0e27c2d30296ada",
+  "baseline": [
+    {
+      "path": ".codespellrc",
+      "sha256": "ce8ec79bb62843229a251653baf2e0a892a1e4b7abb2be92e1f4dfbccced091a",
+      "bytes": 404
+    },
+    {
+      "path": ".editorconfig",
+      "sha256": "0927374f9b0ad3f36dfbc5e22014c86257f0c1ad89554c8f7dac656cc4bab3ac",
+      "bytes": 192
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.yaml",
+      "sha256": "2467b2207c7f04573ab6fd10a3765001167bd1b2298efb8a8b91e37d2bd5c230",
+      "bytes": 194
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "sha256": "d845cdd639dc68bfdf677ad38e7cd69f6b24c4cfd3d75bccb546ca172812d272",
+      "bytes": 361
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.yaml",
+      "sha256": "e51aa05669896698a9a5e9021168677f4daa5669e69b58fbe6fc3db15ce91654",
+      "bytes": 113
+    },
+    {
+      "path": ".github/actions/setup_cache_for_template/action.yml",
+      "sha256": "19603f5550d59212cb209b0e83eaf9d3bf9b8ed5d2c1f020cb963ca5c332e884",
+      "bytes": 3343
+    },
+    {
+      "path": ".github/actions/upload_failure_logs_if_exists/action.yml",
+      "sha256": "468f9bac0ca90168edd354ef85fcf657d51dc9e3264dd222a62d8eec9fc56aee",
+      "bytes": 1160
+    },
+    {
+      "path": ".github/actions/windows_msys2_prep/action.yml",
+      "sha256": "60d722a3c64f0fc7d39c878f68ca72fce31f86d736434b5edb6d80da9773340f",
+      "bytes": 1427
+    },
+    {
+      "path": ".github/actions/windows_plain_build/action.yml",
+      "sha256": "1aec43cbd917a42a153ded2cb79ebf97e542955f6bcafb30fb89004691e3c6dd",
+      "bytes": 1036
+    },
+    {
+      "path": ".github/actions/windows_plain_host/action.yml",
+      "sha256": "c4f2092dc74cace29c8d4b0eb2ccac544f7797cd97af7dfa666632e2a9d7dea6",
+      "bytes": 7630
+    },
+    {
+      "path": ".github/actions/windows_plain_smoke_test/action.yml",
+      "sha256": "cda92608614cc8b5c8028e5eed3e00a78b13d0ddbbcd058ee2ad290671de99fd",
+      "bytes": 3163
+    },
+    {
+      "path": ".github/actions/windows_plain_templates/action.yml",
+      "sha256": "2f0baec3132e69dc8a5f6c16b6f9b5a36f5652d836514aee8556232d570c9d53",
+      "bytes": 3353
+    },
+    {
+      "path": ".github/actions/windows_qemu_install/action.yml",
+      "sha256": "3cc5193056ca20f461bc91b8fdbb1a5bfa3b217465f16879ed8b8263ab174e21",
+      "bytes": 438
+    },
+    {
+      "path": ".github/actions/windows_wsl2_setup/action.yml",
+      "sha256": "c7c8f1e186e6dac863bb85d8a9e9471b9159901e5e3fed05e6e4e2977f9fa3f2",
+      "bytes": 787
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "sha256": "8aa79eb103e1b4d9bc87bdb00ce24dc96e58cb8547fa9604e22950301fe06689",
+      "bytes": 661
+    },
+    {
+      "path": ".github/workflows/codeql.yaml",
+      "sha256": "e0a0d1f01a086860567e80e4c7cf32684484f6a8950a3412c4de6fd129c51cbd",
+      "bytes": 1823
+    },
+    {
+      "path": ".github/workflows/lint-quick.yml",
+      "sha256": "4fa2188070a1ac5a89e23867a35863616589065461621fe659c05c07a986f8d8",
+      "bytes": 1473
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "256b44edadb00a605122520b54f5c96dde1b3ad4bccf1fd2dcb4407d7cbfc30c",
+      "bytes": 5193
+    },
+    {
+      "path": ".github/workflows/scorecard.yml",
+      "sha256": "20ed7d0a46381ee2fd168a077d43e7f95749db54e1997ab125bf94b26b6a4ef6",
+      "bytes": 2609
+    },
+    {
+      "path": ".github/workflows/spell.yml",
+      "sha256": "b8bcbbd050fa61a73b58f37dad8b9a80e25d88a9308696c0262ac0f7cf4005be",
+      "bytes": 653
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "sha256": "9b7b11a4eca587782a5a21852f3b12cd3956fc4c17e5feb5e0789d8deac3a8d4",
+      "bytes": 27792
+    },
+    {
+      "path": ".gitignore",
+      "sha256": "443a49b8dbd96d1de7b30083b6cc161b9f7f6c93618d1cb4a4271dc7c0b274b6",
+      "bytes": 102
+    },
+    {
+      "path": ".gitmodules",
+      "sha256": "9d92b9be6a49fb460451c40ad8e5b0a169089339160df264e10f0a9f5def3fb3",
+      "bytes": 563
+    },
+    {
+      "path": ".golangci.yml",
+      "sha256": "abb5d210b06f87df57b556da9412443a09181b96e42c8d7e5a8c662a1a3cf36a",
+      "bytes": 4612
+    },
+    {
+      "path": ".ls-lint.yml",
+      "sha256": "f6eea49a651cbc4a3f473e5f254c871ea3f7d8a447fb88fc9f6cd8c810801e25",
+      "bytes": 970
+    },
+    {
+      "path": ".markdownlint.json",
+      "sha256": "a7ae41ceff1fedd2cf533b5ddc5aa9f71ff841e2f33024ed76f27927373bccc2",
+      "bytes": 233
+    },
+    {
+      "path": ".protolint.yaml",
+      "sha256": "3df95ff72a967adc0105509777c4edb86cb99e441d2f652f5da492a75cce3556",
+      "bytes": 312
+    },
+    {
+      "path": ".shellcheckrc",
+      "sha256": "f1bd461f59c74ba4e3430d1da78784e99af35852305f8491b2a422671a80e43f",
+      "bytes": 22
+    },
+    {
+      "path": ".yamllint",
+      "sha256": "d4a6f41af95872904be0765561f1da6b84dc0b4487e8ba627aca376cb38b1091",
+      "bytes": 307
+    },
+    {
+      "path": "ADOPTERS.md",
+      "sha256": "b39b423cde5fb57ebcb45ff8461c7408275f6f6efb9a3fb7bdb889f50bbee5fa",
+      "bytes": 508
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "8eacebf95c6a0bea024077264d5b52230b60886742d886e0b2e98dd067f5ccdd",
+      "bytes": 2632
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "7ef3db86b0ef991077e0fb94c12b536da2890f8f632468136d73762d4490f0ba",
+      "bytes": 225
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "MAINTAINERS.md",
+      "sha256": "74fe542c14c6c39492586a9c823131dfdb04cb8acb2e790762ec62e4ac1c280c",
+      "bytes": 58
+    },
+    {
+      "path": "Makefile",
+      "sha256": "4c5442435d1253425273c10e3ba7e8d57c8ee0ddc1ce3f3a1812ff1f5117a3de",
+      "bytes": 38950
+    },
+    {
+      "path": "NOTICE",
+      "sha256": "a7e0caed1395c49dfa6ce7dc8aa6362e4daa8369917f56fbe80084c1ae8c765c",
+      "bytes": 963
+    },
+    {
+      "path": "README.md",
+      "sha256": "6fe739cb9e00ef211a1014a3b4f8b522d8a7a44551bf0da67caee32b774cc83d",
+      "bytes": 5041
+    },
+    {
+      "path": "ROADMAP.md",
+      "sha256": "11be97b9d348f88d2ece3b6394cafb9f51aebb5049b60066174cf9c6624cab7c",
+      "bytes": 55
+    },
+    {
+      "path": "cmd/apptainer.lima",
+      "sha256": "317231aa6c7c606032091c895a5ebe6c9cd3c21bdce39c80ca916a63b41529d1",
+      "bytes": 762
+    },
+    {
+      "path": "cmd/docker.lima",
+      "sha256": "b27aa268cf41a6f9348f99da9376612a9d53ae31c0bceaef151b0b735569a367",
+      "bytes": 898
+    },
+    {
+      "path": "cmd/kubectl.lima",
+      "sha256": "1c8da7b909449d8e14c737cc8d3e799018ce10a83c75ca2499f63d266c5c8199",
+      "bytes": 1608
+    },
+    {
+      "path": "cmd/lima",
+      "sha256": "88aeac60dbcb69ec675c0ce9af24d5f66255f4899fa73320402db57925500832",
+      "bytes": 1607
+    },
+    {
+      "path": "cmd/lima-driver-krunkit/main_darwin_arm64.go",
+      "sha256": "aee8aac130b3cd05a6b3eaaff910a548291ec0a7a5e2874d7dd272ee23472e59",
+      "bytes": 351
+    },
+    {
+      "path": "cmd/lima-driver-qemu/main.go",
+      "sha256": "27dc642b7e162419c290570e52d02a5e845d156878b77d1e89e28767dbef9822",
+      "bytes": 345
+    },
+    {
+      "path": "cmd/lima-driver-vz/main_darwin.go",
+      "sha256": "e6a91d78c2f91a69d84afcde0099cea14fa1fa35e2711c2fa8e4fde3a74b3a2d",
+      "bytes": 341
+    },
+    {
+      "path": "cmd/lima-driver-wsl2/main_windows.go",
+      "sha256": "fff5bcfad6b0e1a0c1815ba0f6a954b8ab032d75e50acda3dea1faebc8790f3f",
+      "bytes": 345
+    },
+    {
+      "path": "cmd/lima-guestagent/daemon_linux.go",
+      "sha256": "4f6145c3a9ae639df4312a4eedc41241b8e1b54a26b9883bc533784bfec97aa5",
+      "bytes": 4606
+    },
+    {
+      "path": "cmd/lima-guestagent/fake_cloud_init_darwin.go",
+      "sha256": "e2ca762148f6e705e9505ae58c6f87041a5dee27b3ad9532e714a575b732efee",
+      "bytes": 506
+    },
+    {
+      "path": "cmd/lima-guestagent/install_systemd_linux.go",
+      "sha256": "c5c9bd34283cd84e20190140b5252d12db60809f99c1870c4a1b4826cd0d3e48",
+      "bytes": 3890
+    },
+    {
+      "path": "cmd/lima-guestagent/lima-guestagent.TEMPLATE.service",
+      "sha256": "b36c580a625b2f0ca97bbc89380092d955155efb4a21434bdfb2e11418079334",
+      "bytes": 215
+    },
+    {
+      "path": "cmd/lima-guestagent/main.go",
+      "sha256": "963a6aa7ee0411fee97b6e76f4cdb10cd15a2d2ce355a932c84ea3d986c45baa",
+      "bytes": 986
+    },
+    {
+      "path": "cmd/lima-guestagent/root_darwin.go",
+      "sha256": "094ab23272531905ee02c868a68e62b55ae2458b52fc7f7792083142c1e12680",
+      "bytes": 248
+    },
+    {
+      "path": "cmd/lima-guestagent/root_linux.go",
+      "sha256": "5c2729a2b466736a8a95dcbe8e369fa19840b9796fcc94d348220c7d90ea7c9a",
+      "bytes": 271
+    },
+    {
+      "path": "cmd/lima-guestagent/root_others.go",
+      "sha256": "c1a3c482077649edd45b3e1fdce0e0a1ce679d4fe37de2a5a5e137efc9074ef8",
+      "bytes": 227
+    },
+    {
+      "path": "cmd/lima-privileged-block-device/main_darwin.go",
+      "sha256": "5f0d516b7521c39346302850212a8fc7554fc15c56d43bfadae207211b974eb3",
+      "bytes": 554
+    },
+    {
+      "path": "cmd/lima-privileged-net/main_linux.go",
+      "sha256": "c19ba4fb4cc76242ac94f4e198818e8aa29ad29934a86843771ecdd6cb34777e",
+      "bytes": 2312
+    },
+    {
+      "path": "cmd/lima-privileged-net/network_linux.go",
+      "sha256": "4c36d3b7ee967e2147c9590c71e7f87285742833fc25e3a19867559662fc79f8",
+      "bytes": 15781
+    },
+    {
+      "path": "cmd/lima-privileged-net/sys_linux.go",
+      "sha256": "14df41382fc961f54e27efe24aa994b4001fe55807e7d49aea3f524b9fa2c60e",
+      "bytes": 10098
+    },
+    {
+      "path": "cmd/lima.bat",
+      "sha256": "165632cd1ffef0fe31902dda4718b72aee34b558a60c9922580e315ebedbd759",
+      "bytes": 361
+    },
+    {
+      "path": "cmd/limactl-mcp/main.go",
+      "sha256": "94b22909f275fa3484fb48a12d927fda3d2fc05220abffac8d09003779838c31",
+      "bytes": 6250
+    },
+    {
+      "path": "cmd/limactl-url-fedora-rawhide",
+      "sha256": "aaf3ba78520fffb520613d569a9fe9f1842c300b0d1f8d7ed559856e4f5cd220",
+      "bytes": 2024
+    },
+    {
+      "path": "cmd/limactl/autostart.go",
+      "sha256": "3a4334bb33a621689655e79d3ccca6970bcc60965e64fe50949518fb193b95f4",
+      "bytes": 1662
+    },
+    {
+      "path": "cmd/limactl/autostart_darwin.go",
+      "sha256": "320ae5a32ffec3fc0eefca80d35097a62e64799dc28414d86db089f529649ff3",
+      "bytes": 5834
+    },
+    {
+      "path": "cmd/limactl/autostart_darwin_test.go",
+      "sha256": "b5cd6c0d417e5a464d053bcb6e825231670776d52627f0b56142d268748a9fdf",
+      "bytes": 1205
+    },
+    {
+      "path": "cmd/limactl/autostart_others.go",
+      "sha256": "434053f08324a6149360dd9fd6be4785fd2527e8e8985957f1f50e845e1e514d",
+      "bytes": 1860
+    },
+    {
+      "path": "cmd/limactl/clone.go",
+      "sha256": "1e85676ee4bbd184dd61fd3a4ffbe1cda00a3c68de21dfa44b1afe5f3fba4cb6",
+      "bytes": 4280
+    },
+    {
+      "path": "cmd/limactl/completion.go",
+      "sha256": "6a9c4c4671e2b63a9f2074a8e6f9d56a504b5d97ff7b25593dd038a069f99342",
+      "bytes": 2111
+    },
+    {
+      "path": "cmd/limactl/copy.go",
+      "sha256": "10f61b728dc470050fe198f4543dfbbce40fe72d4601113e3f9a4ea2596c8bce",
+      "bytes": 2729
+    },
+    {
+      "path": "cmd/limactl/debug.go",
+      "sha256": "e9332c6c19938ebe5eb15f60fd7c2d100a645e57b2cc7198394cb83a4ca0716d",
+      "bytes": 1581
+    },
+    {
+      "path": "cmd/limactl/delete.go",
+      "sha256": "27a4ce97b3110d3bed7a925a0a2f53f8a5c009a73be7447737539eaf0e006cfc",
+      "bytes": 3041
+    },
+    {
+      "path": "cmd/limactl/disk.go",
+      "sha256": "8b7a1142a97f115d784c328de1648a5e6682a08e340b6c42465df6f520733f54",
+      "bytes": 12487
+    },
+    {
+      "path": "cmd/limactl/edit.go",
+      "sha256": "2b872295bff2376b5ad53e4b9b62c31303ed1554adab88c9fc655903fd840fb7",
+      "bytes": 6400
+    },
+    {
+      "path": "cmd/limactl/editflags/editflags.go",
+      "sha256": "0f8fbc98b5e7acdbe399774c9dc9a359f0c21eb1257b9bf4d5d4e66ccc84348b",
+      "bytes": 18706
+    },
+    {
+      "path": "cmd/limactl/editflags/editflags_test.go",
+      "sha256": "e2410efd4ae07f45888d8ba6c1620f50e105b61102c88d059af0577796b32cdc",
+      "bytes": 10277
+    },
+    {
+      "path": "cmd/limactl/factory-reset.go",
+      "sha256": "18feb4366879fae05c5f2528f6d589a17a7185d41e42443485ee70c9c6454bf1",
+      "bytes": 2550
+    },
+    {
+      "path": "cmd/limactl/gendoc.go",
+      "sha256": "7d3fbdabbf887d5b27344f22703056b40c5b91902616fd0b1fa7f982b2fd136a",
+      "bytes": 4033
+    },
+    {
+      "path": "cmd/limactl/genschema.go",
+      "sha256": "564b548cdde4a524af0d1be1cc47a8e19dcd9f2435a83b71449756784eac9bb8",
+      "bytes": 2894
+    },
+    {
+      "path": "cmd/limactl/guest-install.go",
+      "sha256": "a73258e32e1cfd5ea02f4e577ecb148c1265de9bf8a303734416ec91fecba2df",
+      "bytes": 4605
+    },
+    {
+      "path": "cmd/limactl/hostagent.go",
+      "sha256": "c832575141604925f6fd0f1abf980550a58e2a61f179455d1b69c0a0e9683232",
+      "bytes": 5509
+    },
+    {
+      "path": "cmd/limactl/hostagent_test.go",
+      "sha256": "bb1164f4adf7c3cf8b4554983a23a9150eb3437b97fb63df926877dfae7194ac",
+      "bytes": 1427
+    },
+    {
+      "path": "cmd/limactl/info.go",
+      "sha256": "2f8e369cf67aac80150e7de586ab9889f0364ff5184a5ce5af4c85c138ca66f4",
+      "bytes": 1309
+    },
+    {
+      "path": "cmd/limactl/list.go",
+      "sha256": "f9151e80861f352aa3c9681c6a4023328dd14067828b65123d44575840484f47",
+      "bytes": 11967
+    },
+    {
+      "path": "cmd/limactl/main.go",
+      "sha256": "ee34363d7da2d8d83dc37dd5e063ceb9b902dd13aa91bbd53e9b99172acc70d0",
+      "bytes": 8561
+    },
+    {
+      "path": "cmd/limactl/main_darwin.go",
+      "sha256": "76aaff9655f3be124e152080226c816979614049364d5518b23a2aff2f2a1ed9",
+      "bytes": 257
+    },
+    {
+      "path": "cmd/limactl/main_darwin_gui.go",
+      "sha256": "84d85bdd17bc468d1470669a13908910dd555089f1206be35c78e1cc88e238ae",
+      "bytes": 501
+    },
+    {
+      "path": "cmd/limactl/main_hcs_windows.go",
+      "sha256": "ba361371ae55d0fe17886c0ddef999a8fc34bc9e0ecda894f29d954479b83945",
+      "bytes": 251
+    },
+    {
+      "path": "cmd/limactl/main_qemu.go",
+      "sha256": "b62ecdc6e428ae0755c9e85d089ffe16c20b3cf11ad741fc4bd290c72ad5ac96",
+      "bytes": 260
+    },
+    {
+      "path": "cmd/limactl/main_wsl2_windows.go",
+      "sha256": "a963702e8e73af6e008ea49cfbf0c1c8d429c2036ee4c52994d7ee696b647ec3",
+      "bytes": 254
+    },
+    {
+      "path": "cmd/limactl/network.go",
+      "sha256": "3a0757dee8a1c6f1e674ee1da0f7b94244925367ac5b044ab8dbf6cb897671f6",
+      "bytes": 7655
+    },
+    {
+      "path": "cmd/limactl/protect.go",
+      "sha256": "a554e8d8906c284ea86c3d09e5e0f96fb58a5202dd570864737ee4a794a7f146",
+      "bytes": 1582
+    },
+    {
+      "path": "cmd/limactl/prune.go",
+      "sha256": "4236deac98c1401e614b3bcc5124abb5b95dd69175a6bc640c96888a0d1dfe44",
+      "bytes": 3958
+    },
+    {
+      "path": "cmd/limactl/restart.go",
+      "sha256": "e7a9071bde46b43a12353129f694f8b008f9ca20e6b2fae87e6db6a7ef3a9dd1",
+      "bytes": 3401
+    },
+    {
+      "path": "cmd/limactl/screenshot.go",
+      "sha256": "e318309dce739131761da88f1d0553467bb91a9ef171c297812b6eec42de01c0",
+      "bytes": 2030
+    },
+    {
+      "path": "cmd/limactl/shell.go",
+      "sha256": "7ec1acf2253f01a8f840365eea60238d6a0ae5297252d586875791d683ff7e82",
+      "bytes": 31436
+    },
+    {
+      "path": "cmd/limactl/shell_test.go",
+      "sha256": "8a355c4b8db179332160b85b9ee02fd158b608bc4bc72a75b662eec2c50caa0d",
+      "bytes": 4932
+    },
+    {
+      "path": "cmd/limactl/show-ssh.go",
+      "sha256": "38105865a787918a72a99a4a5b03ae534f7f9a02af3fc9e03c697d5f31159f41",
+      "bytes": 3723
+    },
+    {
+      "path": "cmd/limactl/snapshot.go",
+      "sha256": "f749b230905864b956181dd7953aa6765e641f5d29b30e7c8a551bcd5fcf6a79",
+      "bytes": 7031
+    },
+    {
+      "path": "cmd/limactl/snapshot_test.go",
+      "sha256": "e60e42d7491637166c0a30ef4b4c71c64406777f5a5c379ba0323476bc2bb22b",
+      "bytes": 1799
+    },
+    {
+      "path": "cmd/limactl/start-at-login.go",
+      "sha256": "86c8f9a90b44019c68607484b68e8f75234c57ae1e9365122db7332acabb065b",
+      "bytes": 900
+    },
+    {
+      "path": "cmd/limactl/start-at-login_unix.go",
+      "sha256": "59c5f76c49f0f2a095d5e72a3dffe4e2c3d6d8a0a9aa62b43f3b74bab16846eb",
+      "bytes": 1708
+    },
+    {
+      "path": "cmd/limactl/start-at-login_windows.go",
+      "sha256": "0463eb22b9fd7382f72448373a96aa89c31be82e59d7ffc4c058f2591d34ba21",
+      "bytes": 313
+    },
+    {
+      "path": "cmd/limactl/start.go",
+      "sha256": "d7cacebc3af9a859a321f6fcb4b71911feab2193ed44a7d7c64c095f3f817810",
+      "bytes": 24336
+    },
+    {
+      "path": "cmd/limactl/start_test.go",
+      "sha256": "b9aa4143393c358c5d3c08588f7d315de4e889935b88868c6b9778f180ec9fa8",
+      "bytes": 3709
+    },
+    {
+      "path": "cmd/limactl/stop.go",
+      "sha256": "0c2bccf3c59422e29485231b84ca1ef362d63861dea8f7b8783c8bf903b693d5",
+      "bytes": 1625
+    },
+    {
+      "path": "cmd/limactl/sudoers.go",
+      "sha256": "85af001087514ac01a91cab99e2118574b225f5143e2c5c59d55dbf132b61e55",
+      "bytes": 2305
+    },
+    {
+      "path": "cmd/limactl/sudoers_darwin.go",
+      "sha256": "81cd828b71795c5ea611909783fde0a421cb9ba9e36727e5aff8356a3f9f39ce",
+      "bytes": 4221
+    },
+    {
+      "path": "cmd/limactl/sudoers_darwin_test.go",
+      "sha256": "00ad188ab91487fbba8a45c4c6a3f585169a793bbb52336d58b472387bad786c",
+      "bytes": 4005
+    },
+    {
+      "path": "cmd/limactl/sudoers_nodarwin.go",
+      "sha256": "bb2b0acf0b892a7ecb20c3abe4d0b2d152926104bc6febb5f401dbf9b1f4f550",
+      "bytes": 311
+    },
+    {
+      "path": "cmd/limactl/tab_completion.go",
+      "sha256": "399d93b84cfc354e20c1782ca35640c8bf177c830063d03d1e6652210d0c1859",
+      "bytes": 2986
+    },
+    {
+      "path": "cmd/limactl/tab_completion_test.go",
+      "sha256": "d4f85c7cb9ee92f08aec5c44e8c4c22387249bd95fc5ff88f8fc520a0f99bff9",
+      "bytes": 1614
+    },
+    {
+      "path": "cmd/limactl/template.go",
+      "sha256": "545f48c9aba060d4b0b6616421ca09adbbc5bbc826bac53dc58417e09d701d6f",
+      "bytes": 8786
+    },
+    {
+      "path": "cmd/limactl/tunnel.go",
+      "sha256": "f9b9c4a3fc361432a67170d03e904af8e0e279fc81cbb130c39adcafff86df49",
+      "bytes": 4267
+    },
+    {
+      "path": "cmd/limactl/unprotect.go",
+      "sha256": "c11b6ce876fb8b4e0359fab4324add9fdd8f7158cb92e1939a60554d153d29af",
+      "bytes": 1419
+    },
+    {
+      "path": "cmd/limactl/usernet.go",
+      "sha256": "8483feb3965770d4feea980db5070da7cfae60a397e010db41becc2e5f7ff259",
+      "bytes": 2707
+    },
+    {
+      "path": "cmd/limactl/watch.go",
+      "sha256": "9a238618d6e4b81fcac7cd479602ab7634dbdd13f9ce5e4aa85c906f28c82435",
+      "bytes": 7817
+    },
+    {
+      "path": "cmd/limactl/yq_restrictions.go",
+      "sha256": "5af7efed3f98cc158aa4d33eb48d07933641b86a7de03f03aaa4aae0d3527174",
+      "bytes": 1102
+    },
+    {
+      "path": "cmd/nerdctl.lima",
+      "sha256": "3034baf0798ca7a9ed0cc98328658ba00785aff4a1f33055f02f8081a32ee70b",
+      "bytes": 323
+    },
+    {
+      "path": "cmd/podman.lima",
+      "sha256": "be4d6158749e51bb6325de2f0c81ce29fea1e89a3c8668272e092512f74ed213",
+      "bytes": 801
+    },
+    {
+      "path": "cmd/yq/yq.go",
+      "sha256": "8a2201611ad79f8b9fc5bb19cbbc4cf083fffa8f8488e71bf4d79f2140624b71",
+      "bytes": 1095
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "9c263f7a98210016b76c98f29bcb2ace3b949d53a054bda72d8be7a1758a15a3",
+      "bytes": 147
+    },
+    {
+      "path": "docs/images/lima-logo-01.svg",
+      "sha256": "1153a469e3fd0d0acb02f0fa15c56760466d6ff4882b08605364edb9f3d1fa8f",
+      "bytes": 4755
+    },
+    {
+      "path": "docs/reports/Ada-Logics-Lima-fuzzing-audit-2024.pdf",
+      "sha256": "6c2e8d9a6eac3fbf4d24f34c70f45eabd066788f3f1acf1117d6450a9f4f38b3",
+      "bytes": 1259676
+    },
+    {
+      "path": "go.mod",
+      "sha256": "ff403cea0206e005a5d8baad29f5557fb0bf37c282c1d1ba4ad3422e795535d5",
+      "bytes": 7134
+    },
+    {
+      "path": "go.sum",
+      "sha256": "099c833140389d18f5b3d45b60e7fdd12d65fa6f4b28ee9048dcb89d4157b9e0",
+      "bytes": 45308
+    },
+    {
+      "path": "hack/allowed-licenses.txt",
+      "sha256": "0a6ef6da54648ee2cd6df7b86834012722dee1d40b925f6d800e600284fe9484",
+      "bytes": 103
+    },
+    {
+      "path": "hack/ansible-test.yaml",
+      "sha256": "a6a26c83f00a5847d595a1012fff35ffee1d4d87223ed45419dfa5a86e05f6f3",
+      "bytes": 156
+    },
+    {
+      "path": "hack/bats/README.md",
+      "sha256": "16dffaa3f12ba930e9d219628d770bc54cf24afeb232c6742d1bac68ee06201d",
+      "bytes": 214
+    },
+    {
+      "path": "hack/bats/extras/README.md",
+      "sha256": "48ba28bea286ddf37e50e60ef5db2eef8f2b8de9cd95acdc25bc522c7a9353a9",
+      "bytes": 241
+    },
+    {
+      "path": "hack/bats/extras/colima.bats",
+      "sha256": "9e77684c3fd1284b012f4b39dbbe6883dc5f4ce3de2ff2f8f32edf986e1a6ffa",
+      "bytes": 460
+    },
+    {
+      "path": "hack/bats/extras/freebsd.bats",
+      "sha256": "28fc9ffc98d60b70baba06249d6c5dbaaf9d50fe44a1cf7a8c81c81b5f0fa58f",
+      "bytes": 574
+    },
+    {
+      "path": "hack/bats/extras/k8s.bats",
+      "sha256": "a87786267e3f2b6197bb28e210d2705d40ea8fe8d39abea4091afc8b321c3663",
+      "bytes": 5646
+    },
+    {
+      "path": "hack/bats/extras/port-monitor.bats",
+      "sha256": "8f35199d3ef27cb68d38e7f0a8311a35c24cd1891a17d5dddf8fa9527336e668",
+      "bytes": 1898
+    },
+    {
+      "path": "hack/bats/extras/vz-block-device.bats",
+      "sha256": "02db8c344e9d536178b3adb654c367b49237cfcbd44e9c484394dccae5f86abe",
+      "bytes": 10937
+    },
+    {
+      "path": "hack/bats/helpers/limactl.bash",
+      "sha256": "42d33bbd6cea5f0b8659e5deeded7b135f4177c6661320e413730ad904f7a6d9",
+      "bytes": 2015
+    },
+    {
+      "path": "hack/bats/helpers/load.bash",
+      "sha256": "fbe173401d1ff0165854ea6a2e8cc8832775a1096289e9272796acce83acfc70",
+      "bytes": 2828
+    },
+    {
+      "path": "hack/bats/helpers/logs.bash",
+      "sha256": "b81cc6cb5c3f474320da6b68c5d9858b56bc5da89ac2b40b096a54a3de5a699f",
+      "bytes": 901
+    },
+    {
+      "path": "hack/bats/tests/copy.bats",
+      "sha256": "086ef4c4e3dce5cd0a521b25a9134fa462450ca538ed467497c32c850136a53e",
+      "bytes": 5693
+    },
+    {
+      "path": "hack/bats/tests/list.bats",
+      "sha256": "92d89e82a912f083b94b20794bd9f60f66de49c7b688a8e3164523fce1e55521",
+      "bytes": 13631
+    },
+    {
+      "path": "hack/bats/tests/mcp.bats",
+      "sha256": "63f8bcaa4e75c3a30ee130edf7c1fccb1cf6c1a53d112026d0c23b6f14ad762a",
+      "bytes": 8659
+    },
+    {
+      "path": "hack/bats/tests/param.bats",
+      "sha256": "3e72e6379d45ea6f970f9fb89b26a3869ccc1a39681cbade0a15be67093c5153",
+      "bytes": 1266
+    },
+    {
+      "path": "hack/bats/tests/passwordless-sudo.bats",
+      "sha256": "3b8dda41893558831b3ea77726f82f87851f59392060dd1700c234e4ade1714e",
+      "bytes": 1626
+    },
+    {
+      "path": "hack/bats/tests/path.bats",
+      "sha256": "08e9893f3a9d43901f339538d3c97987bded02391ff9b47b2b91322716561af1",
+      "bytes": 339
+    },
+    {
+      "path": "hack/bats/tests/port-forwarding.bats",
+      "sha256": "bc15ad9afdf153a15d13569baa60ee34f127da61d9d979f1458395b393ae924b",
+      "bytes": 26367
+    },
+    {
+      "path": "hack/bats/tests/preserve-env.bats",
+      "sha256": "b2f624ab75c4c6b639a2ff65e04abb6add451688777b1072b4ab11a598aac9b8",
+      "bytes": 5324
+    },
+    {
+      "path": "hack/bats/tests/protect.bats",
+      "sha256": "eb74f39f46c66d85bc2611c89d02470e49b430f533379bb9094c87446932f2de",
+      "bytes": 2213
+    },
+    {
+      "path": "hack/bats/tests/shell-sync.bats",
+      "sha256": "84aa8f7785d6a873175628082ace665d2ad2f04f2ea2bd9be6fd20fde7c3cf08",
+      "bytes": 6353
+    },
+    {
+      "path": "hack/bats/tests/shell.bats",
+      "sha256": "68311e7d085743a0de33b44209037a33ef10cd2ff294eee0907bef5af1ef44cc",
+      "bytes": 3189
+    },
+    {
+      "path": "hack/bats/tests/url-github.bats",
+      "sha256": "2fa2447ef9f22fba5cf69ac0c6930cc043f5b65d589f49e7522f2f501035f7f5",
+      "bytes": 6857
+    },
+    {
+      "path": "hack/bats/tests/yq.bats",
+      "sha256": "508e8666239e84b9eb740f4b1298a1a6698d1d0f35492f7fe04283a563868dd4",
+      "bytes": 1530
+    },
+    {
+      "path": "hack/brew-install-version.sh",
+      "sha256": "58d7c7f76f221e880580ce3ff3033f10ba5acdf9ad44b3abb3e4307e14a1634d",
+      "bytes": 1120
+    },
+    {
+      "path": "hack/cache-common-inc.sh",
+      "sha256": "5fefab4cd81c7d8eca123a1de13a8d77816a00f80645c429a129cf00b8ebd0c9",
+      "bytes": 16256
+    },
+    {
+      "path": "hack/calculate-cache.sh",
+      "sha256": "27621c61fbb4f50de023ae46a8bd1af0fd6739049e41880f3b3a4d1e3a01bf05",
+      "bytes": 10870
+    },
+    {
+      "path": "hack/codesign/debugserver",
+      "sha256": "648ebe6aa8462a76c0cdc5671eb724ca675eb9ac8d1ac36e5e57ab058a2543b1",
+      "bytes": 4121
+    },
+    {
+      "path": "hack/common.inc.sh",
+      "sha256": "279bf2bf77d4c6a940017f294c9497ae0665c33e8ec5bc3ee34deaa2a164e6e2",
+      "bytes": 1438
+    },
+    {
+      "path": "hack/debug-cache.sh",
+      "sha256": "08511fc55b160a2a2a69bfb038493e887bf1576b10f0368dc65bc4cb2fee3d78",
+      "bytes": 437
+    },
+    {
+      "path": "hack/gogenerate/protoc.sh",
+      "sha256": "ddaf3b44da52f9cf34df9ad0a9701ac30ff49c18e861a59de288dccd28742337",
+      "bytes": 970
+    },
+    {
+      "path": "hack/inject-cmdline-to-template.sh",
+      "sha256": "bc2ed4618e7052fe303babf2c68215e92ad7b28a3e4786e5794605dbafa2706a",
+      "bytes": 3877
+    },
+    {
+      "path": "hack/install-qemu.sh",
+      "sha256": "e9aeeedf29059e7620ff5817cdf0274b1100556765994e2f99440807848fe47c",
+      "bytes": 458
+    },
+    {
+      "path": "hack/ltag/bash.txt",
+      "sha256": "51e6af50aacf3be0e634a0100d1a3eea5c404171737e6f989f7eedd586f101aa",
+      "bytes": 91
+    },
+    {
+      "path": "hack/ltag/dockerfile.txt",
+      "sha256": "51e6af50aacf3be0e634a0100d1a3eea5c404171737e6f989f7eedd586f101aa",
+      "bytes": 91
+    },
+    {
+      "path": "hack/ltag/go.txt",
+      "sha256": "e71a959990fcfefcdf7e8ff8854ffb7806c558a6637b0c0bfa8d7aecd9405b4f",
+      "bytes": 94
+    },
+    {
+      "path": "hack/ltag/makefile.txt",
+      "sha256": "51e6af50aacf3be0e634a0100d1a3eea5c404171737e6f989f7eedd586f101aa",
+      "bytes": 91
+    },
+    {
+      "path": "hack/oss-fuzz-build.sh",
+      "sha256": "f70dd76c3e305454f3500f35faa8492abb1185e5d1a0171904d07dddeb9eef0a",
+      "bytes": 1348
+    },
+    {
+      "path": "hack/test-mount-home.sh",
+      "sha256": "41c0e0d49acf71513e734b0888ea4c54d779e72381631194ba2b7abdebc3df19",
+      "bytes": 822
+    },
+    {
+      "path": "hack/test-nonplain-static-port-forward.sh",
+      "sha256": "9e2655715327d60d4af9fb8a3b94f5ecfe604de2b697982bcb90ae3fab836c10",
+      "bytes": 1121
+    },
+    {
+      "path": "hack/test-plain-static-port-forward.sh",
+      "sha256": "3b7455c82c0e3833bb0ef5bcfd095bafd6aa4cb23f9cf1acc23d9dfcd6190a9a",
+      "bytes": 1166
+    },
+    {
+      "path": "hack/test-selinux.sh",
+      "sha256": "534964996c5023c2ecb51a4c1961a60bea8187024158ed9dc62aa39e11482df6",
+      "bytes": 2956
+    },
+    {
+      "path": "hack/test-templates.sh",
+      "sha256": "e4b7fc3608b1a74b0343eec6c0b7df11f9b0fb607f6a4187b2b2e5fa213a0481",
+      "bytes": 27850
+    },
+    {
+      "path": "hack/test-templates/alpine-iso-9p-writable.yaml",
+      "sha256": "5cc1f0403a312a631b035c4d7895f6b86db8ec49a7097e28a006d3a613de472d",
+      "bytes": 861
+    },
+    {
+      "path": "hack/test-templates/net-user-v2.yaml",
+      "sha256": "dcccd49a3775eccf85993e3967924eb1bfc9feb254cb3a7f311ba95095146986",
+      "bytes": 543
+    },
+    {
+      "path": "hack/test-templates/test-misc.yaml",
+      "sha256": "cf881fc82ea8c144d42cb70498486bdf4b2a8ca87d5fb9ff3b0168af10cad8f3",
+      "bytes": 3134
+    },
+    {
+      "path": "hack/test-upgrade.sh",
+      "sha256": "ddb87a9d7ef6a657e652a9efee876ef8e2226b1f16eaaaf942244d76ed1fc641",
+      "bytes": 3182
+    },
+    {
+      "path": "hack/toolexec-for-codesign.sh",
+      "sha256": "632506a92911199e5e881c5626ea2fbea6f37afc49e3021c80c2b58f94a9180b",
+      "bytes": 1765
+    },
+    {
+      "path": "hack/update-template-almalinux-kitten.sh",
+      "sha256": "e61e18ddace4d10cb267f598083fcb6286daf5bfdb81e066c60f75e1f1159b02",
+      "bytes": 11682
+    },
+    {
+      "path": "hack/update-template-almalinux.sh",
+      "sha256": "772e2fa60bd9c5181be5ae07f69089871209b9a0fff492267374788c5b0d2af5",
+      "bytes": 11853
+    },
+    {
+      "path": "hack/update-template-alpine.sh",
+      "sha256": "e5ae0414018dbd2e43747f45d629a6847ba663d209bd606efc7f89cdb4ded70e",
+      "bytes": 12485
+    },
+    {
+      "path": "hack/update-template-archlinux.sh",
+      "sha256": "a7c9d5970f6c6d1352e73c6dfdfc3bbedbddb125a4b4cc8cb69db7784777a686",
+      "bytes": 11254
+    },
+    {
+      "path": "hack/update-template-centos-stream.sh",
+      "sha256": "5fec150a133c222452aa29b188cd2482e111261a2f8de5ace89838d10a92b3d7",
+      "bytes": 10547
+    },
+    {
+      "path": "hack/update-template-debian.sh",
+      "sha256": "4e9af54505cae81e6b26611ccdf949d3c3ea6d15480358f4e9dc23c2aa23c36f",
+      "bytes": 21690
+    },
+    {
+      "path": "hack/update-template-fedora.sh",
+      "sha256": "da68d8422b063b8e7e8b7e32763a6db84cfebc700f4e18692283ebafb818b0e3",
+      "bytes": 11341
+    },
+    {
+      "path": "hack/update-template-freebsd.sh",
+      "sha256": "e177b9c709e276017d5518ccd8054c6ad34aa79045a8cac6e80e201c78901441",
+      "bytes": 9842
+    },
+    {
+      "path": "hack/update-template-macos.sh",
+      "sha256": "30d9bb6d139e67d6f946236393589c1f127985b4e55c272b5c10e24e31a43896",
+      "bytes": 7404
+    },
+    {
+      "path": "hack/update-template-opensuse.sh",
+      "sha256": "b37160ac253971ee7efc616e2b71f2a3e6baaad060d2b0a2aaf5c7da38132961",
+      "bytes": 13901
+    },
+    {
+      "path": "hack/update-template-oraclelinux.sh",
+      "sha256": "b5df778a390cd7f3733ff4ef3aed5fbb35ebd409dda15b82d6c913804a5e5d4a",
+      "bytes": 9126
+    },
+    {
+      "path": "hack/update-template-rocky.sh",
+      "sha256": "885d5daa5a4a64b3204d51970f1a357151bc097dd1679b04ab4379e245f06f2a",
+      "bytes": 12361
+    },
+    {
+      "path": "hack/update-template-ubuntu.sh",
+      "sha256": "e277c2154bcf434087c02ea902788c434b4e7790524294a7c3e9a6f5797a8f0f",
+      "bytes": 23210
+    },
+    {
+      "path": "hack/update-template.sh",
+      "sha256": "5f1e781f27b5d5d1c0e4eaac4f6b69c00f5a16040bb24fc5fe86bb6507d2b958",
+      "bytes": 9639
+    },
+    {
+      "path": "hack/validate-artifact.sh",
+      "sha256": "830fae60e7a6b58ff50cceda6aca6108509997cbdc021e5139a0a969521d0ed4",
+      "bytes": 1889
+    },
+    {
+      "path": "pkg/apfs/chown.go",
+      "sha256": "318da5724f67126f3ae8b7f14eed4b89ab65d81c6a8029481fba0ec9d719268f",
+      "bytes": 22610
+    },
+    {
+      "path": "pkg/apfs/chown_darwin_test.go",
+      "sha256": "33e503d8613921ef962498b5aa5e79114427f918cd6ebeecfbc0ae9d08e280ac",
+      "bytes": 3084
+    },
+    {
+      "path": "pkg/apfs/chown_test.go",
+      "sha256": "dff3a6097969a5df75361f7f0cd3a79111d7a147476525091b391efacddef6e7",
+      "bytes": 4261
+    },
+    {
+      "path": "pkg/apfs/fletcher64.go",
+      "sha256": "d0b7652fc150cce4ddb0632c941fa6e75301d6ab354c07af557942a2f98ab303",
+      "bytes": 1140
+    },
+    {
+      "path": "pkg/apfs/fletcher64_test.go",
+      "sha256": "cb32e4dbdf4088c52f2da931370d1d1f18acc0c55d371ad9c9be962a5a3da195",
+      "bytes": 1000
+    },
+    {
+      "path": "pkg/apfs/types.go",
+      "sha256": "3a6877dad833b2ea62787a830f41c502e29f92e5abd5343fc551ab6c891764ba",
+      "bytes": 3711
+    },
+    {
+      "path": "pkg/autostart/autostart.go",
+      "sha256": "3f64d2788a3f637aa899bfbf861d26f6168c402902049b774ce4689b8f47ca01",
+      "bytes": 2174
+    },
+    {
+      "path": "pkg/autostart/autostart_test.go",
+      "sha256": "58c2248790c42f6aa720add353d8c0d5dab09c61a671d11856a8645c17899eb2",
+      "bytes": 8547
+    },
+    {
+      "path": "pkg/autostart/launchd/io.lima-vm.autostart.INSTANCE.plist",
+      "sha256": "4b84c11225c27732c644422c8d41ecf9d3ed61a81c0f2ded09ebf212d3245178",
+      "bytes": 930
+    },
+    {
+      "path": "pkg/autostart/launchd/io.lima-vm.daemon.INSTANCE.plist",
+      "sha256": "d52ba244cc1a08258102af588af0a4e112c08f8e3df8c0211360eafc9f274912",
+      "bytes": 982
+    },
+    {
+      "path": "pkg/autostart/launchd/launchd.go",
+      "sha256": "ec6ebb30658f8173e205d9c42973c838b29890c16117da8db49010b02757ae35",
+      "bytes": 3937
+    },
+    {
+      "path": "pkg/autostart/launchd/launchd_test.go",
+      "sha256": "2603e0b764cd2c2e9a42cf068280807a7bd4bb7440f595326eaa2cc119e3b6c7",
+      "bytes": 1735
+    },
+    {
+      "path": "pkg/autostart/managers.go",
+      "sha256": "ab89fa993a69b3df8e6e297b118262dd2ee05eeb58b8bd3114329be2194b9ad2",
+      "bytes": 5461
+    },
+    {
+      "path": "pkg/autostart/managers_darwin.go",
+      "sha256": "f0ef54e90c5a6984da78722601a898aeabf7e0ef77de720de545d5bffa9f4eff",
+      "bytes": 1526
+    },
+    {
+      "path": "pkg/autostart/managers_linux.go",
+      "sha256": "31fae2cbe27786e1b0a0fcf9784e5a5883cca4b083d8874ed586a3e291e6592a",
+      "bytes": 1272
+    },
+    {
+      "path": "pkg/autostart/managers_others.go",
+      "sha256": "b71535c2c0f9c7e858b8ac3ad1d0568cfbcf2e7d4f504860d09d5204be9a135a",
+      "bytes": 523
+    },
+    {
+      "path": "pkg/autostart/systemd/lima-vm@INSTANCE.service",
+      "sha256": "f87ea9c7071be1d6c4ff7ba19756cddaf0cc4ae09fcfa3de4429599245cab38b",
+      "bytes": 305
+    },
+    {
+      "path": "pkg/autostart/systemd/systemd.go",
+      "sha256": "1c630666316d961aaefb8bba853639ec4d8f261c875bc270d18d8bbe925b4872",
+      "bytes": 2344
+    },
+    {
+      "path": "pkg/autostart/systemd/systemd_linux.go",
+      "sha256": "548a0ea5b358f1df4d8c7c23729142cfab5620b43e18ce4d534a93d0076a3f96",
+      "bytes": 440
+    },
+    {
+      "path": "pkg/autostart/systemd/systemd_others.go",
+      "sha256": "82c5017e55cd5b3f46e8b6eafaac66b8dd23403829ff95460780a9c767208f47",
+      "bytes": 223
+    },
+    {
+      "path": "pkg/autostart/systemd/systemd_test.go",
+      "sha256": "599c2f13ccc4748f44ff8fbc0985a9ea33101fc483f56a2e9b04fe36bc44b401",
+      "bytes": 633
+    },
+    {
+      "path": "pkg/bicopy/bicopy.go",
+      "sha256": "35e0888984ef4fe9fdc459c8c624e70fd16b9938fe14110badd5f539f0d6e228",
+      "bytes": 2248
+    },
+    {
+      "path": "pkg/blockdevice/block_device_darwin.go",
+      "sha256": "9c930c73f0a63cf629ab906cb5a5f4286b29ac767e899c2b91d2a4d88311eab7",
+      "bytes": 22770
+    },
+    {
+      "path": "pkg/blockdevice/block_device_darwin_test.go",
+      "sha256": "29f18cddae5d85dc071bee95d0444ab8c48d31dae2d1d2c5e74e260adcd2b901",
+      "bytes": 20144
+    },
+    {
+      "path": "pkg/blockdevice/path.go",
+      "sha256": "6c86241b9651d3658913824d981a98dd43a680e3bc59a382e237b8f2e15c9ccb",
+      "bytes": 1469
+    },
+    {
+      "path": "pkg/cacheutil/cacheutil.go",
+      "sha256": "ced90b3815432a8fb3362ec6847e06b0b5d2cd2eed6bdea682306012a0cb55f5",
+      "bytes": 1700
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.FreeBSD/05-lima-mounts.sh",
+      "sha256": "693c567325d53379402490f9a5a58650fbcf10d5e800938be7f06b25063b6ea8",
+      "bytes": 676
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/00-check-rtc-and-wait-ntp.sh",
+      "sha256": "11fc9086c9a44a2fde8ea2105dd1db59ed1a79de0b7bea14ee7142f2561039f8",
+      "bytes": 2776
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/00-modprobe.sh",
+      "sha256": "623facf56e21b5d2dc8e0945029f63222ad315198daaab9bb3bd0003bf1e3d94",
+      "bytes": 726
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/00-reboot-if-required.sh",
+      "sha256": "017fd213f00a013e1eaae6333686ad54378b915c0ec7dc2c82592199b083d432",
+      "bytes": 929
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/00-systemd-user-group.sh",
+      "sha256": "6f0acbb5aa5508d0738ae6b76b809069e752755d4ada4d780f033ffe92c25160",
+      "bytes": 642
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/04-persistent-data-volume.sh",
+      "sha256": "b7dcd435374583cdc4b92f3f3d34b87fcbbf6d15c2202b8c73d53cdc94bf6423",
+      "bytes": 6523
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/05-guest-home.sh",
+      "sha256": "387b75cd7b25f2691a71d29051db8460427476fd5ddb512b8c66de48648e2ca4",
+      "bytes": 933
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/05-lima-disks.sh",
+      "sha256": "8ed0a861413f9b29c7900187685fff1778eba8d21f1e1e043e74a5cdcbd8bd03",
+      "bytes": 6187
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/05-lima-mounts.sh",
+      "sha256": "e237dcbcdf2bee259e3a5ced3e9c1f54fe392c76e4ef20d789a29e60994e4b4c",
+      "bytes": 3806
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/06-enable-mdns-on-systemd.sh",
+      "sha256": "9abddad19795c97d78c757318477f4e4bf31f33b5c204032a2c2d4823e0e0528",
+      "bytes": 1320
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/06-etc-hosts.sh",
+      "sha256": "e3c3ee33e54f8f5adb7d7502c2950c77eb6d681d1ac8e81757350e782e1256dc",
+      "bytes": 449
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/07-etc-environment.sh",
+      "sha256": "6d588849441d8bf2eade783628a65104a32b4463aad22a6b6ace7caf07e588b3",
+      "bytes": 1040
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/08-shell-prompt.sh",
+      "sha256": "f431dca64f6ea2a6b1548b411c6a465311fddbf79e221c350c403c51120c3508",
+      "bytes": 1548
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/09-host-dns-setup.sh",
+      "sha256": "71ec7f9fcbdc332fab73f1e0df5ecfe1edd8e582cdcc47cb813122bb63f65ec0",
+      "bytes": 1282
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/10-alpine-cgroups.sh",
+      "sha256": "1cf03c92711909ccba4ba88e86901d4e5e6ccb54c7fc944ea7a959ca4da6be04",
+      "bytes": 337
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/11-colorterm-environment.sh",
+      "sha256": "c6ce0ba346a156b7010433736ef233b793a0e1c2faceffa09dd69a451280b6fb",
+      "bytes": 986
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/20-rootless-base.sh",
+      "sha256": "0d898f1afd0ca830a2c553f1d80396ee3570cb24c481178189c03f8c07b40535",
+      "bytes": 2975
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/25-guestagent-base.sh",
+      "sha256": "7f3ddd1b78b9de1c85be5949a372cf220527579490856499437218856f3de7e8",
+      "bytes": 3644
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/26-host-services.sh",
+      "sha256": "dee40d519a7bfe4966798a18cbccc090d86ce0cefadf6d9e15dd8ceafb87bb5e",
+      "bytes": 385
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/30-install-packages.sh",
+      "sha256": "2bbb1e654b478ec1218f3d84487ebde9ff3f33e601e30a4f56c9b0b28a02326b",
+      "bytes": 8232
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/35-setup-packages.sh",
+      "sha256": "9d6c93f0128f80988e22fdd16994e8ff37d40ea5ac97d0f7d98c7a00d48314cd",
+      "bytes": 2315
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.Linux/40-install-containerd.sh",
+      "sha256": "49ad87dc327d7843ad4e902d4b85207c4a9b016dc153a445f8bb050af1be49d5",
+      "bytes": 6191
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.essential.FreeBSD/00-freebsd-user-group.sh",
+      "sha256": "c9921fe63cbb86e423bc718dc6e0bd902f1c003645d68d8bb41225f6c7c6d6c7",
+      "bytes": 505
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.essential.Linux/00-alpine-user-group.sh",
+      "sha256": "063b49fb279965b8109b32178e6f35035614660b773362c5722afd44ce1818f6",
+      "bytes": 663
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.essential.Linux/01-alpine-ash-as-bash.sh",
+      "sha256": "3df37a23cd4bb4b032ba860bcec6c7df70b034bc821c4ace59f874f5ccaf8ff3",
+      "bytes": 642
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.essential.Linux/10-alpine-prep.sh",
+      "sha256": "10e988041d6fef997110a883cb4f9e28d093ccd4b998bcd6a8c816419d4c511d",
+      "bytes": 1429
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/boot.sh",
+      "sha256": "0d492d2835fc80ea46f1dab1c41512adfd7ca6c9bc9f12dd4a8380bc9a28edcb",
+      "bytes": 8697
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/etc_environment",
+      "sha256": "5736a9657e8d6b99971884c3ac25cdf38d0d533c59fe27e0e537863ef6dac453",
+      "bytes": 81
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/lima.env",
+      "sha256": "ec9cb87c631e9cc431af405eded02753bcc426dc4b99f911d4332de1f332e32a",
+      "bytes": 3160
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/meta-data",
+      "sha256": "93c9141a6d8508aabcce6687da898f20eb2f248425b6c95774f9678b0df25664",
+      "bytes": 52
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/network-config",
+      "sha256": "14d8ca4a1a771ecd802760a3c9338bd0a76814adfdfa22d92241eba0e5017fb5",
+      "bytes": 560
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/param.env",
+      "sha256": "0725ec2632d8fd0745205fe042f9958ab0c1c84e3c130cd73d0bcabeb05b6903",
+      "bytes": 71
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/user-data",
+      "sha256": "f89fe728ee80ada78a57303dad03f2486714424da34386d0bf0f9b076cde30ae",
+      "bytes": 6567
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/util.FreeBSD/print_cidata_fstab.lua",
+      "sha256": "df53916cd25e1a017df9b27d8513e4fb6f8d5218ba93c68186fc05c018f0f021",
+      "bytes": 369
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/util/compare_version.sh",
+      "sha256": "fc03ae50c43e50bde7ce52e06f83d48902513c4d0eccfe11326111c5ff9fb643",
+      "bytes": 1511
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/util/escape_fstab.sh",
+      "sha256": "e3f727d535df25daf75ff5f47cb07c00604095eeb5040ae85f00fb2da8bf8304",
+      "bytes": 3010
+    },
+    {
+      "path": "pkg/cidata/cidata.TEMPLATE.d/util/unescape_fstab.sh",
+      "sha256": "3064f4aa93937f847a2c61ab43a035f890a3c5c33fd1dc1034347ed2a0537e1f",
+      "bytes": 1627
+    },
+    {
+      "path": "pkg/cidata/cidata.go",
+      "sha256": "ddb141986f2fdfa7dc4e78b7332cc5c049f89c37f2b55fe4409a46f2270947f5",
+      "bytes": 20728
+    },
+    {
+      "path": "pkg/cidata/cidata_test.go",
+      "sha256": "f6394945e49624d3ab2d826a500c5749f286b746f564a1bbf3bd1985e8a08032",
+      "bytes": 3260
+    },
+    {
+      "path": "pkg/cidata/cloudinittypes/metadata.go",
+      "sha256": "9171d53eca5a748c14ff6b83cd0ffa48172e9dab7e4ba17639a1eaad17ac86e0",
+      "bytes": 252
+    },
+    {
+      "path": "pkg/cidata/cloudinittypes/userdata.go",
+      "sha256": "197970df89b7ee2028e7ef620046155d4d562f912363901573c017c412dfef69",
+      "bytes": 1883
+    },
+    {
+      "path": "pkg/cidata/fuzz_test.go",
+      "sha256": "831086a77d1919f5ffa51c5f6607cfb46690bb7b380aacab497f9319592db5f5",
+      "bytes": 470
+    },
+    {
+      "path": "pkg/cidata/template.go",
+      "sha256": "0d976fc4b5ad5bd3d3efb4307de2153dff2d155c99e57cfeab4becdc72ec478a",
+      "bytes": 7387
+    },
+    {
+      "path": "pkg/cidata/template_test.go",
+      "sha256": "2eb6875cbd9e476cd145f204ecd73d5aeafea2743c75f65dae7ee3fb178c4a13",
+      "bytes": 13558
+    },
+    {
+      "path": "pkg/cidata/wincidata.TEMPLATE.d/autounattend.xml",
+      "sha256": "4fac6c8c56301f1bce5c5b6adaa36420718e894908ccfc45703c4d65cce1625c",
+      "bytes": 10792
+    },
+    {
+      "path": "pkg/cidata/wincidata.TEMPLATE.d/first_logon.ps1",
+      "sha256": "095cb50493101279b977bda77522dbc268a47eef73b84d7e26caef350617d6c9",
+      "bytes": 5307
+    },
+    {
+      "path": "pkg/cidata/wincidata.TEMPLATE.d/install_provision.ps1",
+      "sha256": "48aa2554f33c7049c98cced9a0fad444955bb27f811df33142155bc10fb64a5d",
+      "bytes": 3014
+    },
+    {
+      "path": "pkg/cidata/wincidata.TEMPLATE.d/startup_runner.ps1",
+      "sha256": "1e94018f640087b13ee0257356125b781e748edecfaa9d3c3a2853689d3528a8",
+      "bytes": 919
+    },
+    {
+      "path": "pkg/copytool/copytool.go",
+      "sha256": "4588e52c80a89217165432def77f6b457097f06378f7ab06243db03e294df4f7",
+      "bytes": 6025
+    },
+    {
+      "path": "pkg/copytool/copytool_test.go",
+      "sha256": "f646d8ef7ac144a058040190a8c4a68eb81aa1e605d7358f46dac36af3dad8f6",
+      "bytes": 14507
+    },
+    {
+      "path": "pkg/copytool/rsync.go",
+      "sha256": "a2457b70b7f6abd068a71bf2c753c90bc1432da7db34f10c413bb1d10bb0b942",
+      "bytes": 10269
+    },
+    {
+      "path": "pkg/copytool/scp.go",
+      "sha256": "ce0c32b928da809f6b31342e7a70a7b3d1ea3e8ff1215cfb817840e42cbb09cc",
+      "bytes": 4115
+    },
+    {
+      "path": "pkg/debugutil/debugutil.go",
+      "sha256": "2b0e276ae8b8eb7d8568ef4287a1ecadeb9bcdba31a3ab2bbbf3f10999f82b0b",
+      "bytes": 154
+    },
+    {
+      "path": "pkg/downloader/downloader.go",
+      "sha256": "f15a8e286fcf751e13f72acd1dfb2fea1b3ab2ce814dd1dd03dd7516e42cda97",
+      "bytes": 31928
+    },
+    {
+      "path": "pkg/downloader/downloader_test.go",
+      "sha256": "91568e96b15eac52ce2864d9e22f310a3b375c23c6d80c5fda41877a6e3e0047",
+      "bytes": 23285
+    },
+    {
+      "path": "pkg/downloader/fuzz_test.go",
+      "sha256": "6ba61b97a4177e0bcbb9ec83bb579ecf656edb816f21f85611c48de4de251e0a",
+      "bytes": 837
+    },
+    {
+      "path": "pkg/downloader/testdata/downloader.txt",
+      "sha256": "380481d26f897403368be7cb86ca03a4bc14b125bfaf2b93bff809a5a2ad717e",
+      "bytes": 49
+    },
+    {
+      "path": "pkg/driver/driver.go",
+      "sha256": "196030511873dd573b7f9d562f0c6369327975a1a7c96affcd927f68701002fd",
+      "bytes": 6959
+    },
+    {
+      "path": "pkg/driver/external/client/client.go",
+      "sha256": "94b9dfa073ef8e99f76c517d43746f9850246e25ad9f424def03fb8ba4837a80",
+      "bytes": 1322
+    },
+    {
+      "path": "pkg/driver/external/client/methods.go",
+      "sha256": "77f6aa663a7371d4242d958c856b4a065ed51c27aa38f43dd9a87f9060bbbe64",
+      "bytes": 10307
+    },
+    {
+      "path": "pkg/driver/external/driver.pb.desc",
+      "sha256": "ae0b052a4f5c6425a0d7bfded54268c4e181d4738c510f92fc6bd8ca28f2e3c5",
+      "bytes": 2339
+    },
+    {
+      "path": "pkg/driver/external/driver.pb.go",
+      "sha256": "a848eeb7d392be234167d8d36c4f36f95b308a6a0ee8faa662d2bcbb24ebd55f",
+      "bytes": 29774
+    },
+    {
+      "path": "pkg/driver/external/driver.proto",
+      "sha256": "1e041ea70dcc4210893796dddb4bf6e4320767b211bc0d03803f83d9fd68c3ea",
+      "bytes": 10668
+    },
+    {
+      "path": "pkg/driver/external/driver_grpc.pb.go",
+      "sha256": "7c3eba45fc1cd317af1248f17ee0c066f6f4290e1b9a54662988509f76b278fa",
+      "bytes": 44094
+    },
+    {
+      "path": "pkg/driver/external/gen.go",
+      "sha256": "cc4e2c8ccd8952c7a8509eb5b2dcb80fac66791aa62fdd767bddec7b6d681032",
+      "bytes": 174
+    },
+    {
+      "path": "pkg/driver/external/server/methods.go",
+      "sha256": "6d5081364ceaacb63a4f8260d6ee9155ed9cd7c5594c4d33e508be3c212b9e83",
+      "bytes": 10940
+    },
+    {
+      "path": "pkg/driver/external/server/server.go",
+      "sha256": "edec9bb7945b9ca6120f849226c255d0a865eb26fbf18e3fa20d904bdccb0447",
+      "bytes": 10671
+    },
+    {
+      "path": "pkg/driver/hcs/errors_windows.go",
+      "sha256": "8ac4b0073932b4686a7b965bb5fe5f660cea07c63df0c6185116ac7d2956276e",
+      "bytes": 175
+    },
+    {
+      "path": "pkg/driver/hcs/hcs_api_windows.go",
+      "sha256": "994570c2d922c2dca3583cbfd13642878244f5aba6a2271b6cf7244fff715598",
+      "bytes": 8605
+    },
+    {
+      "path": "pkg/driver/hcs/hcs_driver_windows.go",
+      "sha256": "06ee1db435df8adb48b4a13e3a0568c869ecc0c3e9a7279862d9f65f4d46ebc3",
+      "bytes": 12035
+    },
+    {
+      "path": "pkg/driver/hcs/hcs_driver_windows_test.go",
+      "sha256": "8d1882f59c9f0597269c0f00f884234352218b6c4e6c4fa7e5e43b845d221697",
+      "bytes": 6441
+    },
+    {
+      "path": "pkg/driver/hcs/helper_windows.go",
+      "sha256": "d91bc53bccac8f270c0a20f4882fb6727d9a9bc45c25db80d3c70f58ca80862c",
+      "bytes": 6968
+    },
+    {
+      "path": "pkg/driver/hcs/helper_windows_test.go",
+      "sha256": "197b292b10ab3d74f2f57120b243efb774c9db2b3f830ec3a088971a392d827a",
+      "bytes": 4380
+    },
+    {
+      "path": "pkg/driver/hcs/register.go",
+      "sha256": "8babc2fb3840d16f0891a63083b19f6a31cf6c893c0fe2fe51c85dd78eee753c",
+      "bytes": 275
+    },
+    {
+      "path": "pkg/driver/krunkit/boot.Linux/00-add-user-to-video-render-group.sh",
+      "sha256": "950da85dce602c812d712f5273d25d43a441e03d3db85ef30d94ee03df1bf32b",
+      "bytes": 345
+    },
+    {
+      "path": "pkg/driver/krunkit/boot.Linux/01-gpu-device-perms.sh",
+      "sha256": "1ac31857954c18673c60ed02fb7a26c530b01d74f19706b382d3f70ef708b5ce",
+      "bytes": 625
+    },
+    {
+      "path": "pkg/driver/krunkit/errors_darwin_arm64.go",
+      "sha256": "2e986362d6bf569ec4ea2020e63cf47451be1759cbecb664a7a52da83165c8d8",
+      "bytes": 201
+    },
+    {
+      "path": "pkg/driver/krunkit/krunkit_darwin_arm64.go",
+      "sha256": "bc9aefc45df936b47b1c8e3a7eafa0e9272d98ab38e166e08c33dfea4cb017ae",
+      "bytes": 7775
+    },
+    {
+      "path": "pkg/driver/krunkit/krunkit_driver_darwin_arm64.go",
+      "sha256": "35400a1cdf7fe42a2e5ecce8a3cce21a2d3a35b7454edf41cac1a7301c04efe9",
+      "bytes": 12567
+    },
+    {
+      "path": "pkg/driver/krunkit/krunkit_driver_darwin_arm64_test.go",
+      "sha256": "fba82e88a0579a5b81ff488e79f9e5029e6a8548e6f3a8c951d4413a1e3a5e2c",
+      "bytes": 438
+    },
+    {
+      "path": "pkg/driver/qemu/entitlementutil/entitlementutil.go",
+      "sha256": "5e9dbddf31b2ae05462813f4baf5d043a502ff3ad15739b208dbc2de990dbbb0",
+      "bytes": 4603
+    },
+    {
+      "path": "pkg/driver/qemu/qemu.go",
+      "sha256": "e9a39032e666d67033052e3df000fb5ebdbad13a2e10570ed93935886a537ea8",
+      "bytes": 49495
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_darwin_amd64.go",
+      "sha256": "32ec4814cc14946bab13bcf7f79e4a9e3558af423cc88945ad20a6c97097c0d7",
+      "bytes": 575
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_darwin_arm64.go",
+      "sha256": "89369bb5119abd7efb51e3edb938908de079abe8e68e4cf1d4455accaaf5a203",
+      "bytes": 1155
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_driver.go",
+      "sha256": "f64aa99df217cbeab73e341957ac8c8c3cbae57665c98c25c6db77858f571651",
+      "bytes": 28567
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_linux_amd64.go",
+      "sha256": "5d02fbc09deb477435427e261d652a9b00706a2c642223ca43df4682014f2eba",
+      "bytes": 1879
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_linux_arm64.go",
+      "sha256": "28ffa00ce489df9fa5dd68c8a695d4b4663539c77af655b9725b13e921492cda",
+      "bytes": 1176
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_others.go",
+      "sha256": "bc20243b5702ba2165d762840951a0c197cd9b1c6c745e0e90cf7160fdfa41ac",
+      "bytes": 562
+    },
+    {
+      "path": "pkg/driver/qemu/qemu_test.go",
+      "sha256": "0a9b537b5373c274248ab9fe2289a5e9a369c35130db831da3a97f3ffcb17e0c",
+      "bytes": 6449
+    },
+    {
+      "path": "pkg/driver/qemu/register.go",
+      "sha256": "8142d5d5a47972c2f2eb7dd6f4f712760c434a9e78c71df31a60f991551af3f5",
+      "bytes": 266
+    },
+    {
+      "path": "pkg/driver/vz/block_device_darwin.go",
+      "sha256": "5912d02fc9c7e76c4d862b3621ab79fb98df3716ad4c812e3238c59196b7af06",
+      "bytes": 4791
+    },
+    {
+      "path": "pkg/driver/vz/block_device_darwin_test.go",
+      "sha256": "4b515d41e098657986bcca4c9c3b0707df2340f1718bb7fd11f4ed326cd2070f",
+      "bytes": 4720
+    },
+    {
+      "path": "pkg/driver/vz/boot.Linux/05-rosetta-volume.sh",
+      "sha256": "02ff16c3d5fd8f8d203d69be6672fa2af0be29aa9a153d5a9028e11b76348e15",
+      "bytes": 4221
+    },
+    {
+      "path": "pkg/driver/vz/errors_darwin.go",
+      "sha256": "43f6b58671fbcedffa145f29a05c326846a9054c5c7dedd97ceee8fe94d00d3f",
+      "bytes": 477
+    },
+    {
+      "path": "pkg/driver/vz/network_darwin.go",
+      "sha256": "e5d18a68fe88f91d26f3b65e6fa252c95ff6cc387cd13e441f0c2cff3a4120a7",
+      "bytes": 4956
+    },
+    {
+      "path": "pkg/driver/vz/network_darwin_test.go",
+      "sha256": "f6cf077a8fdda852a8ed71d1c00230c39f752745c2586ed5676b8fe78a3f7b20",
+      "bytes": 4741
+    },
+    {
+      "path": "pkg/driver/vz/register.go",
+      "sha256": "5ca0e8c7f560c4ccdd950e45061227ab63827e03e040aaa171946442c0a091eb",
+      "bytes": 282
+    },
+    {
+      "path": "pkg/driver/vz/rosetta_directory_share.go",
+      "sha256": "a9a57314a66e39aa6b1869f28e26f9f84d681b572f8989d127f3ce5b9e696721",
+      "bytes": 322
+    },
+    {
+      "path": "pkg/driver/vz/rosetta_directory_share_arm64.go",
+      "sha256": "a3f6c6238e1c95a881c2b01cfa5aa6aeb37e0a9199e5d6f48115eaa8100ce063",
+      "bytes": 1873
+    },
+    {
+      "path": "pkg/driver/vz/screenshot_darwin.go",
+      "sha256": "d8ec4c32b2ea120cafd98deb8b63cd05c2c72087156a03b9b4e807f942207a72",
+      "bytes": 3595
+    },
+    {
+      "path": "pkg/driver/vz/vm_darwin.go",
+      "sha256": "0db6c248822234c9da029338fa1c125f45d3946dbe28da7c3d98c1c1d5fe4bb4",
+      "bytes": 33081
+    },
+    {
+      "path": "pkg/driver/vz/vm_darwin_amd64.go",
+      "sha256": "832bbc4bbcf2ad9b4cca35c2f379150fbff4e7d372d2f59774fbf6857c23cfbf",
+      "bytes": 1050
+    },
+    {
+      "path": "pkg/driver/vz/vm_darwin_arm64.go",
+      "sha256": "a4eaf646ccdb3f9a3cbb412ff7b00f860b02ef3966722caef1f5af99dc5ec765",
+      "bytes": 5329
+    },
+    {
+      "path": "pkg/driver/vz/vsock_forwarder.go",
+      "sha256": "360db190ffbe56572e33d4091ddf7e42a5cd585e4e324e3c08092d11eb680f3f",
+      "bytes": 1628
+    },
+    {
+      "path": "pkg/driver/vz/vz_driver_darwin.go",
+      "sha256": "35e31034c62eb5481824bf967a37ef0f0c9b36e21f1050faef71e9c0f62d8109",
+      "bytes": 19696
+    },
+    {
+      "path": "pkg/driver/vz/vz_driver_darwin_test.go",
+      "sha256": "6abd664986274711e522a3e2d200219c0e58d42a4e3c8797d41dd4271e84ad6e",
+      "bytes": 1363
+    },
+    {
+      "path": "pkg/driver/wsl2/boot.Linux/02-no-cloud-init-setup.sh",
+      "sha256": "ecfa507384c4b7f0d9c0d2fd6abf767cc83abd0f4bb233f379ef9ff8470fcfb1",
+      "bytes": 1199
+    },
+    {
+      "path": "pkg/driver/wsl2/errors_windows.go",
+      "sha256": "fa258284dfdef8f70162b520accdac3518e12488e868ac3df31c89fc058d60fe",
+      "bytes": 207
+    },
+    {
+      "path": "pkg/driver/wsl2/fs.go",
+      "sha256": "663fedff22d82b68a3d43d0f3bf58003962bb2e117a6252c3147e65e82b5aeef",
+      "bytes": 993
+    },
+    {
+      "path": "pkg/driver/wsl2/lima-init.TEMPLATE",
+      "sha256": "44aa8794f87b778666429183af73f52569f3d2c9338d190dee050d6dec078fc9",
+      "bytes": 183
+    },
+    {
+      "path": "pkg/driver/wsl2/register.go",
+      "sha256": "52c599fcf671c3d67b1438e5b90a8589af358e0d227ff7ee8a9d088ae3b3be79",
+      "bytes": 277
+    },
+    {
+      "path": "pkg/driver/wsl2/sshaddress.go",
+      "sha256": "cf14d88a80bc7f06cca3c80d84f1495125846e76c8e9ae0adf08632828715bf7",
+      "bytes": 873
+    },
+    {
+      "path": "pkg/driver/wsl2/sshaddress_test.go",
+      "sha256": "f1987fc9537bb19fbbf7b4a4286060259089ac9a9e18dbc2cb99215d2763aba9",
+      "bytes": 1122
+    },
+    {
+      "path": "pkg/driver/wsl2/vm_windows.go",
+      "sha256": "3a7c62e2d6ffaf1cd47b91d28d2c18d54198b759f0f81714d130f16560e3601e",
+      "bytes": 10293
+    },
+    {
+      "path": "pkg/driver/wsl2/wsl_driver_windows.go",
+      "sha256": "7e200858075155d43bfd407c0c9d2799239310165ec83d36f54e09e34972c8c1",
+      "bytes": 10463
+    },
+    {
+      "path": "pkg/driver/wsl2/wsl_driver_windows_test.go",
+      "sha256": "d0443546abb75bc36764655f234693c680bea575c5ee7ba78d8d1a81eaf52077",
+      "bytes": 5233
+    },
+    {
+      "path": "pkg/driverutil/disk.go",
+      "sha256": "f307dd3f637317b43ddc3817a41e52a8de8aa8fb288a0076d43e44afc96010c0",
+      "bytes": 4406
+    },
+    {
+      "path": "pkg/driverutil/disk_test.go",
+      "sha256": "076c9606db8b7a7ded28489c025afb606abe3a36a400ddbc0d749a399957aecb",
+      "bytes": 7006
+    },
+    {
+      "path": "pkg/driverutil/instance.go",
+      "sha256": "8eac43168372403c65dbef8797cf442d5179b08414f78eff36744be1267abff1",
+      "bytes": 1592
+    },
+    {
+      "path": "pkg/driverutil/vm.go",
+      "sha256": "3ff285bc7d0125795f02356f4e278af9e9048e11c083eb86b0fc4b966fe63e09",
+      "bytes": 3389
+    },
+    {
+      "path": "pkg/editutil/editorcmd/editorcmd.go",
+      "sha256": "e2d9fb003a3f0fe1b081603197f8237325f0fb2054a6729afe4a9570e5b890bc",
+      "bytes": 1211
+    },
+    {
+      "path": "pkg/editutil/editutil.go",
+      "sha256": "a370cacb3870ed9ca05f4d59ff14d910b60367ef3e80b6f772883566edb577dc",
+      "bytes": 2791
+    },
+    {
+      "path": "pkg/envutil/envutil.go",
+      "sha256": "453af439a4132bf1e00486eb72c4a0fdcbc2d4813dec414294dfcd8f0dc38ce7",
+      "bytes": 3881
+    },
+    {
+      "path": "pkg/envutil/envutil_others.go",
+      "sha256": "2dd6179e4d12b4fac000605aab9e900fac3836fc09df52b13bb83f7127873241",
+      "bytes": 476
+    },
+    {
+      "path": "pkg/envutil/envutil_test.go",
+      "sha256": "c880cf26507e66d9b94716df1c7ad2f83c6ad0e922399b6662d98f1a38d6c773",
+      "bytes": 6618
+    },
+    {
+      "path": "pkg/envutil/envutil_windows.go",
+      "sha256": "cc017bb4ff4a0f1b8d2f76cb15e225eee05e1119e7372a0b5b9ea06609f69d99",
+      "bytes": 1151
+    },
+    {
+      "path": "pkg/envutil/envutil_windows_test.go",
+      "sha256": "cf9d65b4e20347ad2be2b1659ccbae113f8e85d6be6782da42659fe6bc84c34f",
+      "bytes": 1590
+    },
+    {
+      "path": "pkg/executil/command.go",
+      "sha256": "b0379cbfa58415f5cc12020be91d6aa2238f3b7de84a3d12f4d2ce50968d5422",
+      "bytes": 1054
+    },
+    {
+      "path": "pkg/executil/opts_others.go",
+      "sha256": "536450f6909ed4e064eafa2bd8c031882ec8c7795081e634b7928bdfd9ae60cd",
+      "bytes": 273
+    },
+    {
+      "path": "pkg/executil/opts_windows.go",
+      "sha256": "d1a541e8356da701da2ff3e2dea6597037f1b00643765771cdf4ec3c3fe2e8fa",
+      "bytes": 292
+    },
+    {
+      "path": "pkg/fileutils/download.go",
+      "sha256": "656654d1b7c03493b7cedc86e77ca7f01ebaef54edd069f3b1311313b6c6b67a",
+      "bytes": 2699
+    },
+    {
+      "path": "pkg/freeport/freeport.go",
+      "sha256": "4b505aae6acca054fe87ef669c6eb9db806299c6354c8586c41415811ae26b30",
+      "bytes": 1133
+    },
+    {
+      "path": "pkg/freeport/freeport_unix.go",
+      "sha256": "7e4ddbe554adfbfdb061e684252bcc581ad1425a92b3722c6b4b18f645241f23",
+      "bytes": 261
+    },
+    {
+      "path": "pkg/freeport/freeport_windows.go",
+      "sha256": "5e9bd5cf1252b43d7ce8bdbd9cf36bbd3ea1955e464c5c99e5155bb9a3cafdbb",
+      "bytes": 245
+    },
+    {
+      "path": "pkg/fsutil/fsutil_linux.go",
+      "sha256": "73cac755c71b9209c2d343b0e8e588ea32eb402d68f3e0073ebe283a88fcd254",
+      "bytes": 736
+    },
+    {
+      "path": "pkg/fsutil/fsutil_others.go",
+      "sha256": "41113b17168babf5ed5a96729a2c2cda5bd6e1793988499887353e556d1a7d44",
+      "bytes": 185
+    },
+    {
+      "path": "pkg/fsutil/fsutil_unix.go",
+      "sha256": "8d59547c4ca85239f73f0cdf11041c161cc2737925b19b637c4146f3e4d2ce5b",
+      "bytes": 1313
+    },
+    {
+      "path": "pkg/fsutil/fsutil_windows.go",
+      "sha256": "a44839f4e0f54272a3231c506f019fd7772f560e8e991d75ade997d24ac42173",
+      "bytes": 3346
+    },
+    {
+      "path": "pkg/fsutil/fsutil_windows_test.go",
+      "sha256": "b6644d79f2371fdf6be82f7a5ffb46012b0f7d56f59d3a620cdc92b47b5c7730",
+      "bytes": 1497
+    },
+    {
+      "path": "pkg/guestagent/api/client/client.go",
+      "sha256": "cc77de33c9b31a36adc9b9ce5af3169bda85869802fd218bbb78a9f3a8cf9c14",
+      "bytes": 2612
+    },
+    {
+      "path": "pkg/guestagent/api/client/credentials.go",
+      "sha256": "2788e609e98f1879e8b1b5114d069cdd583f786364a4d018ce0339e9e18fa317",
+      "bytes": 1619
+    },
+    {
+      "path": "pkg/guestagent/api/gen.go",
+      "sha256": "7e0d62d5dad30249879eb02f6f4e05722f4d1295d4096476c9a8c8ddbb70c329",
+      "bytes": 175
+    },
+    {
+      "path": "pkg/guestagent/api/guestservice.pb.desc",
+      "sha256": "5f37d3f34d474efb14c13c30550b3eface112e36a4cf99a294726d51ca217624",
+      "bytes": 1126
+    },
+    {
+      "path": "pkg/guestagent/api/guestservice.pb.go",
+      "sha256": "85575c36492705d234ac5ec7c8d8b78c8b71963cd1f6c6546d93b6856536f363",
+      "bytes": 16365
+    },
+    {
+      "path": "pkg/guestagent/api/guestservice.proto",
+      "sha256": "4168171abef2bd0437b5fad7230c8472c32f3cc2a2f88bcccbef9257e558ee80",
+      "bytes": 1222
+    },
+    {
+      "path": "pkg/guestagent/api/guestservice_grpc.pb.go",
+      "sha256": "1416afae969e9f290777ca3d3852544e5d716c7da9213225f1b0ed76449a87a0",
+      "bytes": 11321
+    },
+    {
+      "path": "pkg/guestagent/api/ipport.go",
+      "sha256": "f3c1889fd1402e004313b4b79563240d9189574bebb1edbe1689754e4f54777c",
+      "bytes": 236
+    },
+    {
+      "path": "pkg/guestagent/api/server/server.go",
+      "sha256": "44cc12169d82aedfa5b711876c9f1c0765cddc209bf07987b2295b691a7b4b65",
+      "bytes": 4138
+    },
+    {
+      "path": "pkg/guestagent/api/server/server_test.go",
+      "sha256": "b8ff7f961fbf35312f5dc4f609e174df397cb266716a5c1aff9899649aa8e203",
+      "bytes": 1359
+    },
+    {
+      "path": "pkg/guestagent/fakecloudinit/fakecloudinit_darwin.go",
+      "sha256": "4123da4a4dfcc0f65a2df6b801fbd5356ede87b2bd9b305f202243135b13c4e9",
+      "bytes": 20457
+    },
+    {
+      "path": "pkg/guestagent/guestagent.go",
+      "sha256": "81b293728ccc5bbe6360525d134a5fcd1eb097d6c5796579ef0609cb689bede3",
+      "bytes": 415
+    },
+    {
+      "path": "pkg/guestagent/guestagent_linux.go",
+      "sha256": "7fe3d002b715356c0f8de7d49776ea64f1dec230aa49ac663e7d23e1e8ae9974",
+      "bytes": 6187
+    },
+    {
+      "path": "pkg/guestagent/kubernetesservice/kubernetesservice.go",
+      "sha256": "56f344ee9caf1da9c9c450f7b99854ca2c1a706980f8ba13604c7d2050e7ebb0",
+      "bytes": 5744
+    },
+    {
+      "path": "pkg/guestagent/kubernetesservice/kubernetesservice_test.go",
+      "sha256": "53559aa42dd941af0e380c46af311a2a9210bd803e776ffa6744f407faf8f8e3",
+      "bytes": 8555
+    },
+    {
+      "path": "pkg/guestagent/kubernetesservice/types.go",
+      "sha256": "44f36966962f68b64ece33dcaf0ed23bff77c6a464968229e9db86419920cc0e",
+      "bytes": 1229
+    },
+    {
+      "path": "pkg/guestagent/serialport/serialconn_linux.go",
+      "sha256": "1d20a468aab8df91b2fe3ec53ab80d3a0cd7442f9a8c15183e693097fbfff9d1",
+      "bytes": 1189
+    },
+    {
+      "path": "pkg/guestagent/serialport/seriallistener_linux.go",
+      "sha256": "93eca44a32180320d9d928f5136d31d4518ccd23a8c20bb0c26c8d56d53cf1f8",
+      "bytes": 1092
+    },
+    {
+      "path": "pkg/guestagent/serialport/serialport_linux.go",
+      "sha256": "06d24e933c398be0662c0d2e5c588498afcc17891e79f5f46c02dee148d6ee06",
+      "bytes": 759
+    },
+    {
+      "path": "pkg/guestagent/sockets/sockets.go",
+      "sha256": "97a7be05f6d596056dee491e8a70c0fdbaa69ed811ddf8253c5174ae5b42af59",
+      "bytes": 520
+    },
+    {
+      "path": "pkg/guestagent/sockets/sockets_linux.go",
+      "sha256": "c46501b6c3b65fa656d20f084dc04a7616f550b03e2c0d8bf205a6f1d1f13cb1",
+      "bytes": 3060
+    },
+    {
+      "path": "pkg/guestagent/sockets/sockets_linux_test.go",
+      "sha256": "fa2b552174cd65c3e49c62dda79b639525b037253fc04871f1cb465d0472c44e",
+      "bytes": 3319
+    },
+    {
+      "path": "pkg/guestagent/ticker/compound.go",
+      "sha256": "282214c62cde6ffc75587ae56d607adfa989adf0baaa7b07fed50cf1a64dc95c",
+      "bytes": 777
+    },
+    {
+      "path": "pkg/guestagent/ticker/ebpf_linux.go",
+      "sha256": "4c20653c65ba72077f4c0441fd9324e3692306b81cff21aed3e8ebb2d6cbed07",
+      "bytes": 3033
+    },
+    {
+      "path": "pkg/guestagent/ticker/simple.go",
+      "sha256": "28de2e447f618ecf30a4a3db237d8a95f77cfe1e0ca9914496aab6bee110eb81",
+      "bytes": 1265
+    },
+    {
+      "path": "pkg/guestagent/ticker/ticker.go",
+      "sha256": "c913c2261fa561645439cd804be6691713b3bc27be00d6032c4eb79807fabc54",
+      "bytes": 260
+    },
+    {
+      "path": "pkg/guestagent/timesync/timesync_linux.go",
+      "sha256": "476b30bd35e8dce35eda4f3b664b8f2a3c3d885bae9332fcc4c7e5e7c0046009",
+      "bytes": 269
+    },
+    {
+      "path": "pkg/guestagent/timesync/timesync_others.go",
+      "sha256": "ee6d20c83c39d38c681568ee8e007d3f69160ad694df794723f9279df0bd4a5f",
+      "bytes": 305
+    },
+    {
+      "path": "pkg/guestpatch/macos/macos_darwin.go",
+      "sha256": "4bb60ead2fe0827f8bea3290098496bcab702ef3d5ace29418a8cbd85a0b73ab",
+      "bytes": 5839
+    },
+    {
+      "path": "pkg/hostagent/api/api.go",
+      "sha256": "a9fb521f12da1197608c5865714deed0f76aafe6922052e59fc20348dd1698e0",
+      "bytes": 390
+    },
+    {
+      "path": "pkg/hostagent/api/client/client.go",
+      "sha256": "9f9b1bd4e24073af3b65cd228db5d511a3c39257e32eecb54df41bcf262b6e13",
+      "bytes": 3185
+    },
+    {
+      "path": "pkg/hostagent/api/server/server.go",
+      "sha256": "fc5a1b24953487c62a017b550ecf9925d1179418b91df08e477993cb641f19aa",
+      "bytes": 2687
+    },
+    {
+      "path": "pkg/hostagent/cloudinit_test.go",
+      "sha256": "3fb9d96d7b24594dea38ad6d66b1c61e30e65f9ca6e391b66145418cfd30847a",
+      "bytes": 1088
+    },
+    {
+      "path": "pkg/hostagent/dns/dns.go",
+      "sha256": "227f647715c515c0929677638d389abe1159ad17619ae05baa934554c1aee3b1",
+      "bytes": 10068
+    },
+    {
+      "path": "pkg/hostagent/dns/dns_test.go",
+      "sha256": "c4011df3d1a9d880085261daa7623c48cdae3acfd3fc1f34ebf23acae2290957",
+      "bytes": 9879
+    },
+    {
+      "path": "pkg/hostagent/events/events.go",
+      "sha256": "742bb2030974098a472575877c93852b0359734c58c8ad8923fdbf09e74ea111",
+      "bytes": 2172
+    },
+    {
+      "path": "pkg/hostagent/events/watcher.go",
+      "sha256": "98dca92071a658f49c7abd542629c6a3824686a8749d2439fc855d45480243be",
+      "bytes": 1967
+    },
+    {
+      "path": "pkg/hostagent/ga_sock_forward_test.go",
+      "sha256": "0f3f85c93f717b9add263c0cd12137d23263af895d3440224a485e43b729dff3",
+      "bytes": 4051
+    },
+    {
+      "path": "pkg/hostagent/hostagent.go",
+      "sha256": "02a6f5b43702f9f5918d1bf253f2442a0a42f868eea0a558d011c4aa6b2479c5",
+      "bytes": 43622
+    },
+    {
+      "path": "pkg/hostagent/hostagent_unix.go",
+      "sha256": "553113555e659dd0f3095efb8728614e40edef60275b1db1df67201d1024c975",
+      "bytes": 936
+    },
+    {
+      "path": "pkg/hostagent/hostagent_windows.go",
+      "sha256": "8d7b687741b2e7968569b604e48e30a73a8d9f7944f24f13a35e327e470223de",
+      "bytes": 142
+    },
+    {
+      "path": "pkg/hostagent/inotify.go",
+      "sha256": "43b31b66110bccb959bba32566fac9269d34cfeea7a3fb26eb6dd2e514111ee2",
+      "bytes": 3791
+    },
+    {
+      "path": "pkg/hostagent/inotify_darwin.go",
+      "sha256": "8d6c368c15da083e942e73c7b7635d52bf383426ee7572c2b2eaf758e9dcf5ae",
+      "bytes": 257
+    },
+    {
+      "path": "pkg/hostagent/inotify_linux.go",
+      "sha256": "1210dea67645bb67a0eef545b86e6227e7b24a34e372fb05ba89f6cedff646d9",
+      "bytes": 245
+    },
+    {
+      "path": "pkg/hostagent/inotify_others.go",
+      "sha256": "133d7d52455379ceb0628f49a5970d33a039e977230946bdeeddc0fa30fdcf4e",
+      "bytes": 257
+    },
+    {
+      "path": "pkg/hostagent/inotify_test.go",
+      "sha256": "55db33109bb4761ef7987dc3d61cac1a4825237a8fdda021ca2c00587365f400",
+      "bytes": 4205
+    },
+    {
+      "path": "pkg/hostagent/mount.go",
+      "sha256": "1d9182e5475552e3074d3766ed90a6a5bc16ea51c3165e663d0c776caa46f405",
+      "bytes": 4897
+    },
+    {
+      "path": "pkg/hostagent/mount_windows_test.go",
+      "sha256": "7edfb65fa293c93ed4d0721d611a577e2eb4487e809ff55cdd3b33288677e9b7",
+      "bytes": 3519
+    },
+    {
+      "path": "pkg/hostagent/port.go",
+      "sha256": "b2b167c7860cc982a4be372a6feca771643c8f4d4ad0a02fb4aa5810d9ebac17",
+      "bytes": 5312
+    },
+    {
+      "path": "pkg/hostagent/port_darwin.go",
+      "sha256": "6d597b81819b3ce3e6bc1511a92d3377ea6fbb459a2e6aab167c886068861c52",
+      "bytes": 4495
+    },
+    {
+      "path": "pkg/hostagent/port_others.go",
+      "sha256": "b910a46935b8ed18fedac4cbd87f2af11981fca6dd91d5d9cc1b6f9878fcba98",
+      "bytes": 425
+    },
+    {
+      "path": "pkg/hostagent/port_test.go",
+      "sha256": "8dce47ee889045d6018f0e4e277e0358a8919295c267134f3d3a66b3ad158efa",
+      "bytes": 1185
+    },
+    {
+      "path": "pkg/hostagent/port_windows.go",
+      "sha256": "55c42d946a1761a0cf8ea2528b84f763062bdd5d5f665c1b622c7d0422f0555c",
+      "bytes": 393
+    },
+    {
+      "path": "pkg/hostagent/portforward_test.go",
+      "sha256": "cb5b2e4d9187c7da5280815567e9fb3e5b29e0062553cef0912c4cf4bfdcd07d",
+      "bytes": 1769
+    },
+    {
+      "path": "pkg/hostagent/requirements.go",
+      "sha256": "105191f8c4441ed7c0b2738e20f1331c8b4407e98d7843185bf5cfb4f636e1d3",
+      "bytes": 13429
+    },
+    {
+      "path": "pkg/hostagent/timesync.go",
+      "sha256": "c7cbba4aedab29626ba3c71f33bcd6c1d90cda82f4dcb3e18c225fc3744ee332",
+      "bytes": 1478
+    },
+    {
+      "path": "pkg/httpclientutil/httpclientutil.go",
+      "sha256": "ed20a3129eec8bcf8036a0c44aedb1066946d45e6a5342eeca1da544aaa55375",
+      "bytes": 3349
+    },
+    {
+      "path": "pkg/httpclientutil/httpclientutil_others.go",
+      "sha256": "114cc0d8d4ba90fdeb1cb98bfde3dcbbd553582d3aafe6c070a30e66e6a9181b",
+      "bytes": 678
+    },
+    {
+      "path": "pkg/httpclientutil/httpclientutil_windows.go",
+      "sha256": "766cefb2ee458eecf8e00cf9177d8ce4f7e1e5c223706daeefdd74788d90d7c4",
+      "bytes": 725
+    },
+    {
+      "path": "pkg/httputil/httputil.go",
+      "sha256": "2b12af70396328e63a392d37984ea9a5ee573c1ab241a46a5a02edd405ba6f1d",
+      "bytes": 258
+    },
+    {
+      "path": "pkg/identifiers/validate.go",
+      "sha256": "c6ac6f646151049c207c1ad6c73ae44827a577ff5966352bbde39cd495d6f7a1",
+      "bytes": 2493
+    },
+    {
+      "path": "pkg/identifiers/validate_test.go",
+      "sha256": "ec7ce7274d3e11d0292b0f60d962be2100fc6f2e02a1c7891144e16e6b72e1e6",
+      "bytes": 1900
+    },
+    {
+      "path": "pkg/imgutil/manager.go",
+      "sha256": "7fad950de5ab28137d97bbd038107d070ebe0cec22c859d641a0882c83bcff28",
+      "bytes": 882
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/asifutil/asif_darwin.go",
+      "sha256": "03da72a5b63a6c20476096a3d7e20d19b507197b10d224214ec819dd3007a31b",
+      "bytes": 5249
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/asifutil/asif_darwin_test.go",
+      "sha256": "b18d5ff2f25abf049453a10f1bd0b345569cbd69d20cd8e2ded03eef17a46b6c",
+      "bytes": 6956
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/asifutil/asif_others.go",
+      "sha256": "21ca351d1b2e4c317a7921bb15a4147b5d83f845f996d2b0ce715202f3fdc907",
+      "bytes": 550
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/fuzz_test.go",
+      "sha256": "52688690e75d6bcbf447f1841d5f82dd88c3b526c23d8b6d47e161800deb30d7",
+      "bytes": 598
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/nativeimgutil.go",
+      "sha256": "51ece74200f5104c7d91165ab643cbaf7eb32e709b133c235265bfacd20ce503",
+      "bytes": 8644
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/nativeimgutil_test.go",
+      "sha256": "5d35acd94c99d0a09e6597e0193ac36858e6733ef61513a39d671f43a439df2c",
+      "bytes": 4922
+    },
+    {
+      "path": "pkg/imgutil/nativeimgutil/zstd.go",
+      "sha256": "cfb778e840f57876f8ffd258db1f5c23f6ec3c1fb5a187e83ed7f986cc221b64",
+      "bytes": 676
+    },
+    {
+      "path": "pkg/imgutil/proxyimgutil/proxyimgutil.go",
+      "sha256": "c8e97df1840743bc6dac75b6c9a42d439e93de0670e77220efe78a499f3e5c0a",
+      "bytes": 2570
+    },
+    {
+      "path": "pkg/instance/ansible.go",
+      "sha256": "10608bfe9811504c0ae5cc4c687e1497939f4d596ea217a15e7994f056aaf42b",
+      "bytes": 1915
+    },
+    {
+      "path": "pkg/instance/clone.go",
+      "sha256": "3cb12a9628ef5e2692afc75f38d0d14d541aee000e5516c403d214996f3e6335",
+      "bytes": 2861
+    },
+    {
+      "path": "pkg/instance/create.go",
+      "sha256": "93e8c1752256b1d77813ef1723d1761e47d5842cc276575d1f808d48c3d4ae7e",
+      "bytes": 3795
+    },
+    {
+      "path": "pkg/instance/delete.go",
+      "sha256": "ac6ced378e5ee3f7c94dbbd9e43b2b60fa220d834cb63292814d62a52b898c6a",
+      "bytes": 1347
+    },
+    {
+      "path": "pkg/instance/hostname/hostname.go",
+      "sha256": "3e24792567415c04b3417fde50a62a1ad9e2d8907bb508458acda8e82ac1b67d",
+      "bytes": 477
+    },
+    {
+      "path": "pkg/instance/hostname/hostname_test.go",
+      "sha256": "25d769f6de25f42608e99a0b1871865cabfff9c94e4935ccbb5429c88f5a7be6",
+      "bytes": 479
+    },
+    {
+      "path": "pkg/instance/restart.go",
+      "sha256": "984a257b118f8c716c56fdf5b21852b3a2b23cd356d2d23d7c267e92742d9190",
+      "bytes": 1695
+    },
+    {
+      "path": "pkg/instance/start.go",
+      "sha256": "5c0cd4394e8cde0bedcaa7c9022450051d8b3db2f30ed2e2d99edff4f56d9b4a",
+      "bytes": 17455
+    },
+    {
+      "path": "pkg/instance/start_unix.go",
+      "sha256": "0cfcb0e9aa4bb9fafa4c2d0f8bde57fda36c9dfadf7190d13d7b01a78eacb0ee",
+      "bytes": 1373
+    },
+    {
+      "path": "pkg/instance/start_windows.go",
+      "sha256": "f66b45e6a46775cb12824ed40e8f1ee7392563eb9e6cd1905bd0ceab24a021aa",
+      "bytes": 286
+    },
+    {
+      "path": "pkg/instance/stop.go",
+      "sha256": "ac3bb9a09815db03dc60247dc56fc083ed484af10d80b762e1e2cfe565135559",
+      "bytes": 4862
+    },
+    {
+      "path": "pkg/ioutilx/ioutilx.go",
+      "sha256": "556707ad37a26e976d0475e9e19310bcaf1e70734b7b2a56efdc09527b2b0849",
+      "bytes": 462
+    },
+    {
+      "path": "pkg/iso9660util/fuzz_test.go",
+      "sha256": "f440ab0302e90ac78d986287377a8c69aa0524b17550b849006dde13143fad81",
+      "bytes": 443
+    },
+    {
+      "path": "pkg/iso9660util/iso9660util.go",
+      "sha256": "3d760e97c66f393aab405d67945d458e26a827843e24383ad3ae8493ee0a2b96",
+      "bytes": 2627
+    },
+    {
+      "path": "pkg/iso9660util/joliet.go",
+      "sha256": "2d43b50bbe0115f6aaf32bbf1e16cb0b6ab4201f104a5d18f539ca8a513714e1",
+      "bytes": 1802
+    },
+    {
+      "path": "pkg/jsonschemautil/jsonschemautil.go",
+      "sha256": "ef7e2ea9ccd03fa36d20d8db39edf54b32021b180d7670de40b7fc874dc39113",
+      "bytes": 566
+    },
+    {
+      "path": "pkg/jsonschemautil/jsonschemautil_test.go",
+      "sha256": "e87386007191f0c1993fffd65629fc09aefa37731827c820d8960dd43e846ce2",
+      "bytes": 566
+    },
+    {
+      "path": "pkg/jsonschemautil/testdata/invalid.yaml",
+      "sha256": "4b3f4ca5a4651d5e0787248316b6c07cce7eabe48c20cb06424ce390612c9f50",
+      "bytes": 25
+    },
+    {
+      "path": "pkg/jsonschemautil/testdata/schema.json",
+      "sha256": "7a447a94be63485558a91f8e928776cebc81dfaf7be90fc1c4eeff8e1029c02c",
+      "bytes": 133
+    },
+    {
+      "path": "pkg/jsonschemautil/testdata/valid.yaml",
+      "sha256": "dc0ccc869253c04f37a7ba67a46ad7f9955bce001591e37c4273281447a3f455",
+      "bytes": 23
+    },
+    {
+      "path": "pkg/limactlutil/limactlutil.go",
+      "sha256": "28374e516dde6203326d226ef2f864ff707d6852a3b84b0a687d3de209c63253",
+      "bytes": 1005
+    },
+    {
+      "path": "pkg/limainfo/limainfo.go",
+      "sha256": "b08484e7c864ded458d201050cfcd1e77a52336836723cf016a55fc7967cfe52",
+      "bytes": 4544
+    },
+    {
+      "path": "pkg/limatmpl/abs.go",
+      "sha256": "17c38647ed0c99d4cd76fb3c5fe5859bc8bcf33ba1aff554ec4bc30c567e2287",
+      "bytes": 5585
+    },
+    {
+      "path": "pkg/limatmpl/abs_test.go",
+      "sha256": "8e8e51f06fd3a11338d765d6e4853ee916dce7e71d489ea7a1f5b56dcebecd7e",
+      "bytes": 7931
+    },
+    {
+      "path": "pkg/limatmpl/embed.go",
+      "sha256": "a23a33d906b801dd3fe8b7e291a15cfbd59f5f7f2be7e986fcdb3ba9ec278339",
+      "bytes": 25263
+    },
+    {
+      "path": "pkg/limatmpl/embed_test.go",
+      "sha256": "ca19f5050e5dccb5407176cb9ebb34bb14c72344eca0222023a6fbe6eda45a59",
+      "bytes": 13724
+    },
+    {
+      "path": "pkg/limatmpl/github.go",
+      "sha256": "881b769d94b8755df74900428e635f1bae83291e7c2bd25dd8028cb25eae1ccc",
+      "bytes": 9137
+    },
+    {
+      "path": "pkg/limatmpl/github_test.go",
+      "sha256": "c008025233bc40fb4298df0a209106d8250ea4ddbb960df16b02a0336a76d323",
+      "bytes": 3191
+    },
+    {
+      "path": "pkg/limatmpl/locator.go",
+      "sha256": "b062db7ef9ee5fdcba84d14bfd510a03a796f9a0db25d26c791ce113eb2bd9b0",
+      "bytes": 12202
+    },
+    {
+      "path": "pkg/limatmpl/locator_test.go",
+      "sha256": "5f53adeae75807420b573c60bf6a1de44b37009e5d82be9314b2f40f26558cb6",
+      "bytes": 7384
+    },
+    {
+      "path": "pkg/limatmpl/template.go",
+      "sha256": "fd9d304133c736539539f896eb6d839c26583eb4a6cdfdcbe3c29138942d5b81",
+      "bytes": 1109
+    },
+    {
+      "path": "pkg/limatype/dirnames/dirnames.go",
+      "sha256": "312b8a9403b018d8b2b9ee96dcaa868dd48b375b21aea3be5f4aa55172f09f19",
+      "bytes": 2971
+    },
+    {
+      "path": "pkg/limatype/filenames/filenames.go",
+      "sha256": "406a125f78e0a253a6e2dba616f73150be02d45393401c83f493ecaf3529afd3",
+      "bytes": 5274
+    },
+    {
+      "path": "pkg/limatype/lima_instance.go",
+      "sha256": "9b3ad1b0ae13702dc87b5bf509eca40ab0c31eea135e49bda876e4dddf58be0e",
+      "bytes": 3687
+    },
+    {
+      "path": "pkg/limatype/lima_yaml.go",
+      "sha256": "ba26b3d5e2ec632e5cd1b79dc20d727f3c38bd21feb3f04531d7ceb9b50e03a4",
+      "bytes": 20285
+    },
+    {
+      "path": "pkg/limayaml/containerd.yaml",
+      "sha256": "adbabd2f2e59c6f4348acc4621ea11cf869b53e725a73404b62fd265cbae3eef",
+      "bytes": 592
+    },
+    {
+      "path": "pkg/limayaml/defaults.go",
+      "sha256": "ab6046b9e19474d3d50a60a8edd658c76880b060d15ee826054855e15c9ef129",
+      "bytes": 32371
+    },
+    {
+      "path": "pkg/limayaml/defaults_test.go",
+      "sha256": "cc11ba3b82c3c97634f35469fd1a79c18eb7b91b2efa70415cfbba27b0a14460",
+      "bytes": 34725
+    },
+    {
+      "path": "pkg/limayaml/defaults_unix.go",
+      "sha256": "86d83a7666a15f8ce70408d9e27f8fcd3da3b9cba91e4af726c50e5a790cc0ff",
+      "bytes": 1446
+    },
+    {
+      "path": "pkg/limayaml/defaults_unix_test.go",
+      "sha256": "19b7053bb33d6e339287ef4c6d19c54f14c2f2a56bd25298f06bd6ab6eb21cad",
+      "bytes": 1518
+    },
+    {
+      "path": "pkg/limayaml/defaults_windows.go",
+      "sha256": "aa970650e7e75bee6576be4661e6f8a618b20f00e2896a1b7193c0fcae87b737",
+      "bytes": 219
+    },
+    {
+      "path": "pkg/limayaml/disklabel.go",
+      "sha256": "3ad509def11bab909d8f738a09f11253a7fd5e2a84ee6df04e060b9bb996b101",
+      "bytes": 1730
+    },
+    {
+      "path": "pkg/limayaml/disklabel_test.go",
+      "sha256": "eabfd1cee038b2b5bb5d2cf326a3304414a812cd163504c63e5549a3d7659271",
+      "bytes": 1826
+    },
+    {
+      "path": "pkg/limayaml/limayaml_test.go",
+      "sha256": "f84b65ceae5b65964e5f763ce70054ab131ad9f5a6300d3737697f73d3a195f0",
+      "bytes": 1602
+    },
+    {
+      "path": "pkg/limayaml/load.go",
+      "sha256": "e43e1aa4b83b680bcbe51b5dbbbd524f6fe6b2c590a5474213ea2e19abb5d849",
+      "bytes": 2245
+    },
+    {
+      "path": "pkg/limayaml/load_test.go",
+      "sha256": "acc47763eea2d98f61e4d01ca00766becfce5704d626d215d25affdc6af240d4",
+      "bytes": 1757
+    },
+    {
+      "path": "pkg/limayaml/marshal.go",
+      "sha256": "132a54a94592c03a2055150252b79a3122054cf36e5b4ab0f6d187beafbaec60",
+      "bytes": 3031
+    },
+    {
+      "path": "pkg/limayaml/marshal_test.go",
+      "sha256": "f05229320d15f77bffe7db867c311945019e3b483b0000b7812ef50a46f725fe",
+      "bytes": 4269
+    },
+    {
+      "path": "pkg/limayaml/validate.go",
+      "sha256": "443102a8961fa2238929202f6e45f4b5f03749702a2952372d3a3537c87ca9aa",
+      "bytes": 32541
+    },
+    {
+      "path": "pkg/limayaml/validate_test.go",
+      "sha256": "120b0b68180f89d42177736c739e3100a7b4bfbe9e1b297fff1590de0b261cb6",
+      "bytes": 25733
+    },
+    {
+      "path": "pkg/limayaml/validate_unix_test.go",
+      "sha256": "13e4ed074d82165a3cad5625a07109e7a12d687059fbc1b3f37249d72f6b809e",
+      "bytes": 1024
+    },
+    {
+      "path": "pkg/localpathutil/localpathutil.go",
+      "sha256": "45c3a54e971571f27a4236be81b4b2e403b90e1098b988afbb2dd7c23d290279",
+      "bytes": 978
+    },
+    {
+      "path": "pkg/localpathutil/localpathutil_test.go",
+      "sha256": "5bc5956b26c4b6c5925eed8954a0d1020fad48d2c834934c8d26b13ad3ea5400",
+      "bytes": 1090
+    },
+    {
+      "path": "pkg/lockutil/lockutil_test.go",
+      "sha256": "d6ddb34a70c75500faad2581abee79dffa465535acedba86659a96687dbacc73",
+      "bytes": 1134
+    },
+    {
+      "path": "pkg/lockutil/lockutil_unix.go",
+      "sha256": "e783b252398f110ce64639a568da4ce6444a7a8e3e7cbaac700ab3bc7311136e",
+      "bytes": 1470
+    },
+    {
+      "path": "pkg/lockutil/lockutil_windows.go",
+      "sha256": "51be6a97db2353561b764870c790b8fa40e87c74ea4d822b193b31a1a7fe6d54",
+      "bytes": 2874
+    },
+    {
+      "path": "pkg/logrusutil/logrusutil.go",
+      "sha256": "d8bdabc78b52e830c78d85720ada3b779fc205dc4044022d97e87b681975e8cd",
+      "bytes": 1727
+    },
+    {
+      "path": "pkg/logrusutil/logrusutil_test.go",
+      "sha256": "21ada1a9b493d5e839cccf4af2c4974e8cfd7d698631156e93610ef2adc3e274",
+      "bytes": 4752
+    },
+    {
+      "path": "pkg/mcp/msi/filesystem.go",
+      "sha256": "9c284205ff6e55bcf81bfbd1661b34a54d0734c1b7da8c6fdaca231e9dbff67e",
+      "bytes": 4260
+    },
+    {
+      "path": "pkg/mcp/msi/msi.go",
+      "sha256": "319793323ac73988c05c0767875f62ad6c0e89dacf82415a6146421de518499a",
+      "bytes": 1147
+    },
+    {
+      "path": "pkg/mcp/msi/shell.go",
+      "sha256": "bfc48670c8848c5cfcdc100e9194566d23cd8048b6c2d4d9af1e24b279ba1c58",
+      "bytes": 1433
+    },
+    {
+      "path": "pkg/mcp/toolset/filesystem.go",
+      "sha256": "8595c9f5cceb665023b05b3ec51e613a5d72621e79182e2ef6c72c70254904eb",
+      "bytes": 5040
+    },
+    {
+      "path": "pkg/mcp/toolset/shell.go",
+      "sha256": "e7092a025931310559fc7f91581e0fe3f9468504612363ee55991a97ac840f5a",
+      "bytes": 1174
+    },
+    {
+      "path": "pkg/mcp/toolset/toolset.go",
+      "sha256": "53c44a52e029900b955355c24a28b0d2d3f3d7796ccc76e816029660b799f023",
+      "bytes": 3002
+    },
+    {
+      "path": "pkg/must/must.go",
+      "sha256": "6af18a02cabdaf8e4e68a34cb08fa5ee4a6dfb3d21ad1740d55359db27821d77",
+      "bytes": 194
+    },
+    {
+      "path": "pkg/must/must_test.go",
+      "sha256": "f7a957c7f2d998ef5860c9f4377dc745e0dc1c25c6584950ca0a130b537acf08",
+      "bytes": 444
+    },
+    {
+      "path": "pkg/networks/commands.go",
+      "sha256": "833fbd5ee19c1317c87381220c943214ebf107c09181d577654181d2cdeafdfb",
+      "bytes": 8405
+    },
+    {
+      "path": "pkg/networks/commands_darwin_test.go",
+      "sha256": "afcfe0e6f219cd6076f51e322bd179e7c472c1ef6a06364f25515031bfda52ba",
+      "bytes": 551
+    },
+    {
+      "path": "pkg/networks/commands_test.go",
+      "sha256": "4183d398f7ee880938ba338f2d2fe9faa8f38036777518bbc50335710fc3fa01",
+      "bytes": 4358
+    },
+    {
+      "path": "pkg/networks/config.go",
+      "sha256": "0aaeaf15bdd1ce459eace59317d0a8dee280f97f1cf07ded280afcabb1d85a36",
+      "bytes": 5217
+    },
+    {
+      "path": "pkg/networks/config_test.go",
+      "sha256": "d0b07975bbd60db65192bc1cb737639d81714aedba9a9273bb7bb932398eab34",
+      "bytes": 1581
+    },
+    {
+      "path": "pkg/networks/const.go",
+      "sha256": "69fbdb193f83ae834643b583a1cae22257f90fa1b0e95c410a63097a5071eaec",
+      "bytes": 355
+    },
+    {
+      "path": "pkg/networks/networks.TEMPLATE.yaml",
+      "sha256": "595b541375e468df32f63c5765303118a87fa23580a7ba3d047b2ad751bbe559",
+      "bytes": 1420
+    },
+    {
+      "path": "pkg/networks/networks.go",
+      "sha256": "8da3cdbedfb9e837b1ebc397d7e3cd5c64918e2a39be822848dd7635cfb7208c",
+      "bytes": 1357
+    },
+    {
+      "path": "pkg/networks/reconcile/reconcile.go",
+      "sha256": "a4180fd8517348046efd878cae5480063e6bb28b3fd73a8ed5764b599630abd2",
+      "bytes": 13897
+    },
+    {
+      "path": "pkg/networks/sudoers.go",
+      "sha256": "9e1c03108d7258d8e4c94f5ea3b67dba5e79c66be1228426842128cda65983fc",
+      "bytes": 3507
+    },
+    {
+      "path": "pkg/networks/sudoers_test.go",
+      "sha256": "4c06cc86a4f69996b8834520e34f16de3fa318f9b6a3696703d7a98f105b6dc0",
+      "bytes": 2354
+    },
+    {
+      "path": "pkg/networks/usernet/client.go",
+      "sha256": "de94d6e0ec931ad8b40c6ea66673a4e865fb68ecc544f64757f2fed4834f65c1",
+      "bytes": 4878
+    },
+    {
+      "path": "pkg/networks/usernet/config.go",
+      "sha256": "efe4226817701ad958caaaa0cef869a8645a157d976c5a422fbc4bcd2015be90",
+      "bytes": 3207
+    },
+    {
+      "path": "pkg/networks/usernet/config_test.go",
+      "sha256": "3ab649290b534401a543ce4be36c3d9306c490b7b92d2bcf3f18549dc8fead3b",
+      "bytes": 799
+    },
+    {
+      "path": "pkg/networks/usernet/dnshosts/dnshosts.go",
+      "sha256": "0d5d6810a391065ce74ad27dc62b6c12bab1f899133e025c0b0986aaf33fda86",
+      "bytes": 2721
+    },
+    {
+      "path": "pkg/networks/usernet/dnshosts/dnshosts_test.go",
+      "sha256": "bc648a8a9694be6e63bd4fbe7ea926bfe9bb66ef5ffe30a225751ccd4941b861",
+      "bytes": 5096
+    },
+    {
+      "path": "pkg/networks/usernet/gvproxy.go",
+      "sha256": "8fea6af4b43884b6d52e3e6e831dded5ba8229bdb3de20a2a326e14330e9e244",
+      "bytes": 7091
+    },
+    {
+      "path": "pkg/networks/usernet/gvproxy_test.go",
+      "sha256": "8b7425ea3da174f444a18374d9bc5ec3bfbb017e94710fc78b332e43a5826bec",
+      "bytes": 1127
+    },
+    {
+      "path": "pkg/networks/usernet/recoincile.go",
+      "sha256": "81c8a0f4565ccb9feb4051fc97d7a94348792a2bb913fbaf30ab7364d7569448",
+      "bytes": 5317
+    },
+    {
+      "path": "pkg/networks/usernet/udpfileconn.go",
+      "sha256": "1418857fa777b0b0bd93925766ad774d098b22717bacf5125b9803d2b97f6438",
+      "bytes": 480
+    },
+    {
+      "path": "pkg/networks/validate.go",
+      "sha256": "10473c362dbb40455018366cf0080d38649f62c11692cc9f3c15e9ee845d85ed",
+      "bytes": 7580
+    },
+    {
+      "path": "pkg/networks/validate_test.go",
+      "sha256": "29c44b4cb82899239a6db3274a7b4e95317bf4c272d68a81504f046f7562c8e6",
+      "bytes": 1396
+    },
+    {
+      "path": "pkg/networks/validate_unix_test.go",
+      "sha256": "e817f8d2227cbb0bfef20ed0ecea813e4c4ee9a74a32f21bfd50155ec5f6c4c5",
+      "bytes": 2586
+    },
+    {
+      "path": "pkg/osutil/bootsession.go",
+      "sha256": "793707ea533a68c02c1c8564fc5ec355f6793812c3649783366519edebcb33fc",
+      "bytes": 353
+    },
+    {
+      "path": "pkg/osutil/bootsession_darwin.go",
+      "sha256": "4934153d4379384cd4c6b5e3c0e05c07cd4a0c07bce651e2e7faba4589a93cb4",
+      "bytes": 420
+    },
+    {
+      "path": "pkg/osutil/bootsession_linux.go",
+      "sha256": "f19a8311eaf65b6db3789cf746bb9e827b7e2e66e69eea13f87f98a2f4d5cf0d",
+      "bytes": 510
+    },
+    {
+      "path": "pkg/osutil/bootsession_others.go",
+      "sha256": "b39c3b28ae7301cca6dfcf8211743aa9ad292296588a386194623c807328b020",
+      "bytes": 292
+    },
+    {
+      "path": "pkg/osutil/dns_darwin.go",
+      "sha256": "40ec68a83fbe6c06a91451229a84553526040f70b755eadba39af3c9e42a727d",
+      "bytes": 2626
+    },
+    {
+      "path": "pkg/osutil/dns_others.go",
+      "sha256": "8ab1de8389acf0dea740ad903adc597801d9f0656ce17392bddf9d29ad323aa5",
+      "bytes": 320
+    },
+    {
+      "path": "pkg/osutil/exit.go",
+      "sha256": "e8d4c8294035bc56ad3e8bae386ac1e52ee5aec0f68363295bc31a353722ad83",
+      "bytes": 787
+    },
+    {
+      "path": "pkg/osutil/file.go",
+      "sha256": "7500a044ab94488ed709cfb3bba0c40a4cfe586c67809120774fff574575ca64",
+      "bytes": 2306
+    },
+    {
+      "path": "pkg/osutil/file_test.go",
+      "sha256": "2234c29331d69049dc98a62a99309ec238ae44e952d4538dc1e97eb934b1224f",
+      "bytes": 2457
+    },
+    {
+      "path": "pkg/osutil/machineid.go",
+      "sha256": "9c301ec156eee87704c1b3c2ee40501b9637a4a9acc5303105c7bfad62665a90",
+      "bytes": 2303
+    },
+    {
+      "path": "pkg/osutil/machineid_test.go",
+      "sha256": "a0740b7f1bfcd075d1d045a2b5f64222b179798226d701ca4970c843eb759e9c",
+      "bytes": 1284
+    },
+    {
+      "path": "pkg/osutil/mount_darwin.go",
+      "sha256": "c068584540a9d9011b76dd8da414a2ba591172c5c0c43fcba802682d3ba33fec",
+      "bytes": 1043
+    },
+    {
+      "path": "pkg/osutil/osutil_linux.go",
+      "sha256": "f16955aa49b13246afaaa697e3f655fc0d0118bc09f43eee8ab6f1275b9f2eb4",
+      "bytes": 781
+    },
+    {
+      "path": "pkg/osutil/osutil_others.go",
+      "sha256": "8b649751d7ae746ca6be9552662815a89b60d4deb8caaece02354e89a3e03046",
+      "bytes": 812
+    },
+    {
+      "path": "pkg/osutil/osutil_unix.go",
+      "sha256": "bd4bbf753006839c8db6c832ec28a97ad807fbdeee96ed138784cc272e79a58d",
+      "bytes": 1085
+    },
+    {
+      "path": "pkg/osutil/osutil_windows.go",
+      "sha256": "ba93e8ccd854e2e34ac8b0207922e25874c088552d75c09559045d8e470fb769",
+      "bytes": 1710
+    },
+    {
+      "path": "pkg/osutil/osversion_darwin.go",
+      "sha256": "e69ff2b39b34d3daeefe40a4bea8fa62c4cb4a661debb537c09208836735b8b7",
+      "bytes": 848
+    },
+    {
+      "path": "pkg/osutil/osversion_others.go",
+      "sha256": "35c7fd5eaa4c8fc14e2a21caff5e529c2f802178685b874b14b213f63294fd6b",
+      "bytes": 359
+    },
+    {
+      "path": "pkg/osutil/rosetta_darwin.go",
+      "sha256": "44cf40c10a935fe7b28ae5215e758c79942f17074ebc319821426720701b7782",
+      "bytes": 611
+    },
+    {
+      "path": "pkg/osutil/rosetta_others.go",
+      "sha256": "434c53f86f86abf6b946213a0995c600ae0e2ddaacf8343b1ea8376b58b75be7",
+      "bytes": 185
+    },
+    {
+      "path": "pkg/osutil/user.go",
+      "sha256": "3b94d2c282fd2a84227ba263ec86bda70bcddccf1b33452b60c18aba6d317072",
+      "bytes": 5102
+    },
+    {
+      "path": "pkg/osutil/user_test.go",
+      "sha256": "2a208753047fcae4690df5325f36e7438091ab3411356f75cb4328456944a1c7",
+      "bytes": 1898
+    },
+    {
+      "path": "pkg/plist/plist.go",
+      "sha256": "0eb5a63ca7f56ccfe435699f9036cd26e4228a98c744be940fa03a4cb7038517",
+      "bytes": 4482
+    },
+    {
+      "path": "pkg/plist/plist_test.go",
+      "sha256": "062512cdac1ec5b7ade98acf333c3888a1f04a8ac3aeafb34266e749057f887a",
+      "bytes": 3547
+    },
+    {
+      "path": "pkg/plugins/plugins.go",
+      "sha256": "514dca781d8b55c562a78721795c9b97c3a0f93834bea92cabbb7dd63e026bc2",
+      "bytes": 4745
+    },
+    {
+      "path": "pkg/portfwd/client.go",
+      "sha256": "79db6845e46e303b281c2fa5a32962fbd190d75d2b494baa5fdae5ccbdfc9817",
+      "bytes": 5083
+    },
+    {
+      "path": "pkg/portfwd/client_test.go",
+      "sha256": "d3d0a036afe86cf65c9ddc81f9e2d336fe2bd49cedef8757b8910ff1a82c956a",
+      "bytes": 3841
+    },
+    {
+      "path": "pkg/portfwd/control_others.go",
+      "sha256": "a6071a74b8462e3cf245324e5c5b63377df48e22b6b5ed09e53f47926e69b842",
+      "bytes": 455
+    },
+    {
+      "path": "pkg/portfwd/control_windows.go",
+      "sha256": "45eb7d185819e08b5c5307fe53cbe39a3a699324ad6cf5f8f48bf2ac913475a4",
+      "bytes": 462
+    },
+    {
+      "path": "pkg/portfwd/forward.go",
+      "sha256": "386970db0e4a85eb74adeb7c6d5e0bc40cfb6c1b30a0c9abc524d829572e012f",
+      "bytes": 5081
+    },
+    {
+      "path": "pkg/portfwd/forward_test.go",
+      "sha256": "8b8ae224f43e8b8d1e0d49682ec6984b2966d04c4d378c95890a325e1c9c100e",
+      "bytes": 1421
+    },
+    {
+      "path": "pkg/portfwd/listener.go",
+      "sha256": "a073c9a4169268c8528e1d2b5a9f83e3c970058c0d189cdd1e60930e51ac3ec2",
+      "bytes": 5656
+    },
+    {
+      "path": "pkg/portfwd/listener_darwin.go",
+      "sha256": "1d7fb49d6f8854dc4f754b461966a006b1d1d786f01f082c35ecdec6bcd37795",
+      "bytes": 3813
+    },
+    {
+      "path": "pkg/portfwd/listener_others.go",
+      "sha256": "be097d55a15055fe0b0837c50d0486ad58d016318400fa66e6870b90e821073d",
+      "bytes": 855
+    },
+    {
+      "path": "pkg/portfwd/listener_test.go",
+      "sha256": "ca49bcb67707da26540e0981ed6ca62910d9894e110e949ee590362fcb53a0d9",
+      "bytes": 1812
+    },
+    {
+      "path": "pkg/portfwdserver/server.go",
+      "sha256": "cb890f6424862d981673fb581986e5e6020996fa2c20ff1d51820e3667b5fee7",
+      "bytes": 4638
+    },
+    {
+      "path": "pkg/portfwdserver/server_test.go",
+      "sha256": "f9ec387c2717d979ceb42b9cdfa45de68d0db4ab3b29fe36a849f62f74988287",
+      "bytes": 7684
+    },
+    {
+      "path": "pkg/progressbar/progressbar.go",
+      "sha256": "ab92d4d7b770ced81e0346dedb37f99416fea3847ab5ef86d4110e367264c47b",
+      "bytes": 1132
+    },
+    {
+      "path": "pkg/qemuimgutil/qemuimgutil.go",
+      "sha256": "fabfc4e75e436ba39149fc502baebbb1c1c71e01699a5cfc1e19aa816a42a7c6",
+      "bytes": 10477
+    },
+    {
+      "path": "pkg/qemuimgutil/qemuimgutil_test.go",
+      "sha256": "a309a66c7c1c5bfdd2ae61864b2cfb5c88893be7612d8db4e4669fb7be19c6f3",
+      "bytes": 8557
+    },
+    {
+      "path": "pkg/reflectutil/reflectutil.go",
+      "sha256": "0af50ec0ef6fbf74a740c8d79f93a752520d185cf24c5f4b1d7226dffeffb278",
+      "bytes": 1822
+    },
+    {
+      "path": "pkg/reflectutil/reflectutil_test.go",
+      "sha256": "f33c2984a3fdc45821f5bb7ca49812cd36edcf9c6ceabfeddea23aa3c6d185d5",
+      "bytes": 3669
+    },
+    {
+      "path": "pkg/registry/registry.go",
+      "sha256": "2e70f8538560b779e4f4ceaf97d6f79a871e504b161f604b03af84322c999ef2",
+      "bytes": 4320
+    },
+    {
+      "path": "pkg/registry/registry_test.go",
+      "sha256": "a2bc205eeff4c890544da299a22e9eb88073dc6461f098385d1540d72eb0ed9e",
+      "bytes": 7747
+    },
+    {
+      "path": "pkg/snapshot/snapshot.go",
+      "sha256": "eb0a39e56a4ac6c7d48a02a7eac6b6242b61ef78692d87b1d8c986fe381bbf94",
+      "bytes": 1822
+    },
+    {
+      "path": "pkg/sshutil/format.go",
+      "sha256": "e9c5a16824be52bc8a806dcb6be5e5e2ef9dcd78e0eb45577ab1815d07e0365e",
+      "bytes": 3205
+    },
+    {
+      "path": "pkg/sshutil/format_test.go",
+      "sha256": "592050c84044bcc68a63183f817bac0abb7d6147a755cc0e54c87c7bdc80ed3b",
+      "bytes": 996
+    },
+    {
+      "path": "pkg/sshutil/sshutil.go",
+      "sha256": "41b0ea7cf6d240b522dd2277b8b63906c474017f9616fde90e9b0c8b9b6f10d8",
+      "bytes": 27595
+    },
+    {
+      "path": "pkg/sshutil/sshutil_test.go",
+      "sha256": "ca7d1df884159ca1628241ed89474559bdc41c1d839f7b588de64a11402ccc07",
+      "bytes": 8057
+    },
+    {
+      "path": "pkg/sshutil/sshutil_windows_test.go",
+      "sha256": "358dc67e8c4fdba5adb066d6bcdf90f35fd11916eec878b79c2a2e5911a72e2d",
+      "bytes": 9768
+    },
+    {
+      "path": "pkg/store/disk.go",
+      "sha256": "e4ba596e55cbe65a337c196ec331f0afd31a5f58be557da5e321838a59167b55",
+      "bytes": 2550
+    },
+    {
+      "path": "pkg/store/disk_test.go",
+      "sha256": "5af326c8f32b215c99f32f0d2a8cb4e909a1bf1c6ec36a8d2bdce665bbe28cf9",
+      "bytes": 1755
+    },
+    {
+      "path": "pkg/store/fuzz_test.go",
+      "sha256": "d0723f7bbd5d9cc286523a5d4af9ba88aec95cdb8e3687d7d8d62ba67bf3a22b",
+      "bytes": 1113
+    },
+    {
+      "path": "pkg/store/guestos.go",
+      "sha256": "aaeb0de55d50c1d8bc3990df34c1998528d9eb39ec1488c653817ac8b2a4fbf6",
+      "bytes": 1022
+    },
+    {
+      "path": "pkg/store/guestos_test.go",
+      "sha256": "4ef545d2ff36edb92ffa4a78dbb780bc0afa6e067eb8af87a6756685b09ec089",
+      "bytes": 788
+    },
+    {
+      "path": "pkg/store/instance.go",
+      "sha256": "b6634ec613b611901b3d8a22036c18e7499e14fce7348efeca5dfd9279288796",
+      "bytes": 14875
+    },
+    {
+      "path": "pkg/store/instance_test.go",
+      "sha256": "0ba9b424530c163f9ccd34600f83df092a132fa92ac3ca0bfecedd10dea94009",
+      "bytes": 7560
+    },
+    {
+      "path": "pkg/store/pidfile.go",
+      "sha256": "1e8b940e802e07fe1c1e7dd3f3e55f4bf40b30bd80c8998d03469c8d24a28e6e",
+      "bytes": 3806
+    },
+    {
+      "path": "pkg/store/pidfile_test.go",
+      "sha256": "bd10f85b8222ad06f880630e853322ea906052b255e731f1da76480f687475cb",
+      "bytes": 4684
+    },
+    {
+      "path": "pkg/store/staleagent_unix_test.go",
+      "sha256": "8ebdd2c41761de6e0de8d3432fb3e4e0c1a0973c637d6a3984170b63f579d82d",
+      "bytes": 3815
+    },
+    {
+      "path": "pkg/store/store.go",
+      "sha256": "77ee0d55512668a834c5aa4e541397d0ae493c1d5a830a33a073d4017e32d486",
+      "bytes": 3028
+    },
+    {
+      "path": "pkg/store/store_test.go",
+      "sha256": "acc5e819ef94f4fc61983734806c80799d229cacdee7db04a6d7dd49a8b74ca5",
+      "bytes": 1192
+    },
+    {
+      "path": "pkg/strutil/controlchars.go",
+      "sha256": "3c8723c1277e1c123fbe3437cd98eb9d65abf586310f7af17ba87cbb81f2c65c",
+      "bytes": 427
+    },
+    {
+      "path": "pkg/strutil/strutil.go",
+      "sha256": "137a322c7217767ee328579430416c6dd99f4aba84677e518bf86639491e8639",
+      "bytes": 799
+    },
+    {
+      "path": "pkg/strutil/strutil_test.go",
+      "sha256": "3503dede4c5d3ee6a81e0e8ab77a5c686a64900b9b757fca94e43146a2ad0bc5",
+      "bytes": 492
+    },
+    {
+      "path": "pkg/sudoers/sudoers.go",
+      "sha256": "3f9f0943928c2910f09c9a332bacde2aaf95d07ad2ed26fd41a2ed3b5755e04c",
+      "bytes": 3708
+    },
+    {
+      "path": "pkg/sudoers/sudoers_test.go",
+      "sha256": "b2eed5a15aa880c8e11c936e75eafd7d641a16c387ab18821be0bc9de714235d",
+      "bytes": 3562
+    },
+    {
+      "path": "pkg/sysprof/network_darwin.go",
+      "sha256": "a91b5572719fba6614d80a4634e8997200378b139dfff2f4a7fde07ebdb67c43",
+      "bytes": 1157
+    },
+    {
+      "path": "pkg/sysprof/sysprof_darwin.go",
+      "sha256": "d754eb954f14352c3e310218c360aa2f95bc61b8cad899c019033a7b9780e3f7",
+      "bytes": 1296
+    },
+    {
+      "path": "pkg/templatestore/templatestore.go",
+      "sha256": "bc1e9c6824ed81bdb65206a7e7e3610c116eb9d311d704d1620272b995a8bbaf",
+      "bytes": 3613
+    },
+    {
+      "path": "pkg/textutil/textutil.go",
+      "sha256": "9496cd9d4eafc24be17e16d3e246c1c5fd01172833bc175fd2dcb4f427ed9cb6",
+      "bytes": 3034
+    },
+    {
+      "path": "pkg/textutil/textutil_test.go",
+      "sha256": "98b339478efdaa753eaacdea14b9e92cd7709776ce6a8f0d8274062c02658e9b",
+      "bytes": 1800
+    },
+    {
+      "path": "pkg/uiutil/uiutil.go",
+      "sha256": "46eb69b5516bf464b2cb37615e36313b1eef4f492ef09c4aa7f2974c9ff77d50",
+      "bytes": 1725
+    },
+    {
+      "path": "pkg/usrlocal/usrlocal.go",
+      "sha256": "a761fe63ee7e1347e61a8f1eb67cc587c8b6f3f2dffeb27a86b6b8db94f99dce",
+      "bytes": 6735
+    },
+    {
+      "path": "pkg/version/version.go",
+      "sha256": "f3bee22063837405c47e1b7a4d2ccdbdb91c6aefa17950d73a78dbbdc3ad4a3d",
+      "bytes": 179
+    },
+    {
+      "path": "pkg/version/versionutil/versionutil.go",
+      "sha256": "7e3c3d1578c6c2613c7ac3e4156dc47494b18a9716f049fc3a7a69e3eddac2bc",
+      "bytes": 2050
+    },
+    {
+      "path": "pkg/version/versionutil/versionutil_test.go",
+      "sha256": "5f2b9fe66e6115bf445d22cfb5583a54c305b4edbd589b1f55fa09b04be3bd29",
+      "bytes": 2082
+    },
+    {
+      "path": "pkg/windows/process_windows.go",
+      "sha256": "9988ab3d211cc0142aacfa7eeb2b6355a7598f1315d49fb546fd2ae9a98ff37c",
+      "bytes": 954
+    },
+    {
+      "path": "pkg/windows/registry_windows.go",
+      "sha256": "c272e39911b3bfb8e6c3e2c5018b4bc25015c3dfccbe06ff2cbc6f8ca21f14b9",
+      "bytes": 6109
+    },
+    {
+      "path": "pkg/windows/wsl_util_windows.go",
+      "sha256": "180b552e96f3e82edf0da6f98816cc39f11b29192ad9cb4f81b9a278c5244eac",
+      "bytes": 1008
+    },
+    {
+      "path": "pkg/yqutil/fuzz_test.go",
+      "sha256": "14c1ef97ac6ad15a7b07a57f4794ad938b1d5db38ed859b06f9c8c1b03c43dbb",
+      "bytes": 309
+    },
+    {
+      "path": "pkg/yqutil/yqutil.go",
+      "sha256": "766ec3b9db252913de4218c37fce1829f11fe9a782989554c19d068c10bc96b7",
+      "bytes": 4499
+    },
+    {
+      "path": "pkg/yqutil/yqutil_test.go",
+      "sha256": "469b64b98ddcc70efeae70a4d4ac5eec1e96cf324f650665ec9ea479d900ac50",
+      "bytes": 3932
+    },
+    {
+      "path": "templates/README.md",
+      "sha256": "d1763f75a2020901b7ed4caadc0e1c7b4d39835a641b3b7798c191387f9bd47b",
+      "bytes": 8749
+    },
+    {
+      "path": "templates/_default/mounts.yaml",
+      "sha256": "96e29b599c7a2277eb1b1f5e34e1a9527f03c649916bae3038e66049635ce647",
+      "bytes": 171
+    },
+    {
+      "path": "templates/_images/almalinux-10.yaml",
+      "sha256": "8eedca5ae3e371841a753479f10e459dc4b41d11c5ccf7c8935a6f6e464a16d0",
+      "bytes": 2215
+    },
+    {
+      "path": "templates/_images/almalinux-8.yaml",
+      "sha256": "8a10916067a10df728eb8fab38080136e758867f6b84c0bb717992dfd72edbe0",
+      "bytes": 1922
+    },
+    {
+      "path": "templates/_images/almalinux-9.yaml",
+      "sha256": "8bb968adbd45a51965971e0125ea19c6f07404525db02c324922d461066df5b0",
+      "bytes": 1571
+    },
+    {
+      "path": "templates/_images/almalinux-kitten-10.yaml",
+      "sha256": "67b8ad4381d670ef677441a3d3160cd411e1770130b66426d9b6dfeaee87493c",
+      "bytes": 2062
+    },
+    {
+      "path": "templates/_images/alpine-3.21.yaml",
+      "sha256": "7ff078869f4e3d972d19d1cbdd3437e6f9c6be585f7a21e396c1e3bd84b7ac23",
+      "bytes": 592
+    },
+    {
+      "path": "templates/_images/alpine-3.22.yaml",
+      "sha256": "50de1b89aa3a6c91a588407547b76819271cb03a7591953f9debcaee8153d0ce",
+      "bytes": 592
+    },
+    {
+      "path": "templates/_images/alpine-3.23.yaml",
+      "sha256": "2ee39eac2b8e2ca17733968cbe8940c834c3288e6bc0075a517072e1bd8c0e63",
+      "bytes": 592
+    },
+    {
+      "path": "templates/_images/alpine-iso.yaml",
+      "sha256": "ed168816ab7b7390df97b316e2e4599458c103cd8130a5227619d5902b86d57d",
+      "bytes": 646
+    },
+    {
+      "path": "templates/_images/archlinux.yaml",
+      "sha256": "d5a188eb132731606dbad3cc1827dd2a36bf9c33ed71491f0089b7e16d5668f3",
+      "bytes": 825
+    },
+    {
+      "path": "templates/_images/centos-stream-10.yaml",
+      "sha256": "48ec015db12f3537d8e6e9201254ec0094596a74e45ad46f1c5169b0c455ecb1",
+      "bytes": 1809
+    },
+    {
+      "path": "templates/_images/centos-stream-9.yaml",
+      "sha256": "a65fa0da05cb991bc1133743d24d0faa9201bc425ee8bf9b727bcff2c10c7a36",
+      "bytes": 1792
+    },
+    {
+      "path": "templates/_images/debian-11.yaml",
+      "sha256": "2b126eda475b4a553f4f19a0300908d63abf7601f3e2eb247bf0351fcc9a3f43",
+      "bytes": 1671
+    },
+    {
+      "path": "templates/_images/debian-12.yaml",
+      "sha256": "1b8c60de28408f2f8bc306684e1a2b1670654b606e7acb5c71a62c825cf3524e",
+      "bytes": 3015
+    },
+    {
+      "path": "templates/_images/debian-13.yaml",
+      "sha256": "7f39ca32e4867f4ef64e7b8fe5214590ad384d3f2640e36e106686d5b29dd996",
+      "bytes": 4513
+    },
+    {
+      "path": "templates/_images/fedora-41.yaml",
+      "sha256": "f5ae388da0f372d6617e4a1eda9be2a08d638801e0ac3da5a6bdb4ebe77ab348",
+      "bytes": 938
+    },
+    {
+      "path": "templates/_images/fedora-42.yaml",
+      "sha256": "17c5b4a85f67c982163a1962203484bc8787116db290f7fe34c14b4e3837f052",
+      "bytes": 889
+    },
+    {
+      "path": "templates/_images/fedora-43.yaml",
+      "sha256": "598858ec53ddeb4227956f20fffe2bc5a5d14a382983ee4b76173c272efc6505",
+      "bytes": 1111
+    },
+    {
+      "path": "templates/_images/fedora-44.yaml",
+      "sha256": "20e5585a589803d4be686a682bf67c484a9c1b5178c394a96a7443f64000ab1b",
+      "bytes": 892
+    },
+    {
+      "path": "templates/_images/freebsd-15.yaml",
+      "sha256": "baeabbee290c3d4ff9e30f6f651159404480f46252036a006739209153e40a2f",
+      "bytes": 710
+    },
+    {
+      "path": "templates/_images/macos-15.yaml",
+      "sha256": "902a4675924f35eb4ee9c4fb5165de93c154c98a2113aa305c520bc2838428ae",
+      "bytes": 509
+    },
+    {
+      "path": "templates/_images/macos-26.yaml",
+      "sha256": "b5f330f87e1636ef33c2bd9ab3e91bb6b887477ac3bee31a56646fc9dcb5402a",
+      "bytes": 509
+    },
+    {
+      "path": "templates/_images/macos-27.yaml",
+      "sha256": "4ebe1fdc7c59ec7fee56b559655d207c9431fa6d47acb9ea05ebbec23306e42c",
+      "bytes": 485
+    },
+    {
+      "path": "templates/_images/opensuse-leap-15.yaml",
+      "sha256": "598c299022cd3d45fde3259e7a4d5ea3595cb21380b87218f397930a763b09db",
+      "bytes": 580
+    },
+    {
+      "path": "templates/_images/opensuse-leap-16.yaml",
+      "sha256": "7792005012f9d85b4e1b0ca9c8ca332041ee34273e5d0906e95dfcdf09f6ac99",
+      "bytes": 470
+    },
+    {
+      "path": "templates/_images/oraclelinux-10.yaml",
+      "sha256": "8bcc04100ebae6e63ff0735f4c3717678a777043779246108bc494663a508776",
+      "bytes": 613
+    },
+    {
+      "path": "templates/_images/oraclelinux-8.yaml",
+      "sha256": "0aac1503ccb588d7cdc9ffdffb5e8d6cabee356e43732ec9697f5ae30986ca28",
+      "bytes": 1017
+    },
+    {
+      "path": "templates/_images/oraclelinux-9.yaml",
+      "sha256": "6134ef5b6ca5bfda4b01b6088a732a57d36101ebe7ecb86db7a2287d0f88f4a5",
+      "bytes": 609
+    },
+    {
+      "path": "templates/_images/rocky-10.yaml",
+      "sha256": "0abc23e59d0fafb239239c2cbd3b5c8723f8a8896517dc21760e45a8aa5869d9",
+      "bytes": 1551
+    },
+    {
+      "path": "templates/_images/rocky-8.yaml",
+      "sha256": "97e22263db95da9ea02c6da943db2126af5876ff0f75c0b655fc8dba94d36764",
+      "bytes": 1159
+    },
+    {
+      "path": "templates/_images/rocky-9.yaml",
+      "sha256": "5e094249ce479df8bf0115ba71e14cfc5c56d3d07aa01cfd53eccdba766739ba",
+      "bytes": 1511
+    },
+    {
+      "path": "templates/_images/ubuntu-20.04.yaml",
+      "sha256": "08973a1184129c05865e9d227b73c05f0af7961e565dd41a0fb8cf1a4fcb2164",
+      "bytes": 1922
+    },
+    {
+      "path": "templates/_images/ubuntu-22.04.yaml",
+      "sha256": "8f9224b4b9e0e1fe891e886368c0ec392d81e77b617b0e897b71a85e6650d76f",
+      "bytes": 2997
+    },
+    {
+      "path": "templates/_images/ubuntu-24.04.yaml",
+      "sha256": "f523ea95c37d54ae51f4704337cd8d5ad56f5448da2765806ce049588d676ad4",
+      "bytes": 3403
+    },
+    {
+      "path": "templates/_images/ubuntu-24.10.yaml",
+      "sha256": "c520c8ecd33996a257f5e586d0bc84816a27f9fc004ce5f18548dca44eff1f7d",
+      "bytes": 2497
+    },
+    {
+      "path": "templates/_images/ubuntu-25.04.yaml",
+      "sha256": "20c004c346e9de7294747916b62786e236b30a5ac22769b928cbdb4f3e0a1c11",
+      "bytes": 2421
+    },
+    {
+      "path": "templates/_images/ubuntu-25.10.yaml",
+      "sha256": "fdd85fb08b33fc6ebcb3d7c5a60a7bccfb911b46cef1654243aa5b436d847914",
+      "bytes": 2445
+    },
+    {
+      "path": "templates/_images/ubuntu-26.04.yaml",
+      "sha256": "a0b034796bf2544dd1344341c977051f0235304794b02368b3f02b88dff633d7",
+      "bytes": 4418
+    },
+    {
+      "path": "templates/almalinux-10.yaml",
+      "sha256": "6d960b4284dd2633ec509e3b8ec66ac610d9617b1c7febda4c395f0501f49dc2",
+      "bytes": 92
+    },
+    {
+      "path": "templates/almalinux-8.yaml",
+      "sha256": "f231496dfe1cd12ee3c5ea1832fd37f1a1185bda028d51b310c61d47c8970809",
+      "bytes": 91
+    },
+    {
+      "path": "templates/almalinux-9.yaml",
+      "sha256": "6126b2957d549f5560c7c9defab1130401b5c348122bf1d6fa7c9b93a3e3f35c",
+      "bytes": 91
+    },
+    {
+      "path": "templates/alpine-3.21.yaml",
+      "sha256": "815d8456421d7b7b298a5dd732a21e0934ec8315d03bfe4cf32a5930f1325530",
+      "bytes": 437
+    },
+    {
+      "path": "templates/alpine-3.22.yaml",
+      "sha256": "5c1a5d6a47e368fadacc9d1cbfdfa606ad89342302c89835426a8bcc97f8236c",
+      "bytes": 437
+    },
+    {
+      "path": "templates/alpine-3.23.yaml",
+      "sha256": "a0e5edbbd40398db17b537c90e82a6dd06cac248b785cebfaa73fa15fcb3d258",
+      "bytes": 437
+    },
+    {
+      "path": "templates/alpine-iso.yaml",
+      "sha256": "b6b7b5fd328e11d66deeead98c2532093f7901e5f551326f0e29227c9a2473ba",
+      "bytes": 436
+    },
+    {
+      "path": "templates/apptainer-rootful.yaml",
+      "sha256": "3039025efb6101f4967b8702fa29321ae17815e8a3de31a4e79b7264ca0cae0f",
+      "bytes": 1212
+    },
+    {
+      "path": "templates/apptainer.yaml",
+      "sha256": "586227f754b848513abea48a03da3aa3358c7a0fa09b547f0eb11f386da765ee",
+      "bytes": 1191
+    },
+    {
+      "path": "templates/archlinux.yaml",
+      "sha256": "dc37d10fbddba63feb1cab22306981105c8804914f3a45081a6a0cf94877897e",
+      "bytes": 89
+    },
+    {
+      "path": "templates/buildkit.yaml",
+      "sha256": "944061c5bae23e75369981e386fb9f71d28cfead8d3272aa7d6087a6076c7865",
+      "bytes": 695
+    },
+    {
+      "path": "templates/centos-stream-10.yaml",
+      "sha256": "0562476a532ef74fb5d398018fa0a1138dced12dcdc9b408f17ea28878afc037",
+      "bytes": 96
+    },
+    {
+      "path": "templates/centos-stream-9.yaml",
+      "sha256": "b982332554617169ada0c00e7b025adf0951cc8a971dc8a35ad22e948efa1c56",
+      "bytes": 95
+    },
+    {
+      "path": "templates/debian-11.yaml",
+      "sha256": "c13a7e8dacefbb18fddfa700cb111f1a723ee44239a63bdda6570cbf82feb9d1",
+      "bytes": 89
+    },
+    {
+      "path": "templates/debian-12.yaml",
+      "sha256": "353b31ff0eb91caddbc1c0e1c5ab349000978a95519e7b3ff92eb5c0a8f99c87",
+      "bytes": 89
+    },
+    {
+      "path": "templates/debian-13.yaml",
+      "sha256": "62483b54fec217bae92ccf5e6939d0f079e127f3837b7cb45e84e0c3eb8b8d3e",
+      "bytes": 89
+    },
+    {
+      "path": "templates/default.yaml",
+      "sha256": "3f333ed7a0a86c4f493a9c994f819721c2880d2c5661ab0823812854dd4b1dc9",
+      "bytes": 36431
+    },
+    {
+      "path": "templates/docker-rootful.yaml",
+      "sha256": "30bd059d93bf3d3e3becb14c2e2e66aa22b3ed669f63cfa14c65d91b0b1804e8",
+      "bytes": 3380
+    },
+    {
+      "path": "templates/docker.yaml",
+      "sha256": "4577486ed36c6b5ac58e2cb6262a1e83e8a654fdaa702a0ac73763f132e103f5",
+      "bytes": 3804
+    },
+    {
+      "path": "templates/experimental/almalinux-kitten-10.yaml",
+      "sha256": "dfd17c245143afcb04453c833f8fa37fda9e0607e8a64a9a465c2f54df3393b8",
+      "bytes": 99
+    },
+    {
+      "path": "templates/experimental/alsa.yaml",
+      "sha256": "3d8f2b7567be9bb2c5658033a98cb6f0ff496bec270dafc27ecc8fa5b8721e97",
+      "bytes": 1071
+    },
+    {
+      "path": "templates/experimental/debian-sid.yaml",
+      "sha256": "d460cf0799c390e98140e25393e7a75f02cf909a5c8c1871e157844a5e0decd5",
+      "bytes": 711
+    },
+    {
+      "path": "templates/experimental/fedora-rawhide.yaml",
+      "sha256": "e188937906f382a21fce08ff14d0df0734ebac188e44bf1ad6b3884bf3ac34d2",
+      "bytes": 100
+    },
+    {
+      "path": "templates/experimental/freebsd-16.yaml",
+      "sha256": "b039863f185b0ef2f77dba371829a0ba4d799efc00be7f1c66a7838f2fc6e4dc",
+      "bytes": 439
+    },
+    {
+      "path": "templates/experimental/gentoo.yaml",
+      "sha256": "d04237a3af3ca93498f19f1dffad1b48a4677772e78c6fd683243990219bab7d",
+      "bytes": 339
+    },
+    {
+      "path": "templates/experimental/hcs.yaml",
+      "sha256": "b4029778470fb3ba75e472f809d4dc5ea3c264cd7666eba26492722f2e6aff19",
+      "bytes": 438
+    },
+    {
+      "path": "templates/experimental/opensuse-tumbleweed.yaml",
+      "sha256": "dd2eb0adf5222fe837738ae1c2f8380cedeb4cc6eeabee9dc2fecaf48ab43ac1",
+      "bytes": 404
+    },
+    {
+      "path": "templates/experimental/rke2.yaml",
+      "sha256": "4726d53971f993c3b4009f245afc735cfa79dcdf490e269c561854d3929fc55d",
+      "bytes": 2179
+    },
+    {
+      "path": "templates/experimental/u7s.yaml",
+      "sha256": "6c95026344c83191e905c4b1ecec8b9b8af44a0d2f7af533ee5aa562173aee79",
+      "bytes": 3837
+    },
+    {
+      "path": "templates/experimental/ubuntu-26.10.yaml",
+      "sha256": "db8b63f5f4117a2bab89ed3a0b36652f1ab4476c9be7e79ece47ed50412e8a69",
+      "bytes": 1401
+    },
+    {
+      "path": "templates/experimental/vnc.yaml",
+      "sha256": "08f26461b82906b7a163904acdb09953ad27118f649d7a3e27492c0c9a253645",
+      "bytes": 1486
+    },
+    {
+      "path": "templates/experimental/wsl2.yaml",
+      "sha256": "e01a2828332dd204d04d7853968e80255a39e1f9df00e6532b26229ba871de4d",
+      "bytes": 704
+    },
+    {
+      "path": "templates/faasd.yaml",
+      "sha256": "bbb9c8e61fb9c7b18038c2d9871c6d1819db8ac6fa33df312c957fd56aa13217",
+      "bytes": 1630
+    },
+    {
+      "path": "templates/fedora-41.yaml",
+      "sha256": "711c8f8bce83ce4e824c8618f62c97f8b8077d591cf2bf72cab54dcc961e311b",
+      "bytes": 89
+    },
+    {
+      "path": "templates/fedora-42.yaml",
+      "sha256": "5b931416da67ee214eb2e6627b247c500a0174478416bd74a903177e0ca2048e",
+      "bytes": 89
+    },
+    {
+      "path": "templates/fedora-43.yaml",
+      "sha256": "9bf3bffd32fb4c0e5309df6533b6cdaccf54516748652a3546e1a019412b5152",
+      "bytes": 89
+    },
+    {
+      "path": "templates/fedora-44.yaml",
+      "sha256": "8f3232ec23d3186e7cefee02dcc48a357f1992b69845e4335f0e560742f834b9",
+      "bytes": 89
+    },
+    {
+      "path": "templates/freebsd-15.yaml",
+      "sha256": "705322efa6624a4849fea9b7c1eddc53220170c103177f05544b4605eacbe77f",
+      "bytes": 90
+    },
+    {
+      "path": "templates/homebrew-macos.yaml",
+      "sha256": "985a8a99f0d87fc9fd420322d65f7b55df87c2c2d64d83f44202dfc85d06309d",
+      "bytes": 1314
+    },
+    {
+      "path": "templates/k0s.yaml",
+      "sha256": "682e2f6f1404d34969afb5d962c85951e9db21c7728d93afb75e393166d37817",
+      "bytes": 1947
+    },
+    {
+      "path": "templates/k3s.yaml",
+      "sha256": "93f57d77362eee0702d9a6914ae3fde32ec747895814289539121c8fa0e9a415",
+      "bytes": 3344
+    },
+    {
+      "path": "templates/k8s.yaml",
+      "sha256": "8a5fc47d6f282ade2277b631902f49afb37ab39b4d379928a085881ebc69eaa1",
+      "bytes": 10598
+    },
+    {
+      "path": "templates/linuxbrew.yaml",
+      "sha256": "86c382f1fb2f28454c67d6190ad6dcc3b3e2b194ee83a98ea744d4361b6e80f6",
+      "bytes": 1023
+    },
+    {
+      "path": "templates/macos-15.yaml",
+      "sha256": "b0ba9183b52c32515fbab9d372dbafa603f413358ced4bfffa84c0aa3ab41f88",
+      "bytes": 327
+    },
+    {
+      "path": "templates/macos-26.yaml",
+      "sha256": "bbe8ed38edcbd96fc50de54b28d735b4476acd01d41c6dc422d1eaf222f6ce29",
+      "bytes": 327
+    },
+    {
+      "path": "templates/macos-27.yaml",
+      "sha256": "03bfe24a484b1e8672fdcdd4083dce7a718a2506887359f4c3334bfae456983a",
+      "bytes": 327
+    },
+    {
+      "path": "templates/opensuse-leap-15.yaml",
+      "sha256": "ab5daf58ea54a5f9cb3b3f1738ba2e268a16f2ed1ff72490c05cae85d42617a6",
+      "bytes": 96
+    },
+    {
+      "path": "templates/opensuse-leap-16.yaml",
+      "sha256": "e7057daa2f400fb0c87a39d8a590dd641961d9b7315f4672a1ae048b349f1021",
+      "bytes": 96
+    },
+    {
+      "path": "templates/oraclelinux-10.yaml",
+      "sha256": "6113d9b481846a5ea3b5dbdb7dab8949ab76dd0c0a2465fba156220e19a708fb",
+      "bytes": 94
+    },
+    {
+      "path": "templates/oraclelinux-8.yaml",
+      "sha256": "12ffe1b1463107031d8b3e1fd983e31269dbffaa395cd489bd0bdc26c6610f92",
+      "bytes": 93
+    },
+    {
+      "path": "templates/oraclelinux-9.yaml",
+      "sha256": "907758c19aa8c71e711aa574f1b14abe1182f0e08c5c023214f697fdd23563f4",
+      "bytes": 93
+    },
+    {
+      "path": "templates/podman-rootful.yaml",
+      "sha256": "577601b2b36cbe349813995c4127d35393c925140a8e70ab1f1ddb5189f1a537",
+      "bytes": 2149
+    },
+    {
+      "path": "templates/podman.yaml",
+      "sha256": "c1eda96ec59e1144e6ed6fa893e9f1a703280a1ea2d71a80ad5e280e89c313bc",
+      "bytes": 1712
+    },
+    {
+      "path": "templates/rocky-10.yaml",
+      "sha256": "8b329bb268d71b7b6290617c40f3646d505adad1cd03a42185dd486e41f25882",
+      "bytes": 88
+    },
+    {
+      "path": "templates/rocky-8.yaml",
+      "sha256": "ec9be57ac7895490589d8d4d571f122947e92e1f40a0faa17a2d405630d69183",
+      "bytes": 87
+    },
+    {
+      "path": "templates/rocky-9.yaml",
+      "sha256": "46f68996054fc6d39604ead72f89dc42aee37fd749af877d7771d77e1ecb76a7",
+      "bytes": 87
+    },
+    {
+      "path": "templates/ubuntu-20.04.yaml",
+      "sha256": "3e75e01bebf917004785ee68401098bd74c993b63bb48dc9f76f261e6fa6ec00",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-22.04.yaml",
+      "sha256": "fd2ce55fdb0462cd7ca67e6a1a60fc9f80d7dde700cca529ed44b6297a758b02",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-24.04.yaml",
+      "sha256": "84ec4177f7f8ddd4ebb12ee23e50f556ec70ce71f753cb0c6c790cd5d05c7b72",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-24.10.yaml",
+      "sha256": "d2b8923fb448a846e63dc6270917d48f53e3fe1944e2bc2ad015e2af09e75a6c",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-25.04.yaml",
+      "sha256": "56e3eb602b5590d047bb32cafa30bb3fd9aba077eaab58b333ad130293d3080b",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-25.10.yaml",
+      "sha256": "78adc1ba19ce9036e77a4c29136ce92a9d20dc71479502f2bd94774b6315c0ab",
+      "bytes": 92
+    },
+    {
+      "path": "templates/ubuntu-26.04.yaml",
+      "sha256": "b01daf4e906f1ba71fca9a5f3b0c3f2b9a820ac71787409ef8eb0cc578b56036",
+      "bytes": 92
+    },
+    {
+      "path": "templates/windows-11.yaml",
+      "sha256": "acaf4cb3fcaa0f574a969f229dd6c8888fbb6a328db079b935dbd846c4762c48",
+      "bytes": 2614
+    },
+    {
+      "path": "templates/windows-2025.yaml",
+      "sha256": "d60ef0a38aa24207f4df3c961eca07b4debd783be1aab9605da7e27985915799",
+      "bytes": 1952
+    },
+    {
+      "path": "vz.entitlements",
+      "sha256": "7f25b8ed135c8c0daf574baf1cb8948af1bf02897e9e0560ab3e4e7338a3cb66",
+      "bytes": 353
+    }
+  ],
+  "patchedSourceFiles": 710,
+  "patchedProjectionSha256": "6d64fcfeebc53ebba369f9c254226ceacb19dbdce2bce2982b81814c11bcde27",
+  "patch": {
+    "path": "patches/lima/0002-owned-selected-lifecycle.patch",
+    "sha256": "42af8d8b63e542eea0f6f4bf703d3e170820dd7e69978d5ec27a804ce7a13754"
+  },
+  "replacements": [
+    {
+      "path": "pkg/driver/wsl2/configured_lifecycle_windows_test.go",
+      "replacement": "patches/lima/wsl2/configured_lifecycle_windows_test.go",
+      "before": null,
+      "sha256": "bbf9e2bdee98680ea74a5b2c68e20982c94628a4d42a12dfe5a5945f1b19cc13",
+      "bytes": 960
+    },
+    {
+      "path": "pkg/driver/wsl2/import_args_windows.go",
+      "replacement": "patches/lima/wsl2/import_args_windows.go",
+      "before": null,
+      "sha256": "93baab7ad24d34741623135077e47dbdc2d923c4e961127a6946cb4502636608",
+      "bytes": 502
+    },
+    {
+      "path": "pkg/driver/wsl2/import_args_windows_test.go",
+      "replacement": "patches/lima/wsl2/import_args_windows_test.go",
+      "before": null,
+      "sha256": "e645ced64867a85e58e47ff0f0c4df8c24f6ee0fafd4ee8cde471052cc361c62",
+      "bytes": 1223
+    },
+    {
+      "path": "pkg/driver/wsl2/vm_windows.go",
+      "replacement": "patches/lima/wsl2/vm_windows.go",
+      "before": "3a7c62e2d6ffaf1cd47b91d28d2c18d54198b759f0f81714d130f16560e3601e",
+      "sha256": "38af3beeb2c333ca88bc9678085d286d006b2362806e6d7f53c796086a25e51a",
+      "bytes": 9717
+    },
+    {
+      "path": "pkg/driver/wsl2/worker_lifecycle.go",
+      "replacement": "patches/lima/wsl2/worker_lifecycle.go",
+      "before": null,
+      "sha256": "9db4438835d8451bdf5479439ffb3259a243d002b1cbe58afffe0d7c6a9d2771",
+      "bytes": 5287
+    },
+    {
+      "path": "pkg/driver/wsl2/worker_lifecycle_test.go",
+      "replacement": "patches/lima/wsl2/worker_lifecycle_test.go",
+      "before": null,
+      "sha256": "921d18b4884628ae22ad4d9926d5a739029105b0f49b339b3977574ac331b805",
+      "bytes": 4489
+    },
+    {
+      "path": "pkg/driver/wsl2/wsl_driver_windows.go",
+      "replacement": "patches/lima/wsl2/wsl_driver_windows.go",
+      "before": "7e200858075155d43bfd407c0c9d2799239310165ec83d36f54e09e34972c8c1",
+      "sha256": "975383f9765e1b092fe238e04ece61ddd40e513f60c1f034f0c302064a2c606f",
+      "bytes": 12317
+    },
+    {
+      "path": "pkg/hostagent/hostagent.go",
+      "replacement": "patches/lima/hostagent/hostagent.go",
+      "before": "02a6f5b43702f9f5918d1bf253f2442a0a42f868eea0a558d011c4aa6b2479c5",
+      "sha256": "c5cca8c780a494c0a2be64df6989ae6948295dede53a14b23a00ca0abb4d0fe3",
+      "bytes": 44308
+    },
+    {
+      "path": "pkg/hostagent/lifecycle_state.go",
+      "replacement": "patches/lima/hostagent/lifecycle_state.go",
+      "before": null,
+      "sha256": "252fb221af06db65af3702b8de7db0ec15073fa68f8bbcedb9d1ff33572db8ba",
+      "bytes": 2817
+    },
+    {
+      "path": "pkg/hostagent/lifecycle_state_test.go",
+      "replacement": "patches/lima/hostagent/lifecycle_state_test.go",
+      "before": null,
+      "sha256": "a7ba586f9afca387bfb2d142d29417cbded2b791da61e3fe1fb185032c459a54",
+      "bytes": 2119
+    },
+    {
+      "path": "pkg/hostagent/requirements.go",
+      "replacement": "patches/lima/hostagent/requirements.go",
+      "before": "105191f8c4441ed7c0b2738e20f1331c8b4407e98d7843185bf5cfb4f636e1d3",
+      "sha256": "37318adeda9cbf9623a20679712b4b4654aa418b7fe77ce98276f7adab3a6f63",
+      "bytes": 13636
+    },
+    {
+      "path": "pkg/limayaml/defaults.go",
+      "replacement": "patches/lima/limayaml/defaults.go",
+      "before": "ab6046b9e19474d3d50a60a8edd658c76880b060d15ee826054855e15c9ef129",
+      "sha256": "a394fde3f2c65f95ed431ed90b4d40b1fb5e9432cb153431f7d69d9330c1ca07",
+      "bytes": 32608
+    },
+    {
+      "path": "pkg/limayaml/host_home.go",
+      "replacement": "patches/lima/limayaml/host_home.go",
+      "before": null,
+      "sha256": "6f95ed129aa267616ed12156409da52eaf250a74830d58bcc9194cc3b4a8a565",
+      "bytes": 852
+    },
+    {
+      "path": "pkg/limayaml/host_home_test.go",
+      "replacement": "patches/lima/limayaml/host_home_test.go",
+      "before": null,
+      "sha256": "b88c71895d53744eb178f5f6af6e49ea3bd2ade010f0d45462c7e667d78098d8",
+      "bytes": 1502
+    }
+  ],
+  "qualification": {
+    "priorThreeReplacementLockSha256": "218b0083bcf3fffdc38cc195cd25a1a5cec20628a46b2ab212386490f05ce480",
+    "priorImportSourceDeliverySha256": "01b981acb8c8782b74dceac5edf0319c3d2d1f3628d1e0e90e2132ffbfe75706",
+    "priorImportFinalDeliverySha256": "872968a11c808b9e9d8381cd8a7e24a2738a0c2ed1141ba849c79a231f49370b",
+    "upstreamModuleSumVerifiedBy": "official golang.org/x/mod/sumdb/dirhash.HashZip",
+    "selectedInitAuditSha256": "0429b28809497ca836309a6e75b59349e071f9afa10660e6ee411b06b971cf69",
+    "nativeImportQualified": false,
+    "nativeSetupQualified": false,
+    "lazyHomeSourceOnly": true,
+    "priorSixReplacementLockSha256": "044df9bed9a28fdfc696918a1c04cd1584e218364edd22ac743609c06e559cd8",
+    "selectedLifecycleSource4ReceiptSHA256": "613750337f961d97332d03989b9d5a26ffb02b04e8ff6caba9a0bf9351226e8e",
+    "independentSource4ReviewSHA256": "3bac194af5522844f703d7c710574580ac6cee5f5d6174729679677ea8a223a4",
+    "lifecycleSourceOnly": true,
+    "guestAuthenticationQualified": false,
+    "guestNativeAuthorityQualified": false
+  }
+}

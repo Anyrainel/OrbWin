@@ -22,7 +22,12 @@ export function loadLayout(page: Page): Layout {
         .slice(0, 512);
     if (typeof value.width === "number" && Number.isFinite(value.width))
       result.width = Math.max(240, Math.min(700, value.width));
-    if (value.sort === "status" || value.sort === "name")
+    if (
+      value.sort === "status" ||
+      value.sort === "name" ||
+      ((page === "images" || page === "volumes") &&
+        (value.sort === "size-desc" || value.sort === "size-asc"))
+    )
       result.sort = value.sort;
     if (typeof value.selected === "string" && value.selected.length <= 256)
       result.selected = value.selected;

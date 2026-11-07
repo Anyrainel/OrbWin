@@ -1,0 +1,182 @@
+diff --git a/rdd/pkg/socketbridge/docker_ports_windows.go b/rdd/pkg/socketbridge/docker_ports_windows.go
+index 8a61fd5..2de2f19 100644
+--- a/rdd/pkg/socketbridge/docker_ports_windows.go
++++ b/rdd/pkg/socketbridge/docker_ports_windows.go
+@@ -300,9 +300,11 @@ func withPortLifecycle(next http.Handler, transport http.RoundTripper, published
+ 	if len(generations) > 0 {
+ 		generation = generations[0]
+ 	}
++	// One observation owner per serving bridge, independent of reusable numeric epochs.
++	ownerInstance := newPublicationOwner()
+ 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+ 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/orbwin/port-status/v2/") {
+-			publicationStatusV2(w, r, transport, published, generation)
++			publicationStatusV2(w, r, transport, published, generation, ownerInstance)
+ 			return
+ 		}
+ 		if r.Method == http.MethodGet && r.URL.Path == "/orbwin/port-status" {
+diff --git a/rdd/pkg/socketbridge/publication_v2_windows.go b/rdd/pkg/socketbridge/publication_v2_windows.go
+index b810700..63a5a48 100644
+--- a/rdd/pkg/socketbridge/publication_v2_windows.go
++++ b/rdd/pkg/socketbridge/publication_v2_windows.go
+@@ -4,8 +4,10 @@
+ package socketbridge
+ 
+ import (
++	"crypto/rand"
+ 	"encoding/hex"
+ 	"encoding/json"
++	"io"
+ 	"net"
+ 	"net/http"
+ 	"reflect"
+@@ -17,6 +19,20 @@ import (
+ 
+ // Additive owned publication observation. The original v1 endpoint and Docker lifecycle
+ // behavior are untouched. Stable double observation is not a reservation/CAS.
++// The public nonce identifies this HTTP bridge lifetime. It confers no authority.
++// Missing entropy disables only v2 observations; existing Docker/v1 routes remain.
++func newPublicationOwner() string { return publicationOwnerFromEntropy(rand.Reader) }
++func publicationOwnerFromEntropy(entropy io.Reader) string {
++	var nonce [16]byte
++	if entropy == nil {
++		return ""
++	}
++	if _, err := io.ReadFull(entropy, nonce[:]); err != nil || nonce == [16]byte{} {
++		return ""
++	}
++	return hex.EncodeToString(nonce[:])
++}
++
+ type publicationV2Container struct {
+ 	ID    string
+ 	State *struct {
+@@ -109,7 +125,12 @@ func samplePublicationV2(c publicationV2Container, published PortPublication, ge
+ 	})
+ 	return result, true
+ }
+-func publicationStatusV2(w http.ResponseWriter, r *http.Request, transport http.RoundTripper, published PortPublication, generation PortGeneration) {
++func publicationStatusV2(w http.ResponseWriter, r *http.Request, transport http.RoundTripper, published PortPublication, generation PortGeneration, ownerInstance string) {
++	owner, ownerErr := hex.DecodeString(ownerInstance)
++	if ownerErr != nil || len(owner) != 16 || hex.EncodeToString(owner) != ownerInstance || ownerInstance == strings.Repeat("0", 32) {
++		dockerError(w, 409, "Publication owner unavailable")
++		return
++	}
+ 	if transport == nil {
+ 		dockerError(w, 409, "Publication transport unavailable")
+ 		return
+@@ -142,13 +163,14 @@ func publicationStatusV2(w http.ResponseWriter, r *http.Request, transport http.
+ 		return
+ 	}
+ 	result := struct {
+-		Version      int                    `json:"version"`
+-		ReadAt       string                 `json:"readAt"`
+-		ContainerID  string                 `json:"containerId"`
+-		StartedAt    string                 `json:"startedAt"`
+-		Running      bool                   `json:"running"`
+-		Publications []publicationV2Binding `json:"publications"`
+-	}{2, time.Now().UTC().Format(time.RFC3339Nano), id, second.State.StartedAt, true, after}
++		OwnerInstance string                 `json:"ownerInstance"`
++		Version       int                    `json:"version"`
++		ReadAt        string                 `json:"readAt"`
++		ContainerID   string                 `json:"containerId"`
++		StartedAt     string                 `json:"startedAt"`
++		Running       bool                   `json:"running"`
++		Publications  []publicationV2Binding `json:"publications"`
++	}{ownerInstance, 2, time.Now().UTC().Format(time.RFC3339Nano), id, second.State.StartedAt, true, after}
+ 	w.Header().Set("Content-Type", "application/json")
+ 	w.Header().Set("Cache-Control", "no-store")
+ 	_ = json.NewEncoder(w).Encode(result)
+diff --git a/rdd/pkg/socketbridge/publication_v2_windows_test.go b/rdd/pkg/socketbridge/publication_v2_windows_test.go
+index 8f7e157..33e5dfc 100644
+--- a/rdd/pkg/socketbridge/publication_v2_windows_test.go
++++ b/rdd/pkg/socketbridge/publication_v2_windows_test.go
+@@ -16,6 +16,64 @@ import (
+ 
+ const publicationFixtureID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ 
++func TestPublicationV2OwnerLifetimeSurvivesReadsButChangesAcrossRestart(t *testing.T) {
++	c := publicationFixture(t)
++	data, err := json.Marshal(c)
++	if err != nil {
++		t.Fatal(err)
++	}
++	transport := publicationFixtureTransport(func(*http.Request) (*http.Response, error) {
++		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
++	})
++	handler := func() http.Handler {
++		return withPortLifecycle(http.NotFoundHandler(), transport, func(string, string) bool { return true }, nil, func(string, string) uint64 { return 1 })
++	}
++	read := func(h http.Handler) string {
++		response := httptest.NewRecorder()
++		h.ServeHTTP(response, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil))
++		var snapshot struct {
++			OwnerInstance string
++			Publications  []publicationV2Binding
++		}
++		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil || len(snapshot.OwnerInstance) != 32 || len(snapshot.Publications) != 1 || snapshot.Publications[0].Generation != 1 {
++			t.Fatal("owner snapshot unavailable")
++		}
++		return snapshot.OwnerInstance
++	}
++	first := handler()
++	owner := read(first)
++	if read(first) != owner {
++		t.Fatal("ordinary read changed publication owner")
++	}
++	if read(handler()) == owner {
++		t.Fatal("restarted bridge reused old owner despite repeated numeric epoch")
++	}
++}
++
++func TestPublicationV2OwnerEntropyAndMissingOwnerFailClosed(t *testing.T) {
++	if publicationOwnerFromEntropy(strings.NewReader(strings.Repeat("a", 16))) != strings.Repeat("61", 16) {
++		t.Fatal("entropy encoding")
++	}
++	for _, entropy := range []io.Reader{nil, strings.NewReader("short"), strings.NewReader(strings.Repeat("\x00", 16))} {
++		if publicationOwnerFromEntropy(entropy) != "" {
++			t.Fatal("unavailable entropy admitted")
++		}
++	}
++	calls := 0
++	transport := publicationFixtureTransport(func(*http.Request) (*http.Response, error) {
++		calls++
++		t.Fatal("missing owner reached inspection")
++		return nil, nil
++	})
++	for _, owner := range []string{"", strings.Repeat("0", 32), strings.Repeat("A", 32), strings.Repeat("a", 30)} {
++		response := httptest.NewRecorder()
++		publicationStatusV2(response, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil), transport, nil, nil, owner)
++		if response.Code != 409 || calls != 0 {
++			t.Fatal("missing owner admitted")
++		}
++	}
++}
++
+ func TestPublicationV2PreservesV1AndDockerRoutes(t *testing.T) {
+ 	transport := publicationFixtureTransport(func(r *http.Request) (*http.Response, error) {
+ 		if r.URL.Path != "/containers/json" {
+@@ -215,7 +273,7 @@ func TestPublicationV2RejectsAliasesAndPropagatesCancellation(t *testing.T) {
+ 	transport := publicationFixtureTransport(func(r *http.Request) (*http.Response, error) { calls++; return nil, r.Context().Err() })
+ 	for _, suffix := range []string{"name", strings.Repeat("A", 64), publicationFixtureID + "/extra", publicationFixtureID + "?all=true"} {
+ 		recorder := httptest.NewRecorder()
+-		publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+suffix, nil), transport, nil, nil)
++		publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+suffix, nil), transport, nil, nil, strings.Repeat("c", 32))
+ 		if recorder.Code != 400 || calls != 0 {
+ 			t.Fatal("invalid identity reached transport")
+ 		}
+@@ -223,12 +281,12 @@ func TestPublicationV2RejectsAliasesAndPropagatesCancellation(t *testing.T) {
+ 	ctx, cancel := context.WithCancel(context.Background())
+ 	cancel()
+ 	recorder := httptest.NewRecorder()
+-	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil).WithContext(ctx), transport, nil, nil)
++	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil).WithContext(ctx), transport, nil, nil, strings.Repeat("c", 32))
+ 	if recorder.Code != 409 || calls != 1 {
+ 		t.Fatal("cancelled read not contained")
+ 	}
+ 	recorder = httptest.NewRecorder()
+-	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil), nil, nil, nil)
++	publicationStatusV2(recorder, httptest.NewRequest("GET", "/orbwin/port-status/v2/"+publicationFixtureID, nil), nil, nil, nil, strings.Repeat("c", 32))
+ 	if recorder.Code != 409 {
+ 		t.Fatal("missing transport accepted")
+ 	}

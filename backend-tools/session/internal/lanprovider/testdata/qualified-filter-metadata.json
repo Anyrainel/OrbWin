@@ -1,0 +1,1172 @@
+[
+  {
+    "class": {
+      "name": "MSFT_NetAddressFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "LocalAddress",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "RemoteAddress",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": [
+        {
+          "name": "QueryIsolationType",
+          "returnType": 5
+        }
+      ]
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetApplicationFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "AppPath",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "Package",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetInterfaceFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "InterfaceAlias",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetInterfaceTypeFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "InterfaceType",
+          "type": 5,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetProtocolPortFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "DynamicTransport",
+          "type": 5,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "IcmpType",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "LocalPort",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "Protocol",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "RemotePort",
+          "type": 29,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetNetworkLayerSecurityFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "Authentication",
+          "type": 3,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "Encryption",
+          "type": 3,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "LocalUsers",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "OverrideBlockRules",
+          "type": 0,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "RemoteMachines",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        },
+        {
+          "name": "RemoteUsers",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetServiceFilter",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "Caption",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Description",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "ElementName",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstanceID",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CommunicationStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "DetailedStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "HealthState",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "InstallDate",
+          "type": 12,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Name",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "OperatingStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "OperationalStatus",
+          "type": 19,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "PrimaryStatus",
+          "type": 3,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "Status",
+          "type": 13,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "StatusDescriptions",
+          "type": 29,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "CreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "IsNegated",
+          "type": 0,
+          "flags": 538968068,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemCreationClassName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "SystemName",
+          "type": 13,
+          "flags": 538972164,
+          "hasDefault": false
+        },
+        {
+          "name": "ServiceName",
+          "type": 13,
+          "flags": 536870916,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": null
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByAddress",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetAddressFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByApplication",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetApplicationFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByInterface",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetInterfaceFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByInterfaceType",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetInterfaceTypeFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByProtocolPort",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetProtocolPortFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterBySecurity",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetNetworkLayerSecurityFilter"
+      }
+    ]
+  },
+  {
+    "class": {
+      "name": "MSFT_NetFirewallRuleFilterByService",
+      "namespace": "ROOT/StandardCimv2",
+      "provider": "wfascim",
+      "properties": [
+        {
+          "name": "GroupComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        },
+        {
+          "name": "PartComponent",
+          "type": 14,
+          "flags": 536875012,
+          "hasDefault": false
+        }
+      ],
+      "methods": null
+    },
+    "references": [
+      {
+        "name": "GroupComponent",
+        "class": "MSFT_NetFirewallRule"
+      },
+      {
+        "name": "PartComponent",
+        "class": "MSFT_NetServiceFilter"
+      }
+    ]
+  }
+]

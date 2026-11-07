@@ -1,0 +1,55 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync, mkdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
+import { resolve, isAbsolute, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
+import { inputDirectory, cliBuildArguments } from './package-contract.mjs';
+import {freshOutputPath} from './build-output.mjs';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const options=cliBuildArguments(process.argv.slice(2));
+const sourceOnly=options.sourceOnly;
+const option=name=>options[name];
+const requested=option('--output');
+if(!requested||!isAbsolute(requested))throw Error('CLI build requires a fresh absolute --output directory');
+const output=freshOutputPath(root,requested);
+const installed=resolve(root,'artifacts/cli');
+if(output.toLowerCase()===installed.toLowerCase()||!relative(installed,output).startsWith('..')||existsSync(output))throw Error('Refusing existing/installed CLI output');
+const dir=resolve(root,'backend-tools/cli');
+const hash=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
+const json=p=>JSON.parse(readFileSync(p));
+const lockPath=resolve(root,'upstream.lock.json'),toolsPath=resolve(root,'runtime-tools.lock.json');
+const lock=json(lockPath),tools=json(toolsPath),pkg=json(resolve(root,'package.json'));
+const inputs=new Map([[lockPath,hash(lockPath)],[toolsPath,hash(toolsPath)]]);
+const sources=Object.fromEntries(readdirSync(dir).filter(n=>(n.endsWith('.go')&&!n.endsWith('_test.go'))||n==='go.mod'||n==='go.sum').sort().map(n=>[n,hash(resolve(dir,n))]));
+const pins={sourceCommit:lock.commit,version:pkg.version};
+if(!/^[a-f0-9]{40}$/.test(lock.commit))throw Error('Invalid upstream commit');
+if(!sourceOnly){
+ const candidate=option('--candidate-input');
+ const separate=['--backend-input','--credentials-input','--tools-input'].some(n=>option(n)!==undefined);
+ if(candidate&&separate)throw Error('Use one explicit CLI component input shape');
+ const backend=inputDirectory(candidate?resolve(inputDirectory(candidate),'backend'):option('--backend-input'));
+ const toolDir=inputDirectory(candidate?resolve(candidate,'tools'):option('--tools-input'));
+ const credentialDir=candidate?backend:inputDirectory(option('--credentials-input'));
+ const manifestPath=resolve(backend,'build-manifest.json');
+ const manifest=json(manifestPath);inputs.set(manifestPath,hash(manifestPath));
+ const origin=manifest.executionOrigin;
+ if(!origin||Object.keys(origin).sort().join(',')!=='authorityRoot,cacheLayout,schema'||origin.schema!==1||origin.authorityRoot!=='native-profile-authority-v1'||origin.cacheLayout!=='native-profile-runtime-v1')throw Error('Backend lacks recognized execution-origin descriptor');
+ if(lock.patches.length<18||manifest.sourceCommit!==lock.commit||manifest.go!==lock.go.version||manifest.patches?.length!==lock.patches.length)throw Error('Backend source closure is not the selected successor');
+ const closure=lock.patches.map((path,i)=>{const absolute=resolve(root,path),sha256=hash(absolute);inputs.set(absolute,sha256);if(manifest.patches[i].path!==path||manifest.patches[i].sha256!==sha256)throw Error('Backend ordered patch closure differs');return {path,sha256};});
+ pins.patchClosureSHA=createHash('sha256').update(JSON.stringify(closure)).digest('hex');
+ pins.buildLayout='native-profile-runtime-v1';pins.toolLockSHA=hash(toolsPath);
+ function component(path,expected){const actual=hash(path);if(!/^[a-f0-9]{64}$/.test(expected)||actual!==expected)throw Error('Component bytes differ from build provenance');inputs.set(path,actual);return actual;}
+ pins.rddSHA=component(resolve(backend,'rdd.exe'),manifest.binarySha256);
+ pins.forwarderSHA=component(resolve(backend,'rdd-forwarder.exe'),manifest.forwarder?.binarySha256);
+ const credentialsPath=resolve(credentialDir,'credentials-manifest.json');const credentials=json(credentialsPath);inputs.set(credentialsPath,hash(credentialsPath));
+ pins.credentialsSHA=component(resolve(credentialDir,'docker-credential-orbwin.exe'),credentials.binarySha256);
+ for(const [pin,path]of [['dockerSHA','bin/docker.exe'],['composeSHA','docker-cli-plugins/docker-compose.exe'],['buildxSHA','docker-cli-plugins/docker-buildx.exe']]){const record=tools.tools.find(t=>t.path===path);pins[pin]=component(resolve(toolDir,path),record?.sha256);}
+}
+mkdirSync(output,{recursive:false});
+const binary=resolve(output,'orbwin-cli.exe');
+execFileSync(resolve(root,`.tools/go${lock.go.version}/go/bin/go.exe`),['build','-mod=readonly','-trimpath','-buildvcs=false','-ldflags',Object.entries(pins).map(([k,v])=>`-X main.${k}=${v}`).join(' '),'-o',binary,'.'],{cwd:dir,env:{...process.env,CGO_ENABLED:'0',GOOS:'windows',GOARCH:'amd64',GOTOOLCHAIN:'local',GOPROXY:'off'},stdio:'inherit',windowsHide:true});
+for(const[name,sha]of Object.entries(sources))if(hash(resolve(dir,name))!==sha)throw Error('CLI sources changed during build');
+for(const[path,sha]of inputs)if(hash(path)!==sha)throw Error('CLI build input changed during build');
+const alias=resolve(output,'orbwin-docker.exe');copyFileSync(binary,alias);
+writeFileSync(resolve(output,'cli-manifest.json'),JSON.stringify({schema:2,sourceOnly,compiledPinsPresent:!sourceOnly,executionQualified:false,pins,binarySha256:hash(binary),alias:{path:'orbwin-docker.exe',sha256:hash(alias)},sources,inputs:Object.fromEntries(inputs)},null,2)+'\n',{flag:'wx'});
+console.log(binary);

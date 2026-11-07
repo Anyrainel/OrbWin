@@ -1,0 +1,1102 @@
+--- a/file.go
++++ b/file.go
+@@ -54,6 +54,8 @@
+ var ioInitOnce sync.Once
+ var ioCompletionPort windows.Handle
+ 
++var originalFileCloseHandle = windows.NewLazySystemDLL("kernel32.dll").NewProc("CloseHandle")
++
+ // ioResult contains the result of an asynchronous IO operation.
+ type ioResult struct {
+ 	bytes uint32
+@@ -66,18 +68,14 @@
+ 	ch chan ioResult
+ }
+ 
+-func initIO() {
+-	h, err := createIoCompletionPort(windows.InvalidHandle, 0, 0, 0xffffffff)
+-	if err != nil {
+-		panic(err)
+-	}
+-	ioCompletionPort = h
+-	go ioCompletionProcessor(h)
+-}
++func initIO() { initOriginalIO() }
+ 
+ // win32File implements Reader, Writer, and Closer on a Win32 handle without blocking in a syscall.
+-// It takes ownership of this handle and will close it if it is garbage collected.
++// It takes ownership of this handle. Callers must retain a failed close's
++// original file; no garbage-collection close or retry is a release proof.
+ type win32File struct {
++	registration  originalFileRegistration
++	dial          *pipeDialOperation // original private birth borrower, never a second closer
+ 	handle        windows.Handle
+ 	wg            sync.WaitGroup
+ 	wgLock        sync.RWMutex
+@@ -85,6 +83,17 @@
+ 	socket        bool
+ 	readDeadline  deadlineHandler
+ 	writeDeadline deadlineHandler
++
++	closeState          originalFileCloseState
++	closeInput          windows.Handle // Input history only, never a second closer.
++	closeCancelEntered  bool
++	closeCancelReturned bool
++	closeCancelError    error
++	closeJoined         bool
++	closeEntered        bool
++	closeReturned       bool
++	closeRaw            uintptr
++	closeLastError      error
+ }
+ 
+ type deadlineHandler struct {
+@@ -98,17 +107,9 @@
+ // makeWin32File makes a new win32File from an existing file handle.
+ func makeWin32File(h windows.Handle) (*win32File, error) {
+ 	f := &win32File{handle: h}
+-	ioInitOnce.Do(initIO)
+-	_, err := createIoCompletionPort(h, ioCompletionPort, 0, 0xffffffff)
+-	if err != nil {
++	if err := registerOriginalFile(f); err != nil {
+ 		return nil, err
+ 	}
+-	err = setFileCompletionNotificationModes(h, windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS|windows.FILE_SKIP_SET_EVENT_ON_HANDLE)
+-	if err != nil {
+-		return nil, err
+-	}
+-	f.readDeadline.channel = make(timeoutChan)
+-	f.writeDeadline.channel = make(timeoutChan)
+ 	return f, nil
+ }
+ 
+@@ -128,26 +129,54 @@
+ }
+ 
+ // closeHandle closes the resources associated with a Win32 handle.
+-func (f *win32File) closeHandle() {
++func (f *win32File) closeHandle() error {
++	f.closeState.mu.Lock()
++	defer f.closeState.mu.Unlock()
++	if !f.closeState.begin() {
++		return f.closeState.result()
++	}
++	defer func() {
++		if p := recover(); p != nil {
++			f.closeState.refuse(errOriginalCloseUnknown)
++			runtime.KeepAlive(f)
++			panic(p)
++		}
++		runtime.KeepAlive(f)
++	}()
++	// closeState serializes every closer. No I/O completion takes that mutex;
++	// release wgLock before cancellation/join so existing I/O can finish.
+ 	f.wgLock.Lock()
+-	// Atomically set that we are closing, releasing the resources only once.
+-	if !f.closing.Swap(true) {
+-		f.wgLock.Unlock()
+-		// cancel all IO and wait for it to complete
+-		_ = cancelIoEx(f.handle, nil)
+-		f.wg.Wait()
+-		// at this point, no new IO can start
+-		windows.Close(f.handle)
+-		f.handle = 0
+-	} else {
+-		f.wgLock.Unlock()
+-	}
++	f.closing.Store(true)
++	f.wgLock.Unlock()
++	f.closeInput = f.handle
++	f.closeCancelEntered = true
++	f.closeCancelError = cancelIoEx(f.handle, nil)
++	f.closeCancelReturned = true
++	f.wg.Wait()
++	f.closeJoined = true
++	if f.handle == 0 || f.handle == windows.InvalidHandle || f.handle != f.closeInput {
++		f.closeState.refuse(errOriginalCloseUnknown)
++		return f.closeState.result()
++	}
++	// The original native input/reply live on this SAME file before the call.
++	// Keep failed/unreturned input intact, and never retry the native close.
++	f.closeEntered = true
++	f.closeRaw, _, f.closeLastError = originalFileCloseHandle.Call(uintptr(f.handle))
++	f.closeReturned = true
++	if err := originalFileCloseReply(f.closeRaw, f.closeLastError); err != nil {
++		f.closeState.refuse(err)
++		return f.closeState.result()
++	}
++	f.handle = 0 // Disarm only after the original native positive reply.
++	if !f.closeState.publishClosed() {
++		f.closeState.refuse(errOriginalCloseUnknown)
++	}
++	return f.closeState.result()
+ }
+ 
+ // Close closes a win32File.
+ func (f *win32File) Close() error {
+-	f.closeHandle()
+-	return nil
++	return f.closeHandle()
+ }
+ 
+ // IsClosed checks if the file has been closed.
+--- /dev/null
++++ b/file_original_close_state.go
+@@ -0,0 +1,72 @@
++//go:build windows
++
++package winio
++
++import (
++	"errors"
++	"sync"
++	"syscall"
++)
++
++var errOriginalCloseUnknown = errors.New("winio: original handle close completion unknown")
++
++// This private ledger is DATA, not handle ownership. The real win32File holds
++// its mutex through its one concrete native close and result publication.
++type originalFileCloseState struct {
++	mu        sync.Mutex
++	attempted bool
++	refused   bool
++	closed    bool
++	err       error
++}
++
++// Caller holds mu. Prearm failure before any cancellation, join or native call.
++func (s *originalFileCloseState) begin() bool {
++	if s.attempted {
++		return false
++	}
++	s.attempted = true
++	s.err = errOriginalCloseUnknown
++	return true
++}
++
++func (s *originalFileCloseState) refuse(err error) {
++	if !s.attempted || s.closed || s.refused {
++		return
++	}
++	s.refused = true
++	if err == nil {
++		err = errOriginalCloseUnknown
++	}
++	s.err = err
++}
++
++// Only the actual owner calls this AFTER its raw positive reply and clearing
++// its owned handle. A failed/panicked attempt cannot later publish success.
++func (s *originalFileCloseState) publishClosed() bool {
++	if !s.attempted || s.refused || s.closed {
++		return false
++	}
++	s.closed = true
++	s.err = nil
++	return true
++}
++
++func (s *originalFileCloseState) result() error {
++	if !s.attempted || !s.closed && s.err == nil {
++		return errOriginalCloseUnknown
++	}
++	return s.err
++}
++
++// A Win32 BOOL is low32. LastError is irrelevant on success; preserve the
++// actual error on failure, including pending, without treating it as release.
++func originalFileCloseReply(raw uintptr, lastError error) error {
++	if uint32(raw) != 0 {
++		return nil
++	}
++	if code, ok := lastError.(syscall.Errno); ok && code != 0 {
++		return code
++	}
++	return errOriginalCloseUnknown
++}
+--- /dev/null
++++ b/file_original_close_state_test.go
+@@ -0,0 +1,227 @@
++//go:build windows
++
++package winio
++
++import (
++	"errors"
++	"sync"
++	"sync/atomic"
++	"syscall"
++	"testing"
++	"time"
++)
++
++// Explicit file-list tests exercise only DATA and synchronization. No real
++// handle, win32File, DLL, pipe or native function is constructed here.
++func TestOriginalCloseReplyBOOLAndStaleError(t *testing.T) {
++	for _, test := range []struct {
++		raw  uintptr
++		err  error
++		want error
++	}{
++		{1, syscall.Errno(997), nil}, {2, syscall.Errno(5), nil},
++		{0, syscall.Errno(5), syscall.Errno(5)},
++		{0, syscall.Errno(997), syscall.Errno(997)},
++		{uintptr(1) << 32, syscall.Errno(5), syscall.Errno(5)},
++		{0, syscall.Errno(0), errOriginalCloseUnknown},
++		{0, nil, errOriginalCloseUnknown},
++		{0, errors.New("not a native error"), errOriginalCloseUnknown},
++	} {
++		if got := originalFileCloseReply(test.raw, test.err); got != test.want {
++			t.Fatalf("raw=%x: got %v, want %v", test.raw, got, test.want)
++		}
++	}
++}
++
++func TestOriginalCloseDefaultAndRefusedAttemptCannotPublish(t *testing.T) {
++	var state originalFileCloseState
++	state.mu.Lock()
++	defer state.mu.Unlock()
++	if state.result() == nil || state.publishClosed() || !state.begin() || state.result() == nil {
++		t.Fatal("default/inflight state published nil")
++	}
++	state.refuse(syscall.Errno(6))
++	state.refuse(nil)
++	if state.begin() || state.publishClosed() || state.result() != syscall.Errno(6) {
++		t.Fatal("failed original result was retried/reset")
++	}
++}
++
++func testOriginalCloseConcurrent(t *testing.T, raw uintptr, nativeError error) {
++	t.Helper()
++	var state originalFileCloseState
++	var calls atomic.Int32
++	// Dummy original input history. Its scalar is never passed to any OS API.
++	input, owned := 42, 42
++	entered := make(chan struct{})
++	returnNative := make(chan struct{})
++	results := make(chan error, 33)
++	var workers sync.WaitGroup
++	closeOriginal := func(winner bool) {
++		defer workers.Done()
++		state.mu.Lock()
++		defer state.mu.Unlock()
++		if state.begin() {
++			calls.Add(1)
++			close(entered)
++			<-returnNative
++			if err := originalFileCloseReply(raw, nativeError); err != nil {
++				state.refuse(err)
++			} else {
++				owned = 0 // Actual owner publishes nil only AFTER this disarm.
++				if !state.publishClosed() {
++					t.Error("positive publication refused")
++				}
++			}
++		} else if winner {
++			t.Error("original winner did not enter")
++		}
++		results <- state.result()
++	}
++	workers.Add(1)
++	go closeOriginal(true)
++	select {
++	case <-entered:
++	case <-time.After(5 * time.Second):
++		t.Fatal("winner never entered")
++	}
++	ready := make(chan struct{}, 32)
++	for i := 0; i < 32; i++ {
++		workers.Add(1)
++		go func() {
++			ready <- struct{}{}
++			closeOriginal(false)
++		}()
++	}
++	for i := 0; i < 32; i++ {
++		<-ready
++	}
++	select {
++	case <-results:
++		t.Error("a concurrent caller returned before original completion")
++	default:
++	}
++	close(returnNative)
++	workers.Wait()
++	want := originalFileCloseReply(raw, nativeError)
++	for i := 0; i < 33; i++ {
++		if got := <-results; got != want {
++			t.Fatalf("different cached result: %v vs %v", got, want)
++		}
++	}
++	if calls.Load() != 1 || input != 42 || want != nil && owned != 42 || want == nil && owned != 0 {
++		t.Fatal("original input/ownership/call count lost")
++	}
++	state.mu.Lock()
++	defer state.mu.Unlock()
++	if state.begin() || state.result() != want {
++		t.Fatal("cached replay reentered the close")
++	}
++}
++
++func TestOriginalCloseConcurrentPositiveWaitsForOriginal(t *testing.T) {
++	testOriginalCloseConcurrent(t, 1, syscall.Errno(997))
++}
++
++func TestOriginalCloseConcurrentFailureKeepsOriginal(t *testing.T) {
++	testOriginalCloseConcurrent(t, 0, syscall.Errno(6))
++}
++
++func TestOriginalClosePanicCutsNeverCacheDefaultNil(t *testing.T) {
++	for cut := 0; cut < 4; cut++ {
++		var state originalFileCloseState
++		owned, history := 42, 42
++		panicked := false
++		func() {
++			state.mu.Lock()
++			defer state.mu.Unlock()
++			defer func() {
++				if recover() != nil {
++					state.refuse(errOriginalCloseUnknown)
++					panicked = true
++				}
++			}()
++			if !state.begin() {
++				t.Fatal("first entry refused")
++			}
++			for phase := 0; phase < 4; phase++ {
++				if phase == cut {
++					panic("cancel/join/raw-return/prepublication cut")
++				}
++				if phase == 2 {
++					owned = 0 // A real positive prefix, still not a nil publication.
++				}
++			}
++			state.publishClosed()
++		}()
++		state.mu.Lock()
++		if !panicked || state.begin() || state.publishClosed() || state.result() == nil || history != 42 || cut < 3 && owned != 42 {
++			t.Fatal("panic reset original state or defaulted to success", cut)
++		}
++		state.mu.Unlock()
++	}
++}
++
++func TestOriginalClosePositiveReplayCannotChangeResult(t *testing.T) {
++	var state originalFileCloseState
++	state.mu.Lock()
++	defer state.mu.Unlock()
++	if !state.begin() || !state.publishClosed() || state.result() != nil {
++		t.Fatal("positive original completion")
++	}
++	state.refuse(syscall.Errno(6))
++	if state.begin() || state.publishClosed() || state.result() != nil {
++		t.Fatal("completed result changed on replay")
++	}
++}
++
++func TestOriginalClosePanicWaiterReceivesCachedFailure(t *testing.T) {
++	var state originalFileCloseState
++	entered := make(chan struct{})
++	allowPanic := make(chan struct{})
++	panicked := make(chan struct{})
++	result := make(chan error, 1)
++	go func() {
++		state.mu.Lock()
++		defer state.mu.Unlock()
++		defer func() {
++			if recover() != nil {
++				state.refuse(errOriginalCloseUnknown)
++				close(panicked)
++			}
++		}()
++		state.begin()
++		close(entered)
++		<-allowPanic
++		panic("original close continuation")
++	}()
++	<-entered
++	go func() {
++		state.mu.Lock()
++		defer state.mu.Unlock()
++		if state.begin() {
++			result <- nil
++			return
++		}
++		result <- state.result()
++	}()
++	select {
++	case <-result:
++		t.Error("waiter escaped before original panic settled")
++	default:
++	}
++	close(allowPanic)
++	select {
++	case <-panicked:
++	case <-time.After(5 * time.Second):
++		t.Fatal("original panic not settled")
++	}
++	select {
++	case err := <-result:
++		if err != errOriginalCloseUnknown {
++			t.Fatal("waiter saw default nil or new attempt", err)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("waiter did not observe original cached failure")
++	}
++}
+--- /dev/null
++++ b/file_original_iocp_windows.go
+@@ -0,0 +1,126 @@
++//go:build windows
++
++package winio
++
++import (
++	"runtime"
++	"sync/atomic"
++
++	"golang.org/x/sys/windows"
++)
++
++var originalIOCPCreate = windows.NewLazySystemDLL("kernel32.dll").NewProc("CreateIoCompletionPort")
++var originalIOCPNotify = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetFileCompletionNotificationModes")
++
++// This is the SAME existing singleton and processor. No other port is created
++// after failure. Its original native reply remains rooted for process lifetime.
++type originalIOCPFrame struct {
++	state     originalIOInitState
++	raw       uintptr
++	lastError error
++	port      windows.Handle
++	failed    atomic.Bool
++}
++
++var originalIOCP originalIOCPFrame
++
++type originalFileRegistration struct {
++	singleton                               *originalIOCPFrame // same process-lifetime borrower published before init
++	port                                    windows.Handle     // borrower, never a closer
++	associationEntered, associationReturned bool
++	associationRaw                          uintptr
++	associationError                        error
++	notifyEntered, notifyReturned           bool
++	notifyRaw                               uintptr
++	notifyError                             error
++	unknown                                 bool
++}
++
++func ensureOriginalIO() error {
++	ioInitOnce.Do(initIO)
++	if originalIOCP.failed.Load() {
++		return errOriginalDialUnknown
++	}
++	if originalIOCP.state.result() != nil || originalIOCP.port == 0 || ioCompletionPort != originalIOCP.port {
++		return errOriginalDialUnknown
++	}
++	return nil
++}
++
++func initOriginalIO() {
++	if !originalIOCP.state.begin() {
++		originalIOCP.failed.Store(true)
++		return
++	}
++	defer func() {
++		if p := recover(); p != nil {
++			originalIOCP.state.unknown = true
++			originalIOCP.failed.Store(true)
++			panic(p)
++		}
++	}()
++	originalIOCP.raw, _, originalIOCP.lastError = originalIOCPCreate.Call(uintptr(windows.InvalidHandle), 0, 0, 0xffffffff)
++	if !originalIOCP.state.publish(originalIOCP.raw, uintptr(windows.InvalidHandle)) {
++		originalIOCP.failed.Store(true)
++		return
++	}
++	originalIOCP.port = windows.Handle(originalIOCP.raw)
++	ioCompletionPort = originalIOCP.port
++	// Publication and launch cannot panic into a later default-success Once.
++	originalIOCP.state.processor = true
++	go ioCompletionProcessor(originalIOCP.port)
++	originalIOCP.state.ready = true
++	originalIOCP.state.err = nil
++}
++
++// f and its original output cells must already have a real caller lifetime root.
++// Legacy makeWin32File callers retain their historical caller-custody gaps.
++func originalRegistrationOwner(f *win32File) bool {
++	return f != nil && (f.dial == nil || f.dial.file == f && f.dial.guard())
++}
++func registerOriginalFile(f *win32File) (err error) {
++	r := &f.registration
++	defer func() {
++		if p := recover(); p != nil {
++			r.unknown = true
++			originalIOCP.failed.Store(true)
++			runtime.KeepAlive(f)
++			panic(p)
++		}
++		runtime.KeepAlive(f)
++	}()
++	if !originalRegistrationOwner(f) || f.handle == 0 || f.handle == windows.InvalidHandle || r.associationEntered || r.notifyEntered {
++		return errOriginalDialOwner
++	}
++	r.singleton = &originalIOCP
++	if err = ensureOriginalIO(); err != nil {
++		return err
++	}
++	if !originalRegistrationOwner(f) || r.singleton != &originalIOCP {
++		return errOriginalDialUnknown
++	}
++	r.port = originalIOCP.port
++	r.associationEntered = true
++	r.associationRaw, _, r.associationError = originalIOCPCreate.Call(uintptr(f.handle), uintptr(r.port), 0, 0xffffffff)
++	r.associationReturned = true
++	if !originalRegistrationOwner(f) || !originalDialAssociation(r.associationRaw, uintptr(r.port)) {
++		r.unknown = true
++		originalIOCP.failed.Store(true)
++		return errOriginalDialUnknown
++	}
++	r.notifyEntered = true
++	r.notifyRaw, _, r.notifyError = originalIOCPNotify.Call(uintptr(f.handle), uintptr(windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS|windows.FILE_SKIP_SET_EVENT_ON_HANDLE))
++	r.notifyReturned = true
++	if !originalRegistrationOwner(f) || !originalDialBOOL(r.notifyRaw) {
++		r.unknown = true
++		originalIOCP.failed.Store(true)
++		return errOriginalDialUnknown
++	}
++	if originalIOCP.failed.Load() {
++		r.unknown = true
++		return errOriginalDialUnknown
++	}
++	f.readDeadline.channel = make(timeoutChan)
++	f.writeDeadline.channel = make(timeoutChan)
++	return nil
++}
+--- /dev/null
++++ b/pipe_dial_state.go
+@@ -0,0 +1,100 @@
++package winio
++
++import (
++	"errors"
++	"syscall"
++)
++
++var errOriginalDialUnknown = errors.New("original pipe birth or IOCP completion unknown")
++var errOriginalDialOwner = errors.New("original pipe operation identity or lifecycle refused")
++
++type originalDialPhase struct {
++	entered, returned, unknown, handedOff, closed bool
++	closeAttempted                                bool
++	closeErr                                      error
++}
++
++func (s *originalDialPhase) enter() bool {
++	if s.unknown || s.handedOff || s.closed || s.entered && !s.returned {
++		s.unknown = true
++		return false
++	}
++	s.entered = true
++	s.returned = false
++	return true
++}
++func (s *originalDialPhase) complete() {
++	if !s.entered || s.returned {
++		s.unknown = true
++	}
++	s.returned = true
++}
++func (s *originalDialPhase) rejectable() bool {
++	return !s.unknown && !s.handedOff && (!s.entered || s.returned)
++}
++func (s *originalDialPhase) beginClose() bool {
++	if s.closeAttempted || !s.rejectable() {
++		return false
++	}
++	s.closeAttempted = true
++	s.closeErr = errOriginalDialUnknown
++	return true
++}
++func (s *originalDialPhase) closedReply(err error) {
++	if !s.closeAttempted || s.closed || s.unknown {
++		s.unknown = true
++		return
++	}
++	if err != nil {
++		s.unknown = true
++		s.closeErr = err
++		return
++	}
++	s.closed = true
++	s.closeErr = nil
++}
++
++// Only this documented completed no-output result permits another CreateFile.
++func originalDialBusy(raw, invalid uintptr, last error) bool {
++	e, ok := last.(syscall.Errno)
++	return raw == invalid && ok && e == 231
++}
++func originalDialHandle(raw, invalid uintptr) bool {
++	return raw != 0 && raw != invalid && raw != invalid-1 && raw != invalid-2
++}
++func originalDialBOOL(raw uintptr) bool                  { return uint32(raw) != 0 }
++func originalDialAssociation(raw, expected uintptr) bool { return expected != 0 && raw == expected }
++
++// One original singleton frame is prearmed before its existing sync.Once call.
++// The state cannot certify a consumed Once with no positive native result.
++type originalIOInitState struct {
++	attempted, entered, returned, ready, unknown, processor bool
++	err                                                     error
++}
++
++func (s *originalIOInitState) begin() bool {
++	if s.attempted {
++		return false
++	}
++	s.attempted = true
++	s.err = errOriginalDialUnknown
++	s.entered = true
++	return true
++}
++func (s *originalIOInitState) publish(raw, invalid uintptr) bool {
++	s.returned = true
++	if !s.attempted || s.unknown || !originalDialHandle(raw, invalid) {
++		s.unknown = true
++		return false
++	}
++	return true
++}
++func (s *originalIOInitState) result() error {
++	if s.unknown || !s.ready || !s.processor {
++		if s.err != nil {
++			return s.err
++		}
++		return errOriginalDialUnknown
++	}
++	return nil
++}
+--- /dev/null
++++ b/pipe_dial_state_test.go
+@@ -0,0 +1,162 @@
++package winio
++
++import (
++	"errors"
++	"sync"
++	"sync/atomic"
++	"syscall"
++	"testing"
++)
++
++func TestOriginalDialBusyOnlyCompletedNoOutput(t *testing.T) {
++	invalid := ^uintptr(0)
++	for _, v := range []struct {
++		raw  uintptr
++		err  error
++		busy bool
++	}{{invalid, syscall.Errno(231), true}, {0, syscall.Errno(231), false}, {7, syscall.Errno(231), false}, {invalid, syscall.Errno(997), false}, {invalid, nil, false}, {invalid, errors.New("pipe busy"), false}} {
++		if originalDialBusy(v.raw, invalid, v.err) != v.busy {
++			t.Fatalf("raw=%x error=%v", v.raw, v.err)
++		}
++	}
++}
++func TestOriginalDialRawAdmission(t *testing.T) {
++	invalid := ^uintptr(0)
++	for _, h := range []uintptr{0, invalid, invalid - 1, invalid - 2} {
++		if originalDialHandle(h, invalid) {
++			t.Fatalf("pseudo/empty %x", h)
++		}
++	}
++	if !originalDialHandle(7, invalid) || !originalDialBOOL(1) || originalDialBOOL(uintptr(1)<<32) {
++		t.Fatal("native width admission")
++	}
++	if !originalDialAssociation(7, 7) || originalDialAssociation(8, 7) || originalDialAssociation(0, 0) {
++		t.Fatal("association identity")
++	}
++}
++func TestOriginalDialCancellationCuts(t *testing.T) {
++	// Pre-effect cancellation and late cancellation after an exact settled open
++	// may settle once. An entered but unreturned call never admits cleanup.
++	for _, after := range []bool{false, true} {
++		s := originalDialPhase{}
++		if after {
++			s.enter()
++			s.complete()
++		}
++		if !s.beginClose() {
++			t.Fatal("settled rejection")
++		}
++		s.closedReply(nil)
++		if !s.closed || s.closeErr != nil || s.beginClose() {
++			t.Fatal("replay")
++		}
++	}
++	s := originalDialPhase{}
++	s.enter()
++	if s.beginClose() {
++		t.Fatal("pending cleanup")
++	}
++	if s.enter() || !s.unknown {
++		t.Fatal("unknown retry")
++	}
++}
++func TestOriginalDialNoSuffixAfterEachUnknownCut(t *testing.T) {
++	for cut := 0; cut < 4; cut++ {
++		s := originalDialPhase{}
++		effects := 0
++		for phase := 0; phase < 4; phase++ {
++			if !s.enter() {
++				break
++			}
++			effects++
++			if phase == cut {
++				s.unknown = true
++				break
++			}
++			s.complete()
++		}
++		if effects != cut+1 || s.beginClose() {
++			t.Fatalf("suffix at %d", cut)
++		}
++	}
++}
++func TestOriginalDialCloseFailureSticky(t *testing.T) {
++	failure := errors.New("checked original close failed")
++	s := originalDialPhase{}
++	s.enter()
++	s.complete()
++	if !s.beginClose() {
++		t.Fatal("admission")
++	}
++	s.closedReply(failure)
++	if s.closeErr != failure || !s.unknown || s.closed || s.beginClose() {
++		t.Fatal("lost failure")
++	}
++	s.closedReply(nil)
++	if s.closed || s.closeErr != failure {
++		t.Fatal("failure reset")
++	}
++	s = originalDialPhase{handedOff: true}
++	if s.beginClose() {
++		t.Fatal("second closer after successful facade")
++	}
++}
++func TestOriginalSingletonConsumedOnceNeverDefaults(t *testing.T) {
++	for _, panicAt := range []int{0, 1, 2, 3} {
++		var once sync.Once
++		s := originalIOInitState{}
++		var calls atomic.Int32
++		var joins sync.WaitGroup
++		init := func() {
++			defer func() {
++				if recover() != nil {
++					s.unknown = true
++				}
++			}()
++			calls.Add(1)
++			s.begin()
++			if panicAt == 0 {
++				panic("call")
++			}
++			if !s.publish(7, ^uintptr(0)) {
++				t.Error("publish")
++			}
++			if panicAt == 1 {
++				panic("returned")
++			}
++			s.processor = true
++			if panicAt == 2 {
++				panic("processor")
++			}
++			s.ready = true
++			s.err = nil
++		}
++		for i := 0; i < 32; i++ {
++			joins.Add(1)
++			go func() {
++				defer joins.Done()
++				once.Do(init)
++				if (s.result() == nil) != (panicAt == 3) {
++					t.Error("consumed Once gave incorrect cached result")
++				}
++			}()
++		}
++		joins.Wait()
++		if calls.Load() != 1 {
++			t.Fatal("second init")
++		}
++	}
++}
++func TestOriginalSingletonRejectsNullPseudoAndUnentered(t *testing.T) {
++	for _, raw := range []uintptr{0, ^uintptr(0), ^uintptr(0) - 1} {
++		s := originalIOInitState{}
++		s.begin()
++		if s.publish(raw, ^uintptr(0)) || s.result() == nil {
++			t.Fatal("bad port")
++		}
++	}
++	s := originalIOInitState{}
++	if s.result() == nil || s.publish(7, ^uintptr(0)) {
++		t.Fatal("unentered init")
++	}
++}
+--- /dev/null
++++ b/pipe_original_dial_windows.go
+@@ -0,0 +1,199 @@
++//go:build windows
++
++package winio
++
++import (
++	"context"
++	"net"
++	"runtime"
++	"sync"
++	"time"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++// PipeDialOperation retains an original pipe birth, including nil-Conn failure.
++// Its actual private issuer is checked by identity. It grants no product permission.
++// The original slot passed to Into must remain immutable for its whole lifetime.
++type PipeDialOperation interface {
++	Close() error
++	originalPipeDial() *pipeDialOperation
++}
++
++type pipeDialOperation struct {
++	mu        sync.Mutex
++	self      *pipeDialOperation
++	slot      *PipeDialOperation
++	phase     originalDialPhase
++	file      *win32File // sole original handle cell, allocated before any native effect
++	path      string
++	name      []uint16
++	access    uint32
++	flags     uint32
++	openRaw   uintptr
++	openError error
++	infoFlags uint32
++	infoRaw   uintptr
++	infoError error
++	conn      net.Conn // same original file; successful facade is sole closer
++}
++
++func (o *pipeDialOperation) originalPipeDial() *pipeDialOperation { return o }
++func (o *pipeDialOperation) original() bool {
++	return o != nil && o.self == o && o.slot != nil && *o.slot == o && o.file != nil && o.file.dial == o
++}
++func (o *pipeDialOperation) guard() bool {
++	if !o.original() || o.phase.unknown || originalIOCP.failed.Load() {
++		o.phase.unknown = true
++		return false
++	}
++	return true
++}
++func (o *pipeDialOperation) Close() error {
++	if o == nil {
++		return errOriginalDialOwner
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if !o.original() {
++		o.phase.unknown = true
++		return errOriginalDialOwner
++	}
++	// A replay observes the original result, never current ambient state. It
++	// performs no new effect and cannot reset failed/unknown completion.
++	if o.phase.closeAttempted {
++		return o.phase.closeErr
++	}
++	if !o.guard() || o.phase.handedOff {
++		return errOriginalDialUnknown
++	}
++	if !o.phase.beginClose() {
++		return errOriginalDialUnknown
++	}
++	defer func() {
++		if p := recover(); p != nil {
++			o.phase.unknown = true
++			runtime.KeepAlive(o)
++			panic(p)
++		}
++	}()
++	var err error
++	if o.file.handle != 0 {
++		err = o.file.Close()
++	}
++	o.phase.closedReply(err)
++	runtime.KeepAlive(o)
++	return o.phase.closeErr
++}
++
++var originalPipeCreate = windows.NewLazySystemDLL("kernel32.dll").NewProc("CreateFileW")
++var originalPipeInfo = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetNamedPipeInfo")
++
++// DialPipeAccessImpLevelInto publishes the actual operation/file in original
++// before all native work. A failed operation must be retained and settled even
++// when no Conn is returned. A successful Conn is the exclusive native closer.
++// This bounded variant requires a deadline; old Dial APIs remain unchanged.
++func DialPipeAccessImpLevelInto(ctx context.Context, path string, access uint32, impLevel PipeImpLevel, original *PipeDialOperation) (conn net.Conn, err error) {
++	if original == nil || *original != nil || ctx == nil {
++		return nil, errOriginalDialOwner
++	}
++	if _, ok := ctx.Deadline(); !ok {
++		return nil, errOriginalDialOwner
++	}
++	switch impLevel {
++	case PipeImpLevelAnonymous, PipeImpLevelIdentification, PipeImpLevelImpersonation, PipeImpLevelDelegation:
++	default:
++		return nil, errOriginalDialOwner
++	}
++	name, e := windows.UTF16FromString(path)
++	if e != nil || len(name) < 2 {
++		return nil, errOriginalDialOwner
++	}
++	o := &pipeDialOperation{slot: original, file: &win32File{}, path: path, name: name, access: access, flags: windows.FILE_FLAG_OVERLAPPED | windows.SECURITY_SQOS_PRESENT | uint32(impLevel)}
++	o.self = o
++	o.file.dial = o
++	*original = o
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	defer func() {
++		if p := recover(); p != nil {
++			o.phase.unknown = true
++			runtime.KeepAlive(o)
++			panic(p)
++		}
++		if !o.guard() {
++			conn = nil
++			err = errOriginalDialUnknown
++		}
++		runtime.KeepAlive(o)
++	}()
++	for {
++		if !o.guard() {
++			return nil, errOriginalDialUnknown
++		}
++		if err = ctx.Err(); err != nil {
++			return nil, err
++		}
++		if !o.phase.enter() {
++			return nil, errOriginalDialUnknown
++		}
++		o.openRaw, _, o.openError = originalPipeCreate.Call(uintptr(unsafe.Pointer(&o.name[0])), uintptr(o.access), 0, 0, uintptr(windows.OPEN_EXISTING), uintptr(o.flags), 0)
++		o.phase.complete()
++		if !o.guard() {
++			return nil, errOriginalDialUnknown
++		}
++		if originalDialBusy(o.openRaw, uintptr(windows.InvalidHandle), o.openError) {
++			// Completed no-output only. One fixed frame, no unbounded retry history.
++			select {
++			case <-ctx.Done():
++				return nil, ctx.Err()
++			case <-time.After(10 * time.Millisecond):
++				continue
++			}
++		}
++		if !originalDialHandle(o.openRaw, uintptr(windows.InvalidHandle)) {
++			o.phase.unknown = true
++			return nil, errOriginalDialUnknown
++		}
++		o.file.handle = windows.Handle(o.openRaw)
++		break
++	}
++	if err = ctx.Err(); err != nil {
++		return nil, err
++	}
++	if !o.guard() || !o.phase.enter() {
++		return nil, errOriginalDialUnknown
++	}
++	o.infoRaw, _, o.infoError = originalPipeInfo.Call(uintptr(o.file.handle), uintptr(unsafe.Pointer(&o.infoFlags)), 0, 0, 0)
++	o.phase.complete()
++	if !o.guard() || !originalDialBOOL(o.infoRaw) {
++		o.phase.unknown = true
++		return nil, errOriginalDialUnknown
++	}
++	if err = ctx.Err(); err != nil {
++		return nil, err
++	}
++	if !o.guard() || !o.phase.enter() {
++		return nil, errOriginalDialUnknown
++	}
++	err = registerOriginalFile(o.file)
++	o.phase.complete()
++	if err != nil || !o.guard() {
++		o.phase.unknown = true
++		return nil, errOriginalDialUnknown
++	}
++	if err = ctx.Err(); err != nil {
++		return nil, err
++	}
++	if o.infoFlags&windows.PIPE_TYPE_MESSAGE != 0 {
++		o.conn = &win32MessageBytePipe{win32Pipe: win32Pipe{win32File: o.file, path: o.path}}
++	} else {
++		o.conn = &win32Pipe{win32File: o.file, path: o.path}
++	}
++	if !o.guard() {
++		return nil, errOriginalDialUnknown
++	}
++	o.phase.handedOff = true
++	return o.conn, nil
++}
+--- /dev/null
++++ b/pipe_original_dial_windows_test.go
+@@ -0,0 +1,53 @@
++//go:build windows
++
++package winio
++
++import (
++	"errors"
++	"testing"
++
++	"golang.org/x/sys/windows"
++)
++
++// Compile-only during native pause. These actual guards must refuse before
++// resolving a DLL, calling native code, or closing any invented test handle.
++func TestOriginalPipeDialRejectsReboundSlotBeforeClose(t *testing.T) {
++	var slot PipeDialOperation
++	o := &pipeDialOperation{slot: &slot, file: &win32File{handle: windows.Handle(7)}}
++	o.self = o
++	o.file.dial = o
++	slot = o
++	slot = nil
++	if o.Close() == nil || !o.phase.unknown || o.file.closeEntered || o.file.handle != 7 {
++		t.Fatal("rebound slot admitted")
++	}
++}
++func TestOriginalPipeDialUnknownAndHandoffNeverClose(t *testing.T) {
++	for _, handed := range []bool{false, true} {
++		var slot PipeDialOperation
++		o := &pipeDialOperation{slot: &slot, file: &win32File{handle: windows.Handle(7)}}
++		o.self = o
++		o.file.dial = o
++		slot = o
++		o.phase.unknown = !handed
++		o.phase.handedOff = handed
++		if o.Close() == nil || o.file.closeEntered || o.file.handle != 7 {
++			t.Fatal("unknown/handed-off close")
++		}
++	}
++}
++
++func TestOriginalPipeDialCachedCloseResultSurvivesUnknown(t *testing.T) {
++	failure := errors.New("original checked close failure")
++	var slot PipeDialOperation
++	o := &pipeDialOperation{slot: &slot, file: &win32File{handle: windows.Handle(7)}}
++	o.self = o
++	o.file.dial = o
++	slot = o
++	o.phase.closeAttempted = true
++	o.phase.unknown = true
++	o.phase.closeErr = failure
++	if o.Close() != failure || o.Close() != failure || o.file.closeEntered || o.file.handle != 7 {
++		t.Fatal("original error replay lost")
++	}
++}

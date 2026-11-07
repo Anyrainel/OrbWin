@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -23,22 +24,34 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import type * as backend from "../backend";
+import * as backend from "../backend";
+import { VolumeSizeObservation } from "./resources/VolumeSize";
+import { formatSize } from "./settings/storage-model";
 import type { ResourcePage } from "../model/navigation";
-import { ContainerView, ResourceActions, useOperation } from "./Operations";
+import {
+  ContainerResourceLimits,
+  ContainerView,
+  ResourceActions,
+  useOperation,
+} from "./Operations";
 import { actionsFor, groupActions, type Action } from "./resources/actions";
 import { ContextMenu, type MenuRequest } from "./resources/ContextMenu";
 import { InfoPanel } from "./resources/InfoPanel";
 import { StatsPanel } from "./resources/StatsPanel";
 import { FilesPanel } from "./resources/FilesPanel";
+import type { VolumeFileEdit } from "./resources/VolumeFileEditor";
 import {
   entries,
   imageUsers,
+  isPaused,
   isRunning,
   keyOf as identity,
   name,
   publishedPorts,
   publicationWarning,
+  platformBadge,
+  parseImagePlatform,
+  readResourceMetadata,
   target as resourceTarget,
   text,
   volumeUsers,
@@ -93,6 +106,7 @@ export function ResourceList({
   label,
   page,
   containers,
+  onEditFile,
 }: {
   rows: backend.Resource[];
   query: string;
@@ -100,6 +114,7 @@ export function ResourceList({
   page: ResourcePage;
   // Complete container inventory for "in use" markers; omitted means unknown.
   containers?: backend.Resource[];
+  onEditFile: (context: VolumeFileEdit, refreshPreview: () => void) => void;
 }) {
   const [layout] = useState(() => loadLayout(page));
   const [selected, setSelected] = useState<string[]>(
@@ -113,9 +128,41 @@ export function ResourceList({
   const [collapsed, setCollapsed] = useState(
     () => new Set(layout.collapsed ?? []),
   );
-  const [sort, setSort] = useState<SortMode>(layout.sort ?? "status");
+  const [sort, setSort] = useState<SortMode>(
+    layout.sort === "status" && page !== "containers"
+      ? "name"
+      : (layout.sort ?? (page === "containers" ? "status" : "name")),
+  );
   const [width, setWidth] = useState(layout.width);
   const [menu, setMenu] = useState<MenuRequest | null>(null);
+  const [volumeMeasurements, setVolumeMeasurements] = useState<{
+    snapshot: backend.Resource[];
+    sizes: Map<string, number>;
+  } | null>(null);
+  const volumeSizes =
+    volumeMeasurements?.snapshot === rows
+      ? volumeMeasurements.sizes
+      : new Map<string, number>();
+  const [platforms, setPlatforms] = useState(
+    new Map<string, { os: unknown; architecture: unknown }>(),
+  );
+  const [platformBusy, setPlatformBusy] = useState(false);
+  const [platformMessage, setPlatformMessage] = useState("");
+  const platformPending = useRef<AbortController | null>(null);
+  const currentRows = useRef(rows);
+  currentRows.current = rows;
+  const currentPrimary = useRef(primary);
+  currentPrimary.current = primary;
+  useEffect(() => {
+    setVolumeMeasurements(null);
+    setPlatforms(new Map());
+    platformPending.current?.abort();
+    return () => platformPending.current?.abort();
+  }, [rows]);
+  useEffect(() => {
+    platformPending.current?.abort();
+    setPlatformMessage("");
+  }, [primary]);
   const open = useOperation();
   const refs = useRef(new Map<string, HTMLButtonElement>());
   const list = useRef<HTMLDivElement>(null);
@@ -126,7 +173,7 @@ export function ResourceList({
       text(value).toLowerCase().includes(query.toLowerCase()),
     ),
   );
-  const listed = entries(page, filtered, sort);
+  const listed = entries(page, filtered, sort, volumeSizes);
   const visible = listed.flatMap((entry) =>
     entry.kind === "row"
       ? [entry.row]
@@ -139,6 +186,52 @@ export function ResourceList({
   const chosen = new Set(selected);
   const selectedRows = filtered.filter((row) => chosen.has(keyOf(row)));
   const detail = filtered.find((row) => keyOf(row) === primary) ?? null;
+  async function readPlatform(row: Row) {
+    if (platformPending.current) return;
+    const abort = new AbortController();
+    platformPending.current = abort;
+    setPlatformBusy(true);
+    setPlatformMessage("");
+    const snapshot = rows;
+    try {
+      const image = await readResourceMetadata(
+        (output, signal) =>
+          backend.run(
+            crypto.randomUUID(),
+            { kind: "inspect", resource: "image", target: String(row.ID) },
+            output,
+            signal,
+          ),
+        abort.signal,
+        () =>
+          currentRows.current === snapshot &&
+          currentPrimary.current === keyOf(row),
+        (output) => parseImagePlatform(output, String(row.ID)),
+      );
+      if (
+        !image ||
+        abort.signal.aborted ||
+        currentRows.current !== snapshot ||
+        currentPrimary.current !== keyOf(row)
+      )
+        return;
+      setPlatforms((previous) => new Map(previous).set(String(row.ID), image));
+      setPlatformMessage(platformBadge(image.os, image.architecture));
+    } catch (error) {
+      if (!abort.signal.aborted) setPlatformMessage(String(error));
+    } finally {
+      if (platformPending.current === abort) {
+        platformPending.current = null;
+        setPlatformBusy(false);
+        if (
+          abort.signal.aborted &&
+          currentRows.current === snapshot &&
+          currentPrimary.current === keyOf(row)
+        )
+          setPlatformMessage("Platform read cancelled.");
+      }
+    }
+  }
   const Icon =
     page === "images"
       ? Layers
@@ -349,12 +442,17 @@ export function ResourceList({
     if (page === "containers") return text(row.Status ?? "");
     if (page === "images")
       return [row.Size, row.CreatedSince].filter(Boolean).map(text).join(" · ");
+    if (page === "volumes")
+      return volumeSizes.has(String(row.Name))
+        ? `${formatSize(volumeSizes.get(String(row.Name))!)} measured`
+        : "Size unknown";
     return text(row.Scope ?? "");
   }
   function renderRow(row: Row, grouped: boolean) {
     const key = keyOf(row);
     const isSelected = chosen.has(key);
-    const stopped = page === "containers" && !isRunning(row);
+    const paused = page === "containers" && isPaused(row);
+    const stopped = page === "containers" && !isRunning(row) && !paused;
     return (
       <div
         key={key}
@@ -378,12 +476,23 @@ export function ResourceList({
           <span className="resource-symbol">
             <Icon size={23} />
             {page === "containers" && (
-              <i className={`status-dot ${stopped ? "" : "running"}`} />
+              <i
+                aria-hidden="true"
+                className={`status-dot ${paused ? "paused" : stopped ? "" : "running"}`}
+              />
             )}
           </span>
           <span className="row-copy">
             <strong>{name(row)}</strong>
             <small>{text(row.Image ?? row.Tag ?? row.Driver)}</small>
+            {page === "images" && (
+              <small>
+                {platformBadge(
+                  platforms.get(String(row.ID))?.os,
+                  platforms.get(String(row.ID))?.architecture,
+                )}
+              </small>
+            )}
             {page === "containers" && publicationWarning(row) && (
               <small className="notice" title={publicationWarning(row)}>
                 Host port unavailable
@@ -391,6 +500,7 @@ export function ResourceList({
             )}
           </span>
           <span className="row-meta">
+            {paused && <span className="paused-label">Paused</span>}
             {marker(row)}
             {meta(row)}
           </span>
@@ -411,7 +521,7 @@ export function ResourceList({
           Ctrl or Shift click to select several. Shift+F10 opens actions; Delete
           asks to remove.
         </p>
-        {page === "containers" && rows.length > 1 && (
+        {page !== "networks" && rows.length > 1 && (
           <label className="list-sort">
             Sort
             <select
@@ -422,10 +532,24 @@ export function ResourceList({
                 saveLayout(page, { sort: value });
               }}
             >
-              <option value="status">Running first</option>
+              {page === "containers" && (
+                <option value="status">Running, then paused</option>
+              )}
               <option value="name">Name</option>
+              {(page === "images" || page === "volumes") && (
+                <>
+                  <option value="size-desc">Size: largest first</option>
+                  <option value="size-asc">Size: smallest first</option>
+                </>
+              )}
             </select>
           </label>
+        )}
+        {page === "volumes" && (
+          <p className="notice">
+            Measure a volume in Info to include it in size sorting. Unknown
+            sizes sort last; refresh clears measurements.
+          </p>
         )}
         {batch.length > 0 && (
           <div
@@ -678,19 +802,71 @@ export function ResourceList({
                 </div>
               </div>
               <ResourceActions page={page} row={detail} />
+              {page === "containers" && tab === "Info" && (
+                <ContainerResourceLimits key={String(detail.ID)} row={detail} />
+              )}
+              {page === "images" && (
+                <section className="info-section" aria-label="Image platform">
+                  <button
+                    className="button"
+                    disabled={platformBusy}
+                    onClick={() => void readPlatform(detail)}
+                  >
+                    {platformBusy ? "Reading platform…" : "Read image platform"}
+                  </button>
+                  {platformBusy && (
+                    <button
+                      className="button"
+                      onClick={() => platformPending.current?.abort()}
+                    >
+                      Cancel platform read
+                    </button>
+                  )}
+                  <p role="status">
+                    {platformMessage ||
+                      "Only native linux/amd64 execution is qualified. Other image platforms are unsupported."}
+                  </p>
+                </section>
+              )}
               {tab === "Info" ? (
                 <>
-                  <InfoPanel
-                    key={keyOf(detail)}
-                    page={page}
-                    row={detail}
-                    containers={containers}
-                  />
+                  <VolumeSizeObservation.Provider
+                    value={(measurement) => {
+                      if (
+                        currentRows.current === rows &&
+                        rows.some((row) => row.Name === measurement.name)
+                      )
+                        setVolumeMeasurements((previous) => ({
+                          snapshot: rows,
+                          sizes: new Map(
+                            previous?.snapshot === rows ? previous.sizes : [],
+                          ).set(measurement.name, measurement.bytes),
+                        }));
+                    }}
+                  >
+                    <InfoPanel
+                      key={keyOf(detail)}
+                      page={page}
+                      row={detail}
+                      containers={containers}
+                    />
+                  </VolumeSizeObservation.Provider>
                 </>
-              ) : page === "containers" && tab === "Files" ? (
+              ) : (page === "containers" ||
+                  page === "images" ||
+                  page === "volumes") &&
+                tab === "Files" ? (
                 <FilesPanel
                   key={resourceTarget(page, detail)}
                   target={resourceTarget(page, detail)}
+                  resource={
+                    page === "images"
+                      ? "image"
+                      : page === "volumes"
+                        ? "volume"
+                        : "container"
+                  }
+                  onEditFile={onEditFile}
                 />
               ) : page === "containers" && tab === "Stats" ? (
                 <StatsPanel

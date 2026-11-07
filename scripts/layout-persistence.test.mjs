@@ -38,4 +38,11 @@ test("corrupt or old layout preferences cannot inject invalid list state", (t) =
   });
   stored = JSON.stringify({ collapsed: Array(2000).fill("p") });
   assert.equal(loadLayout("containers").collapsed.length, 512);
+  for (const sort of ["size-desc", "size-asc"]) {
+    stored = JSON.stringify({ sort });
+    assert.deepEqual(loadLayout("images"), { sort });
+    assert.deepEqual(loadLayout("volumes"), { sort });
+    assert.deepEqual(loadLayout("containers"), {});
+    assert.deepEqual(loadLayout("networks"), {});
+  }
 });

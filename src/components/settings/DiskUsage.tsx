@@ -22,6 +22,7 @@ export function DiskUsage({
     ReturnType<typeof backend.diskInfo>
   > | null>(null);
   const [diskError, setDiskError] = useState("");
+  const [message, setMessage] = useState("");
   const pending = useRef<AbortController | null>(null);
   async function refresh() {
     if (disabled) return;
@@ -30,9 +31,10 @@ export function DiskUsage({
     pending.current = abort;
     setBusy(true);
     setError("");
+    setMessage("");
     setDisk(null);
     setDiskError("");
-    void backend
+    const diskRead = backend
       .diskInfo()
       .then((value) => {
         if (!abort.signal.aborted) setDisk(value);
@@ -65,9 +67,16 @@ export function DiskUsage({
         setError(String(reason));
       }
     } finally {
+      // The native metadata read is read-only and cannot be interrupted. Keep
+      // its generation owned until it settles so unmount/cancel invalidates it.
+      await diskRead;
       if (pending.current === abort) {
         pending.current = null;
         setBusy(false);
+        if (abort.signal.aborted)
+          setMessage(
+            "Measurement cancelled. Results completed before cancellation may remain below; later replies were discarded.",
+          );
       }
     }
   }
@@ -78,10 +87,15 @@ export function DiskUsage({
       setBusy(false);
       setRows([]);
       setDisk(null);
+      setDiskError("");
+      setMessage("");
       return;
     }
     void refresh();
-    return () => pending.current?.abort();
+    return () => {
+      pending.current?.abort();
+      pending.current = null;
+    };
   }, [disabled, revision]);
   return (
     <section>
@@ -91,6 +105,39 @@ export function DiskUsage({
         reported by the engine; this is separate from the allocated size of its
         Windows virtual disk.
       </p>
+      <details>
+        <summary>Free space and virtual disk maintenance</summary>
+        <p>
+          Removing unused resources frees space inside Linux. Windows may keep
+          the virtual disk allocation. File length, allocated Windows space and
+          Docker usage can differ; OrbWin does not measure allocated file space
+          or offer automatic compaction or moving engine storage in this build.
+        </p>
+        <p>
+          Export important development data before offline disk maintenance.
+          Confirm the exact OrbWin disk and all workloads that would be
+          interrupted. Microsoft documents disk maintenance prerequisites; those
+          procedures are not an OrbWin backup or restore workflow. A global WSL
+          shutdown also interrupts other engines and distributions.
+        </p>
+        <p>Copy a Microsoft guidance address into your browser:</p>
+        <label>
+          WSL disk guidance
+          <input
+            readOnly
+            value="https://learn.microsoft.com/en-us/windows/wsl/disk-space"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </label>
+        <label>
+          Virtual disk compaction prerequisites
+          <input
+            readOnly
+            value="https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/compact-vdisk"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </label>
+      </details>
       <button
         className="button"
         disabled={disabled || busy}
@@ -98,20 +145,70 @@ export function DiskUsage({
       >
         {busy ? "Measuring…" : "Measure disk usage"}
       </button>
+      {busy && (
+        <button
+          className="button"
+          onClick={() => {
+            pending.current?.abort();
+            setMessage(
+              "Measurement cancelled. Waiting for pending reads to settle; earlier engine rows may remain below.",
+            );
+          }}
+        >
+          Cancel measurement
+        </button>
+      )}
+      {message && <p role="status">{message}</p>}
       {error && <p role="alert">{error}</p>}
       {disk && (
-        <dl className="properties">
-          <dt>Virtual disk file length</dt>
-          <dd>
-            {formatSize(disk.fileLengthBytes)}. Sparse/compressed allocation can
-            differ; removing resources does not automatically compact the
-            Windows file.
-          </dd>
-          <dt>Data location</dt>
-          <dd>
-            <code>{disk.path}</code>
-          </dd>
-        </dl>
+        <>
+          {disk.hostCapacity && (
+            <div className="host-capacity">
+              <h3>Host data volume capacity</h3>
+              <meter
+                min={0}
+                max={disk.hostCapacity.totalBytes}
+                value={
+                  disk.hostCapacity.totalBytes -
+                  disk.hostCapacity.availableBytes
+                }
+                aria-label="Host data volume space unavailable to the current Windows user"
+              />
+              <p>
+                {formatSize(disk.hostCapacity.availableBytes)} available to your
+                Windows user out of {formatSize(disk.hostCapacity.totalBytes)}{" "}
+                capacity. Quotas may limit these values. Host volume free space:{" "}
+                {formatSize(disk.hostCapacity.freeBytes)}.
+              </p>
+              <p>
+                This is the Windows volume containing OrbWin data, not free
+                space inside Linux. Other files on the same volume also use this
+                space.
+              </p>
+            </div>
+          )}
+          {disk.hostCapacityError && (
+            <p role="status">{disk.hostCapacityError}</p>
+          )}
+          <dl className="properties">
+            <dt>Virtual disk file length</dt>
+            <dd>
+              {formatSize(disk.fileLengthBytes)}. Sparse/compressed allocation
+              can differ; removing resources does not automatically compact the
+              Windows file.
+            </dd>
+            <dt>Data location</dt>
+            <dd>
+              <code>{disk.path}</code>
+            </dd>
+          </dl>
+          <p>
+            Use volume export after quiescing workloads for portable development
+            data. Copying a running VHDX is not an application-consistent
+            backup. Docker reclaimable bytes and Windows free space are separate
+            measurements.
+          </p>
+        </>
       )}
       {diskError && <p role="status">{diskError}</p>}
       {rows.length > 0 && (

@@ -17,6 +17,7 @@ import {
   type StepState,
 } from "./engine-state";
 import { useElapsed, useEngineLifecycle } from "./EngineLifecycle";
+import { SetupLogAction } from "./SetupLogAction";
 
 function StepIcon({ state }: { state: StepState | "working" }) {
   if (state === "working")
@@ -244,6 +245,9 @@ export function EngineSetup({
                   Cancel stops waiting and closes the client; the backend may
                   still finish starting. Status is re-read afterwards.
                 </p>
+              )}
+              {!lifecycle.action && !lifecycle.result?.success && (
+                <SetupLogAction />
               )}
               {lifecycle.output && (
                 <details className="setup-output">

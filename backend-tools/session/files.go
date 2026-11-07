@@ -7,6 +7,7 @@ package main
 import (
 	"archive/tar"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,9 +31,11 @@ type fileEntry struct {
 	Link string `json:"link,omitempty"`
 }
 type fileResult struct {
-	Entries  []fileEntry `json:"entries"`
-	Complete bool        `json:"complete"`
-	Text     *string     `json:"text,omitempty"`
+	Entries    []fileEntry     `json:"entries"`
+	Complete   bool            `json:"complete"`
+	Text       *string         `json:"text,omitempty"`
+	SHA256     string          `json:"sha256,omitempty"`
+	EditSource *fileEditSource `json:"editSource,omitempty"`
 }
 
 func fileArguments(daemon, container, source, action string) error {
@@ -90,6 +93,8 @@ func readArchive(input io.Reader, action string) (fileResult, error) {
 		}
 		text := string(data)
 		result.Text = &text
+		hash := sha256.Sum256(data)
+		result.SHA256 = hex.EncodeToString(hash[:])
 		result.Complete = true
 		return result, nil
 	}
@@ -184,6 +189,9 @@ func files(output io.Writer, daemon, container, source, action string) error {
 	result, err := readArchive(archive.Content, action)
 	if err != nil {
 		return err
+	}
+	if action == "read" {
+		result.EditSource = containerEditSource(ctx, cli, container, source)
 	}
 	return json.NewEncoder(output).Encode(result)
 }

@@ -1,0 +1,3284 @@
+diff --git a/rdd/pkg/guestsession/session.go b/rdd/pkg/guestsession/session.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..28ebea31a6e23fde4c1daee6a6449fadfebeb55b
+--- /dev/null
++++ b/rdd/pkg/guestsession/session.go
+@@ -0,0 +1,359 @@
++// Package guestsession models authentication DATA, never native authority.
++package guestsession
++
++import (
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"sync"
++)
++
++var ErrProtocol = errors.New("guest session protocol refused")
++var ErrSecretJSON = errors.New("guest session secret cannot be JSON encoded")
++
++type Role byte
++
++const (
++	Bootstrap Role = iota + 1
++	NetworkControl
++	NetworkData
++	Docker
++	Containerd
++	Guestagent
++	SSHBinding
++)
++
++func valid(r Role) bool { return r >= Bootstrap && r <= SSHBinding }
++
++type secret [32]byte
++
++func (secret) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED]")) }
++func (secret) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++
++type Session struct{ state *sessionState }
++type sessionState struct {
++	mu               sync.Mutex
++	master           secret
++	id               [16]byte
++	digest           [32]byte
++	closed, draining bool
++	next             uint64
++	live             uint16
++	startup, drain   uint64
++	ready            [8]bool
++	provisioned      bool
++}
++
++func (Session) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest session]")) }
++func (Session) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func New(master [32]byte, id [16]byte, record []byte) (*Session, error) {
++	if master == ([32]byte{}) || id == ([16]byte{}) || len(record) == 0 || len(record) > 4096 {
++		return nil, ErrProtocol
++	}
++	return &Session{state: &sessionState{master: secret(master), id: id, digest: sha256.Sum256(record)}}, nil
++}
++func (s *Session) Close() {
++	if s == nil || s.state == nil {
++		return
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.closed = true
++	o.master = secret{}
++}
++func (s *Session) Ordered(role Role, seq uint64, drain bool) error {
++	if s == nil || s.state == nil {
++		return ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || !valid(role) {
++		return ErrProtocol
++	}
++	if drain {
++		if seq != o.drain || o.drain >= 8 {
++			return ErrProtocol
++		}
++		o.draining = true
++		o.drain++
++		return nil
++	}
++	if o.draining || seq != o.startup || o.startup >= 16 {
++		return ErrProtocol
++	}
++	o.startup++
++	return nil
++}
++
++// RoleKey holds ONLY a derived role key. Independent peer delivery is future IO.
++type RoleKey struct{ state *roleState }
++type roleState struct {
++	mu     sync.Mutex
++	key    secret
++	id     [16]byte
++	digest [32]byte
++	role   Role
++	closed bool
++	live   uint16
++}
++
++func (RoleKey) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED role key]")) }
++func (RoleKey) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func derive(master secret, id [16]byte, r Role) secret {
++	m := hmac.New(sha256.New, master[:])
++	m.Write([]byte("orbwin-selected-guest-session-v2\x00"))
++	m.Write([]byte{byte(r)})
++	m.Write(id[:])
++	var out secret
++	m.Sum(out[:0])
++	return out
++}
++func (s *Session) DeriveRole(r Role) (RoleKey, error) {
++	if s == nil || s.state == nil {
++		return RoleKey{}, ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || !valid(r) {
++		return RoleKey{}, ErrProtocol
++	}
++	return RoleKey{state: &roleState{key: derive(o.master, o.id, r), id: o.id, digest: o.digest, role: r}}, nil
++}
++func (k RoleKey) Close() {
++	if k.state == nil {
++		return
++	}
++	o := k.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.closed = true
++	o.key = secret{}
++}
++
++type Connection struct{ state *connectionState }
++type connectionState struct {
++	mu             sync.Mutex
++	host           *sessionState
++	peer           *roleState
++	role           Role
++	sid            [16]byte
++	digest         [32]byte
++	hn, gn         [32]byte
++	id             uint64
++	phase          byte
++	failed, closed bool
++}
++
++func (Connection) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest connection]")) }
++func (Connection) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func (s *Session) Host(r Role, nonce [32]byte) (*Connection, error) {
++	if s == nil || s.state == nil {
++		return nil, ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || !valid(r) || nonce == ([32]byte{}) || o.next == ^uint64(0) || o.live >= 256 {
++		return nil, ErrProtocol
++	}
++	o.next++
++	o.live++
++	return &Connection{state: &connectionState{host: o, role: r, sid: o.id, digest: o.digest, hn: nonce, id: o.next}}, nil
++}
++func NewPeer(k RoleKey, nonce [32]byte) (*Connection, error) {
++	if k.state == nil {
++		return nil, ErrProtocol
++	}
++	o := k.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || nonce == ([32]byte{}) || o.live >= 256 {
++		return nil, ErrProtocol
++	}
++	o.live++
++	return &Connection{state: &connectionState{peer: o, role: o.role, sid: o.id, digest: o.digest, gn: nonce}}, nil
++}
++
++const MessageSize = 155
++
++var tags = [4]string{"host-hello", "guest-challenge", "host-finish", "guest-accepted"}
++
++// lockOwner is called only with original connection.mu held. No owner operation
++// locks a connection except readiness, which follows the same connection→owner order.
++func (c *connectionState) lockOwner() (secret, bool, func()) {
++	if c.host != nil {
++		o := c.host
++		o.mu.Lock()
++		return derive(o.master, o.id, c.role), !o.closed && !o.draining, o.mu.Unlock
++	}
++	o := c.peer
++	o.mu.Lock()
++	return o.key, !o.closed, o.mu.Unlock
++}
++func wire(c *connectionState, phase byte, hn, gn [32]byte, id uint64, key secret) []byte {
++	b := make([]byte, MessageSize)
++	b[0] = 2
++	b[1] = phase
++	b[2] = byte(c.role)
++	copy(b[3:19], c.sid[:])
++	copy(b[19:51], c.digest[:])
++	copy(b[51:83], hn[:])
++	copy(b[83:115], gn[:])
++	binary.LittleEndian.PutUint64(b[115:123], id)
++	m := hmac.New(sha256.New, key[:])
++	m.Write([]byte(tags[phase]))
++	m.Write([]byte{0})
++	m.Write(b[:123])
++	copy(b[123:], m.Sum(nil))
++	return b
++}
++func (c *Connection) EncodeNext() ([]byte, error) {
++	if c == nil || c.state == nil {
++		return nil, ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	defer clear(key[:])
++	allowed := o.host != nil && (o.phase == 0 || o.phase == 2) || o.peer != nil && (o.phase == 1 || o.phase == 3)
++	if o.closed || o.failed || !known || !allowed {
++		o.failed = true
++		return nil, ErrProtocol
++	}
++	gn := o.gn
++	if o.phase == 0 {
++		gn = [32]byte{}
++	}
++	b := wire(o, o.phase, o.hn, gn, o.id, key)
++	o.phase++
++	return b, nil
++}
++func (c *Connection) Accept(b []byte) error {
++	if c == nil || c.state == nil {
++		return ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	defer clear(key[:])
++	allowed := o.host != nil && (o.phase == 1 || o.phase == 3) || o.peer != nil && (o.phase == 0 || o.phase == 2)
++	if o.closed || o.failed || !known || !allowed || len(b) != MessageSize {
++		o.failed = true
++		return ErrProtocol
++	}
++	hn, gn, id := o.hn, o.gn, o.id
++	if o.phase == 0 {
++		copy(hn[:], b[51:83])
++		id = binary.LittleEndian.Uint64(b[115:123])
++		gn = [32]byte{}
++		if hn == ([32]byte{}) || id == 0 {
++			o.failed = true
++			return ErrProtocol
++		}
++	}
++	if o.phase == 1 {
++		copy(gn[:], b[83:115])
++		if gn == ([32]byte{}) {
++			o.failed = true
++			return ErrProtocol
++		}
++	}
++	if !hmac.Equal(b, wire(o, o.phase, hn, gn, id, key)) {
++		o.failed = true
++		return ErrProtocol
++	}
++	// Publish peer nonce/source fields ONLY after authenticating the full message.
++	if o.phase == 0 {
++		o.hn = hn
++		o.id = id
++	}
++	if o.phase == 1 {
++		o.gn = gn
++	}
++	o.phase++
++	return nil
++}
++
++// Complete means host has accepted an authentic peer ACK, not IO/native readiness.
++func (c *Connection) Complete() bool {
++	if c == nil || c.state == nil {
++		return false
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	clear(key[:])
++	return o.host != nil && !o.closed && !o.failed && known && o.phase == 4
++}
++
++// Close disposes only a pure parser slot, never an actual native resource.
++func (c *Connection) Close() {
++	if c == nil || c.state == nil {
++		return
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed {
++		return
++	}
++	o.closed = true
++	if o.host != nil {
++		o.host.mu.Lock()
++		o.host.live--
++		o.host.mu.Unlock()
++	} else {
++		o.peer.mu.Lock()
++		o.peer.live--
++		o.peer.mu.Unlock()
++	}
++}
++func (s *Session) ObserveReady(c *Connection) error {
++	if s == nil || s.state == nil || c == nil || c.state == nil {
++		return ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	a := s.state
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	if o.host != a || o.failed || o.closed || o.phase != 4 || a.closed || a.draining || a.ready[o.role] {
++		return ErrProtocol
++	}
++	r := o.role
++	if r == SSHBinding && (!a.ready[NetworkControl] || !a.ready[NetworkData]) {
++		return ErrProtocol
++	}
++	if (r == Docker || r == Containerd || r == Guestagent) && !a.provisioned {
++		return ErrProtocol
++	}
++	a.ready[r] = true
++	return nil
++}
++
++// ObserveProvisionJoin is only a DATA transition; no actual process join is issued.
++func (s *Session) ObserveProvisionJoin() error {
++	if s == nil || s.state == nil {
++		return ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || o.provisioned || !o.ready[SSHBinding] {
++		return ErrProtocol
++	}
++	o.provisioned = true
++	return nil
++}
+diff --git a/rdd/pkg/guestsession/session_test.go b/rdd/pkg/guestsession/session_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..e29f8f5fd1d2440dbba41cdb91cfb30d6e7d8463
+--- /dev/null
++++ b/rdd/pkg/guestsession/session_test.go
+@@ -0,0 +1,412 @@
++package guestsession
++
++import (
++	"bytes"
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/binary"
++	"encoding/json"
++	"fmt"
++	"sync"
++	"testing"
++)
++
++func session(t *testing.T, n byte) *Session {
++	t.Helper()
++	s, e := New([32]byte{n}, [16]byte{n}, []byte("canonical profile"))
++	if e != nil {
++		t.Fatal(e)
++	}
++	return s
++}
++func pair(t *testing.T, s *Session, r Role, n byte) (*Connection, *Connection, RoleKey) {
++	t.Helper()
++	h, e := s.Host(r, [32]byte{n})
++	if e != nil {
++		t.Fatal(e)
++	}
++	k, e := s.DeriveRole(r)
++	if e != nil {
++		t.Fatal(e)
++	}
++	p, e := NewPeer(k, [32]byte{n, 1})
++	if e != nil {
++		t.Fatal(e)
++	}
++	return h, p, k
++}
++func send(t *testing.T, from, to *Connection) []byte {
++	t.Helper()
++	b, e := from.EncodeNext()
++	if e != nil {
++		t.Fatal(e)
++	}
++	if len(b) != 155 {
++		t.Fatal("wire bound")
++	}
++	if e = to.Accept(b); e != nil {
++		t.Fatal(e)
++	}
++	return b
++}
++func exchange(t *testing.T, h, p *Connection) {
++	t.Helper()
++	send(t, h, p)
++	send(t, p, h)
++	send(t, h, p)
++	if h.Complete() {
++		t.Fatal("early ACK")
++	}
++	send(t, p, h)
++	if !h.Complete() || p.Complete() {
++		t.Fatal("directional completion")
++	}
++}
++func dispose(h, p *Connection, k RoleKey) { h.Close(); p.Close(); k.Close() }
++func TestIndependentOwnersAndWire(t *testing.T) {
++	s := session(t, 1)
++	h, p, k := pair(t, s, Docker, 7)
++	defer dispose(h, p, k)
++	hello, e := h.EncodeNext()
++	if e != nil {
++		t.Fatal(e)
++	}
++	want := make([]byte, 155)
++	want[0] = 2
++	want[2] = byte(Docker)
++	want[3] = 1
++	d := sha256.Sum256([]byte("canonical profile"))
++	copy(want[19:51], d[:])
++	want[51] = 7
++	binary.LittleEndian.PutUint64(want[115:123], 1)
++	master := make([]byte, 32)
++	master[0] = 1
++	deriveMAC := hmac.New(sha256.New, master)
++	deriveMAC.Write([]byte("orbwin-selected-guest-session-v2\x00"))
++	deriveMAC.Write([]byte{byte(Docker)})
++	deriveMAC.Write(want[3:19])
++	mac := hmac.New(sha256.New, deriveMAC.Sum(nil))
++	mac.Write([]byte("host-hello\x00"))
++	mac.Write(want[:123])
++	copy(want[123:], mac.Sum(nil))
++	if !bytes.Equal(hello, want) {
++		t.Fatal("independent wire/MAC")
++	}
++	if h.state.gn != ([32]byte{}) || p.state.id != 0 {
++		t.Fatal("pre-adopted context")
++	}
++	if p.Accept(hello) != nil || p.state.id != h.state.id {
++		t.Fatal("peer ID adoption")
++	}
++	send(t, p, h)
++	send(t, h, p)
++	if h.Complete() {
++		t.Fatal("before ack")
++	}
++	send(t, p, h)
++	if !h.Complete() || p.Complete() {
++		t.Fatal("direction")
++	}
++}
++func TestDirectionReplayAndMACBeforePublish(t *testing.T) {
++	s := session(t, 1)
++	h, p, k := pair(t, s, Docker, 1)
++	hello, _ := h.EncodeNext()
++	if h.Accept(hello) == nil || h.Complete() {
++		t.Fatal("host self-feed")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 2)
++	if _, e := p.EncodeNext(); e == nil {
++		t.Fatal("peer originates hello")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 3)
++	send(t, h, p)
++	challenge, _ := p.EncodeNext()
++	challenge[154] ^= 1
++	if h.Accept(challenge) == nil || h.state.gn != ([32]byte{}) {
++		t.Fatal("unauth nonce published")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 4)
++	hello, _ = h.EncodeNext()
++	hello[154] ^= 1
++	if p.Accept(hello) == nil || p.state.id != 0 || p.state.hn != ([32]byte{}) {
++		t.Fatal("unauth peer context")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 5)
++	old := send(t, h, p)
++	if p.Accept(old) == nil {
++		t.Fatal("duplicate hello")
++	}
++	dispose(h, p, k)
++	oldH, oldP, oldK := pair(t, s, Docker, 6)
++	send(t, oldH, oldP)
++	oldChallenge, _ := oldP.EncodeNext()
++	dispose(oldH, oldP, oldK)
++	h, p, k = pair(t, s, Docker, 6)
++	h.EncodeNext()
++	if h.Accept(oldChallenge) == nil {
++		t.Fatal("attempt ID replay")
++	}
++	dispose(h, p, k)
++}
++func TestWrongContextAndPartialACKLocalOnly(t *testing.T) {
++	for _, what := range []string{"key", "role", "session", "profile", "direction"} {
++		t.Run(what, func(t *testing.T) {
++			s := session(t, 1)
++			h, e := s.Host(Docker, [32]byte{1})
++			if e != nil {
++				t.Fatal(e)
++			}
++			other := session(t, 1)
++			r := Docker
++			switch what {
++			case "key":
++				other.state.master[1] = 2
++			case "role":
++				r = Containerd
++			case "session":
++				other.state.id[1] = 2
++			case "profile":
++				other.state.digest[1] = 2
++			}
++			k, _ := other.DeriveRole(r)
++			p, _ := NewPeer(k, [32]byte{2})
++			b, _ := h.EncodeNext()
++			if what == "direction" {
++				b[1] = 2
++			}
++			if p.Accept(b) == nil {
++				t.Fatal("foreign input")
++			}
++			dispose(h, p, k)
++			a, bp, bk := pair(t, s, Docker, 3)
++			exchange(t, a, bp)
++			dispose(a, bp, bk)
++		})
++	}
++	for _, cut := range []int{0, 1, 122, 123, 154, 155} {
++		t.Run(fmt.Sprint(cut), func(t *testing.T) {
++			s := session(t, 1)
++			h, p, k := pair(t, s, Docker, 1)
++			send(t, h, p)
++			send(t, p, h)
++			send(t, h, p)
++			ack, _ := p.EncodeNext()
++			bad := append([]byte(nil), ack...)
++			if cut == 155 {
++				bad[154] ^= 1
++			} else {
++				bad = bad[:cut]
++			}
++			if h.Accept(bad) == nil || h.Complete() || h.Accept(ack) == nil {
++				t.Fatal("ACK retry/forgery")
++			}
++			dispose(h, p, k)
++		})
++	}
++}
++func TestWrapperRebindZeroAndAliasAccounting(t *testing.T) {
++	original := session(t, 1)
++	alias := *original
++	other := session(t, 2)
++	h, p, k := pair(t, original, Docker, 1)
++	*original = *other
++	exchange(t, h, p)
++	if original.ObserveReady(h) == nil {
++		t.Fatal("wrong original ready")
++	}
++	if alias.ObserveReady(h) != ErrProtocol {
++		t.Fatal("Docker before provision")
++	}
++	h.Close()
++	if alias.state.live != 0 || other.state.live != 0 {
++		t.Fatal("wrong close accounting")
++	}
++	p.Close()
++	k.Close()
++	h, p, k = pair(t, &alias, Docker, 2)
++	*original = Session{}
++	exchange(t, h, p)
++	dispose(h, p, k)
++	h, p, k = pair(t, &alias, NetworkControl, 3)
++	exchange(t, h, p)
++	copyAlias := alias
++	if copyAlias.ObserveReady(h) != nil {
++		t.Fatal("same original alias ready")
++	}
++	alias.Close()
++	*original = *other
++	if h.Complete() {
++		t.Fatal("revived after wrapper overwrite")
++	}
++	if _, e := h.EncodeNext(); e == nil {
++		t.Fatal("revived encode")
++	}
++	dispose(h, p, k)
++	s := session(t, 4)
++	h, p, k = pair(t, s, Docker, 1)
++	send(t, h, p)
++	old := k
++	replacement, _ := other.DeriveRole(Docker)
++	k = replacement
++	old.Close()
++	if _, e := p.EncodeNext(); e == nil {
++		t.Fatal("retargeted peer key")
++	}
++	h.Close()
++	p.Close()
++	k.Close()
++	var zero Session
++	var conn Connection
++	if zero.ObserveReady(&conn) == nil || conn.Accept(nil) == nil || conn.Complete() {
++		t.Fatal("zero values")
++	}
++	zero.Close()
++	conn.Close()
++}
++func TestParallelOutOfOrderTwoEnginesAndLiveBudgets(t *testing.T) {
++	a, b := session(t, 1), session(t, 2)
++	var wg sync.WaitGroup
++	for _, s := range []*Session{a, b} {
++		hs := make([]*Connection, 128)
++		ps := make([]*Connection, 128)
++		ks := make([]RoleKey, 128)
++		for i := range hs {
++			hs[i], ps[i], ks[i] = pair(t, s, Docker, byte(i+1))
++		}
++		for i := 127; i >= 0; i-- {
++			h, p, k := hs[i], ps[i], ks[i]
++			wg.Add(1)
++			go func() { defer wg.Done(); exchange(t, h, p); dispose(h, p, k) }()
++		}
++	}
++	wg.Wait()
++	for i := 0; i < 5000; i++ {
++		h, p, k := pair(t, a, Docker, 1)
++		exchange(t, h, p)
++		dispose(h, p, k)
++	}
++	if a.state.live != 0 {
++		t.Fatal("lifetime exhaustion/leak")
++	}
++	a.state.next = ^uint64(0)
++	if _, e := a.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("overflow")
++	}
++	s := session(t, 3)
++	var hs []*Connection
++	for i := 0; i < 256; i++ {
++		h, _ := s.Host(Docker, [32]byte{1})
++		hs = append(hs, h)
++	}
++	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("host live bound")
++	}
++	hs[0].Close()
++	hs[0].Close()
++	h, e := s.Host(Docker, [32]byte{1})
++	if e != nil {
++		t.Fatal("live slot reuse")
++	}
++	h.Close()
++	k, _ := s.DeriveRole(Docker)
++	for i := 0; i < 256; i++ {
++		p, e := NewPeer(k, [32]byte{1})
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer p.Close()
++	}
++	if _, e := NewPeer(k, [32]byte{1}); e == nil {
++		t.Fatal("peer live bound")
++	}
++}
++func TestProvisionOrderAndStreamBudgets(t *testing.T) {
++	s := session(t, 1)
++	ready := func(r Role) error {
++		h, p, k := pair(t, s, r, 1)
++		exchange(t, h, p)
++		defer dispose(h, p, k)
++		return s.ObserveReady(h)
++	}
++	if ready(SSHBinding) == nil || ready(Docker) == nil || s.ObserveProvisionJoin() == nil {
++		t.Fatal("early gates")
++	}
++	for _, r := range []Role{NetworkControl, NetworkData, SSHBinding} {
++		if ready(r) != nil {
++			t.Fatal("SSH cycle")
++		}
++	}
++	if s.ObserveProvisionJoin() != nil {
++		t.Fatal("provision")
++	}
++	for _, r := range []Role{Docker, Containerd, Guestagent} {
++		if ready(r) != nil {
++			t.Fatal("final role")
++		}
++	}
++	if s.Ordered(Bootstrap, 1, false) == nil {
++		t.Fatal("gap")
++	}
++	for i := uint64(0); i < 16; i++ {
++		if s.Ordered(Bootstrap, i, false) != nil {
++			t.Fatal("startup")
++		}
++	}
++	if s.Ordered(Bootstrap, 16, false) == nil {
++		t.Fatal("startup bound")
++	}
++	for i := uint64(0); i < 8; i++ {
++		if s.Ordered(Bootstrap, i, true) != nil {
++			t.Fatal("drain")
++		}
++	}
++	if s.Ordered(Bootstrap, 8, true) == nil {
++		t.Fatal("drain bound")
++	}
++	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("drain new host")
++	}
++}
++func TestSecretRedactionAndClose(t *testing.T) {
++	s := session(t, 77)
++	h, p, k := pair(t, s, Docker, 1)
++	for _, obj := range []any{s, *s, h, *h, k, secret{77}} {
++		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
++			if !bytes.Contains([]byte(fmt.Sprintf(verb, obj)), []byte("REDACTED")) {
++				t.Fatal("secret format", verb)
++			}
++		}
++		if _, e := json.Marshal(obj); e == nil {
++			t.Fatal("secret JSON")
++		}
++	}
++	hello, _ := h.EncodeNext()
++	s.Close()
++	if p.Accept(hello) != nil {
++		t.Fatal("derived peer depends on master owner")
++	}
++	challenge, e := p.EncodeNext()
++	if e != nil || h.Accept(challenge) == nil {
++		t.Fatal("independent peer/master lifetime")
++	}
++	if s.state.master != (secret{}) {
++		t.Fatal("master erasure")
++	}
++	if _, e := h.EncodeNext(); e == nil {
++		t.Fatal("closed master host")
++	}
++	k.Close()
++	if k.state.key != (secret{}) {
++		t.Fatal("role erasure")
++	}
++	if p.Accept(nil) == nil {
++		t.Fatal("closed peer")
++	}
++	h.Close()
++	p.Close()
++}
+diff --git a/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go b/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
+index 7e5ff8b481a6d4cc8d35e7f41f5dbca398911872..49c914230388457fc3a03baebcd6c4aaec1c0e92 100644
+--- a/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
++++ b/rdd/pkg/managementconfig/runtime_fresh_observation_windows.go
+@@ -19,7 +19,6 @@ import (
+ 	"strings"
+ 	"sync"
+ 	"time"
+-	"unsafe"
+ 
+ 	"github.com/Microsoft/go-winio"
+ 	mobyclient "github.com/moby/moby/client"
+@@ -34,6 +33,8 @@ const freshDockerPipe = `\\.\pipe\docker-rancher-desktop-orbwin`
+ // It retains readonly native caps and authenticated observations, not lifecycle
+ // authority. No wire decoder, callback, path or supplied client can create it.
+ type FreshRuntimeObservation struct {
++	birthBorrow                                *managedBirthObservationBorrow
++	nativeFrames                               []*managedObservationFrame
+ 	self                                       *FreshRuntimeObservation
+ 	mu                                         sync.Mutex
+ 	owner                                      *FreshSetupOwner
+@@ -48,7 +49,7 @@ type FreshRuntimeObservation struct {
+ 	resources                                  []*runtimeStorageResource
+ 	connections                                []*freshObservationConnection
+ 	peerProcess, peerToken                     *runtimeStorageResource
+-	peerBinding                                upgradeObservedImageBinding
++	peerBinding                                managedObservationImageBinding
+ 	docker                                     *mobyclient.Client
+ 	digest                                     [32]byte
+ 	appCreatedUID                              string
+@@ -229,7 +230,7 @@ func (w *FreshRuntimeObservation) captureCredentialsLocked(ctx context.Context)
+ 			return nil, nil, ErrUpgrade
+ 		}
+ 		w.resources = append(w.resources, r)
+-		id, e := runtimeStorageIdentityOf(r.handle, n.sid, false, true, false)
++		id, e := w.measureIdentity(r.handle, n.sid, false, true, false)
+ 		if e != nil {
+ 			return nil, nil, ErrUpgrade
+ 		}
+@@ -387,23 +388,21 @@ func (w *FreshRuntimeObservation) captureGuestDirectoriesLocked(ctx context.Cont
+ 		if !freshBoundedContext(ctx) || !w.owner.nativeOutputsAdmittedLocked() {
+ 			return ErrUpgrade
+ 		}
+-		text, e := windows.NewNTUnicodeString(name)
+-		if e != nil {
+-			return ErrUpgrade
+-		}
+-		oa := windows.OBJECT_ATTRIBUTES{RootDirectory: parent, ObjectName: text, Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE}
+-		oa.Length = uint32(unsafe.Sizeof(oa))
+ 		r := n.keep(0)
+ 		w.resources = append(w.resources, r)
+-		var status windows.IO_STATUS_BLOCK
+-		e = windows.NtCreateFile(&r.handle, windows.FILE_TRAVERSE|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.SYNCHRONIZE, &oa, &status, nil, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
++		f := newManagedObservationFrame(w)
++		if f == nil {
++			return ErrUpgrade
++		}
++		f.resource = r
++		e := f.fileOpen(parent, name, true, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
+ 		if e = w.owner.fileOutputLocked(r, e); e != nil {
+-			if !n.unknown {
++			if !n.unknown && !w.unknown {
+ 				w.resources = w.resources[:len(w.resources)-1]
+ 			}
+ 			return ErrUpgrade
+ 		}
+-		id, e := runtimeStorageIdentityOf(r.handle, n.sid, true, false, true)
++		id, e := w.measureIdentity(r.handle, n.sid, true, false, true)
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+@@ -419,17 +418,18 @@ func (w *FreshRuntimeObservation) openRegistryLocked(parent windows.Handle, name
+ 	if !w.owner.nativeOutputsAdmittedLocked() || len(w.keys) >= 4096 {
+ 		return nil, ErrUpgrade
+ 	}
+-	text, e := windows.UTF16PtrFromString(name)
+-	if e != nil {
+-		return nil, ErrUpgrade
+-	}
+ 	r := &freshRegistryResource{}
+ 	w.keys = append(w.keys, r)
+-	e = windows.RegOpenKeyEx(parent, text, 0, windows.KEY_READ, &r.handle)
++	f := newManagedObservationFrame(w)
++	if f == nil {
++		return nil, ErrUpgrade
++	}
++	f.key = r
++	e := f.openKey(parent, name)
+ 	valid := r.handle != 0 && r.handle != windows.InvalidHandle
+ 	classified := runtimeStorageOpenReply(e, valid, func() {}, n.fence)
+ 	if classified != nil {
+-		if n.unknown {
++		if n.unknown || w.unknown {
+ 			w.fenceLocked()
+ 			return nil, ErrUpgrade
+ 		}
+@@ -475,16 +475,18 @@ func (w *FreshRuntimeObservation) observeRegistrationLocked(ctx context.Context)
+ 		if !freshBoundedContext(ctx) || !w.owner.nativeOutputsAdmittedLocked() {
+ 			return ErrUpgrade
+ 		}
+-		var name [64]uint16
+-		count := uint32(len(name))
+-		e := windows.RegEnumKeyEx(root.handle, i, &name[0], &count, nil, nil, nil, nil)
++		f := newManagedObservationFrame(w)
++		if f == nil {
++			return ErrUpgrade
++		}
++		name, e := f.enumKey(root.handle, i)
+ 		if e == windows.ERROR_NO_MORE_ITEMS {
+ 			break
+ 		}
+-		if e != nil || i == 512 || count == 0 || count >= 64 {
++		if e != nil || i == 512 {
+ 			return ErrUpgrade
+ 		}
+-		guid := strings.ToLower(windows.UTF16ToString(name[:count]))
++		guid := strings.ToLower(name)
+ 		if !freshRuntimeGUID(guid) {
+ 			return ErrUpgrade
+ 		}
+@@ -492,7 +494,7 @@ func (w *FreshRuntimeObservation) observeRegistrationLocked(ctx context.Context)
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+-		distro, e := freshRuntimeRegistryValue(key.handle, "DistributionName")
++		distro, e := w.registryValue(key.handle, "DistributionName")
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+@@ -500,18 +502,19 @@ func (w *FreshRuntimeObservation) observeRegistrationLocked(ctx context.Context)
+ 			if found != "" {
+ 				return ErrUpgrade
+ 			}
+-			base, e := freshRuntimeRegistryValue(key.handle, "BasePath")
++			base, e := w.registryValue(key.handle, "BasePath")
+ 			if e != nil {
+ 				return ErrUpgrade
+ 			}
+-			var raw [4]byte
+-			size := uint32(4)
+-			var kind uint32
+-			value, _ := windows.UTF16PtrFromString("Version")
+-			if windows.RegQueryValueEx(key.handle, value, nil, &kind, &raw[0], &size) != nil || kind != windows.REG_DWORD || size != 4 || binary.LittleEndian.Uint32(raw[:]) != 2 || !freshRuntimeRegistrationBase(base, n.home) {
++			f := newManagedObservationFrame(w)
++			if f == nil {
+ 				return ErrUpgrade
+ 			}
+-			again, e := freshRuntimeRegistryValue(key.handle, "DistributionName")
++			version, e := f.version(key.handle)
++			if e != nil || version != 2 || !freshRuntimeRegistrationBase(base, n.home) {
++				return ErrUpgrade
++			}
++			again, e := w.registryValue(key.handle, "DistributionName")
+ 			if e != nil || again != distro {
+ 				return ErrUpgrade
+ 			}
+@@ -540,45 +543,117 @@ func (w *FreshRuntimeObservation) observeRegistrationLocked(ctx context.Context)
+ 	return nil
+ }
+ 
++// PID is only negative correlation. The source process is the genuine unique
++// original managed launch/birth retained before the sole watcher.
+ func (w *FreshRuntimeObservation) capturePipePeerLocked(ctx context.Context, conn net.Conn) error {
+ 	fd, ok := conn.(interface{ Fd() uintptr })
+-	if !ok {
++	if !ok || !freshBoundedContext(ctx) {
+ 		return ErrUpgrade
+ 	}
+-	var pid uint32
+-	if windows.GetNamedPipeServerProcessId(windows.Handle(fd.Fd()), &pid) != nil || pid != w.api.HostPID {
++	c := w.created
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	a, e := c.managedAuthority.exact()
++	if e != nil || a.created != c || a.publisher != w.publisher || a.image != w.owner.image {
+ 		return ErrUpgrade
+ 	}
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	if !a.admitted() || !a.controllersStarted || a.capturing != 0 {
++		return ErrUpgrade
++	}
++	var birth *ManagedHostagentBirth
++	for _, b := range a.births {
++		if b == nil {
++			continue
++		}
++		b.mu.Lock()
++		l := b.sourceLaunch
++		match := b.self == b && b.parent == a.image && b.complete && !b.unknown && !b.observationUnknown.Load() && !b.closeAttempt.attempted && b.original != nil && l != nil && l.self == l && l.owner == a && l.birth == b && l.boundOriginal == b.original && l.captureOriginal == b.original && l.captureLineage.attached && !l.captureLineage.unknown && !l.unknown && l.cmd != nil && l.cmd.Process == b.original && l.startedOriginal == b.original && managedActualHostagentCommand(l) && l.pipeRole != nil && l.pipeRole.appUID == w.api.AppUID && l.pipeRole.vmUID == w.api.VMUID && l.pipeRole.epoch == w.api.TransportEpoch && l.pipeRole.appGeneration == w.api.AppGeneration && l.pipeRole.vmGeneration == w.api.VMGeneration && b.pid == w.api.HostPID && b.creation == w.api.HostCreation && b.session == w.api.HostSession
++		b.mu.Unlock()
++		if match {
++			if birth != nil {
++				return ErrUpgrade
++			}
++			birth = b
++		}
++	}
++	if birth == nil {
++		return ErrUpgrade
++	}
++	birth.mu.Lock()
++	defer birth.mu.Unlock()
++	if birth.unknown || birth.observationUnknown.Load() || birth.closeAttempt.attempted || birth.process == nil || birth.process.attempted || birth.process.handle == 0 {
++		return ErrUpgrade
++	}
++	if w.birthBorrow == nil {
++		edge := &managedBirthObservationBorrow{birth: birth, witness: w}
++		birth.observationBorrows = append(birth.observationBorrows, edge)
++		w.birthBorrow = edge
++	} else if w.birthBorrow.birth != birth || w.birthBorrow.witness != w || w.birthBorrow.state.released {
++		return ErrUpgrade
++	}
++	edge := w.birthBorrow
++	if !edge.window.begin() {
++		return ErrUpgrade
++	}
++	defer func() {
++		known := !w.unknown && !w.owner.unknown && !birth.unknown && !birth.observationUnknown.Load() && runtimeStorageDomainKnown()
++		if !edge.window.settle(known) {
++			birth.observationUnknown.Store(true)
++			birth.parent.managedUnknown.Store(true)
++			w.fenceLocked()
++		}
++	}()
+ 	n := w.owner.storage
+ 	n.mu.Lock()
+ 	defer n.mu.Unlock()
+ 	runtime.LockOSThread()
+ 	defer runtime.UnlockOSThread()
+-	if !freshBoundedContext(ctx) || !w.owner.nativeOutputsAdmittedLocked() || n.checkToken() != nil {
++	if !w.owner.nativeOutputsAdmittedLocked() || n.checkToken() != nil {
++		return ErrUpgrade
++	}
++	q := newManagedObservationFrame(w)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = windows.Handle(fd.Fd())
++	q.err = q.pipePID(q.input)
++	if q.finish(q.err) != nil || q.pid != birth.pid {
++		q.fail()
++		return ErrUpgrade
++	}
++	if birth.binding.same() != nil {
++		birth.observationUnknown.Store(true)
++		birth.parent.managedUnknown.Store(true)
++		w.fenceLocked()
+ 		return ErrUpgrade
+ 	}
+ 	if w.peerProcess == nil {
+ 		r := n.keep(0)
+ 		w.resources = append(w.resources, r)
+-		var e error
+-		r.handle, e = windows.OpenProcess(windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, pid)
+-		if e = w.owner.fileOutputLocked(r, e); e != nil {
+-			if !n.unknown {
+-				w.resources = w.resources[:len(w.resources)-1]
+-			}
++		w.peerProcess = r
++		f := newManagedObservationFrame(w)
++		if f == nil {
++			return ErrUpgrade
++		}
++		f.resource = r
++		if f.duplicateAccess(birth.process.handle, windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE) != nil {
+ 			return ErrUpgrade
+ 		}
+-		w.peerProcess = r
+ 		t := n.keep(0)
+ 		w.resources = append(w.resources, t)
+-		e = windows.OpenProcessToken(r.handle, windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&t.handle)))
+-		if e = w.owner.fileOutputLocked(t, e); e != nil {
+-			if !n.unknown {
+-				w.resources = w.resources[:len(w.resources)-1]
+-			}
++		w.peerToken = t
++		f = newManagedObservationFrame(w)
++		if f == nil {
+ 			return ErrUpgrade
+ 		}
+-		w.peerToken = t
++		f.resource = t
++		if f.token(r.handle, false) != nil {
++			return ErrUpgrade
++		}
++		w.peerBinding.owner = w
+ 		if w.peerBinding.capture(r.handle, w.owner.origin.image.handle) != nil {
+ 			return ErrUpgrade
+ 		}
+@@ -586,41 +661,77 @@ func (w *FreshRuntimeObservation) capturePipePeerLocked(ctx context.Context, con
+ 	return w.checkPipePeerNativeLocked(ctx)
+ }
+ 
+-// Caller holds storage.mu in addition to the observation/owner locks.
++// Storage.mu is held. Original independent process/token/image cells stay
++// protected by the exact birth borrower until positive witness Close.
+ func (w *FreshRuntimeObservation) checkPipePeerNativeLocked(ctx context.Context) error {
+-	if w.peerProcess == nil || w.peerToken == nil {
++	if !freshBoundedContext(ctx) || w.birthBorrow == nil || w.birthBorrow.witness != w || w.birthBorrow.state.released || w.peerProcess == nil || w.peerToken == nil || w.peerProcess.attempted || w.peerToken.attempted {
++		return ErrUpgrade
++	}
++	q := newManagedObservationFrame(w)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = w.peerProcess.handle
++	q.err = q.processID(q.input)
++	if q.finish(q.err) != nil || q.pid != w.api.HostPID {
++		return ErrUpgrade
++	}
++	q = newManagedObservationFrame(w)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = w.peerProcess.handle
++	q.err = q.processTimes(q.input)
++	if q.finish(q.err) != nil || uint64(q.created.HighDateTime)<<32|uint64(q.created.LowDateTime) != w.api.HostCreation {
++		return ErrUpgrade
++	}
++	q = newManagedObservationFrame(w)
++	if q == nil || !q.begin() {
+ 		return ErrUpgrade
+ 	}
+-	pid, e := windows.GetProcessId(w.peerProcess.handle)
+-	var created, exit, kernel, user windows.Filetime
+-	var session uint32
+-	state, waitErr := windows.WaitForSingleObject(w.peerProcess.handle, 0)
+-	if e != nil || pid != w.api.HostPID || windows.GetProcessTimes(w.peerProcess.handle, &created, &exit, &kernel, &user) != nil || uint64(created.HighDateTime)<<32|uint64(created.LowDateTime) != w.api.HostCreation || windows.ProcessIdToSessionId(pid, &session) != nil || session != w.api.HostSession || waitErr != nil || state != uint32(windows.WAIT_TIMEOUT) || legacySDKOrdinaryToken(windows.Token(w.peerToken.handle), w.owner.storage.sid, session) != nil || w.peerBinding.same() != nil {
++	defer q.preservePanic()
++	q.input = w.peerProcess.handle
++	q.err = q.sessionOf(w.api.HostPID)
++	if q.finish(q.err) != nil || q.session != w.api.HostSession || legacySDKOrdinaryToken(windows.Token(w.peerToken.handle), w.owner.storage.sid, q.session) != nil || w.peerBinding.same() != nil {
+ 		return ErrUpgrade
+ 	}
+-	// Retained token properties are insufficient if the process replaced its
+-	// primary token. Capture/close a fresh actual attachment before success.
+ 	n := w.owner.storage
+-	if !freshBoundedContext(ctx) || !w.owner.nativeOutputsAdmittedLocked() {
++	if !w.owner.nativeOutputsAdmittedLocked() {
+ 		return ErrUpgrade
+ 	}
+ 	r := n.keep(0)
+ 	w.resources = append(w.resources, r)
+-	e = windows.OpenProcessToken(w.peerProcess.handle, windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&r.handle)))
+-	if e = w.owner.fileOutputLocked(r, e); e != nil {
+-		if !n.unknown {
+-			w.resources = w.resources[:len(w.resources)-1]
+-		}
++	f := newManagedObservationFrame(w)
++	if f == nil {
++		return ErrUpgrade
++	}
++	f.resource = r
++	if f.token(w.peerProcess.handle, false) != nil {
++		return ErrUpgrade
++	}
++	f = newManagedObservationFrame(w)
++	if f == nil {
++		return ErrUpgrade
++	}
++	held, _, heldErr := f.tokenIdentity(windows.Token(w.peerToken.handle))
++	f = newManagedObservationFrame(w)
++	if f == nil {
+ 		return ErrUpgrade
+ 	}
+-	held, heldErr := legacySDKTokenID(windows.Token(w.peerToken.handle))
+-	current, currentErr := legacySDKTokenID(windows.Token(r.handle))
+-	closeErr := n.closeTemporary(r)
+-	if heldErr != nil || currentErr != nil || held != current || closeErr != nil {
++	current, _, currentErr := f.tokenIdentity(windows.Token(r.handle))
++	if heldErr != nil || currentErr != nil || held != current || n.closeTemporary(r) != nil {
+ 		return ErrUpgrade
+ 	}
+-	state, e = windows.WaitForSingleObject(w.peerProcess.handle, 0)
+-	if e != nil || state != uint32(windows.WAIT_TIMEOUT) || ctx.Err() != nil {
++	q = newManagedObservationFrame(w)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = w.peerProcess.handle
++	q.err = q.processWait(q.input)
++	if q.finish(q.err) != nil || q.wait != uint32(windows.WAIT_TIMEOUT) || ctx.Err() != nil {
+ 		return ErrUpgrade
+ 	}
+ 	return nil
+@@ -715,6 +826,9 @@ func (w *FreshRuntimeObservation) reobserveLocked(ctx context.Context) error {
+ 	if e != nil || !freshRuntimeDaemon(info.Info.ID, info.Info.OSType) || info.Info.ID != w.daemon {
+ 		return ErrUpgrade
+ 	}
++	if w.checkOriginalBirthMappingLocked(ctx) != nil {
++		return ErrUpgrade
++	}
+ 	n.mu.Lock()
+ 	runtime.LockOSThread()
+ 	peerErr := w.checkPipePeerNativeLocked(ctx)
+@@ -861,7 +975,75 @@ func (w *FreshRuntimeObservation) closeHeld(o *FreshSetupOwner) error {
+ 				return ErrUpgrade
+ 			}
+ 		}
++		if edge := w.birthBorrow; edge != nil {
++			b := edge.birth
++			if b == nil || edge.witness != w {
++				return ErrUpgrade
++			}
++			b.mu.Lock()
++			found := 0
++			for _, v := range b.observationBorrows {
++				if v == edge {
++					found++
++				}
++			}
++			if b.self != b || edge.state.released || found != 1 {
++				b.mu.Unlock()
++				return ErrUpgrade
++			}
++			if !edge.state.release(true, true) {
++				b.mu.Unlock()
++				return ErrUpgrade
++			}
++			b.mu.Unlock()
++		}
+ 		w.closed = true
+ 		return nil
+ 	}, w.fenceLocked)
+ }
++
++func (w *FreshRuntimeObservation) registryValue(h windows.Handle, name string) (string, error) {
++	f := newManagedObservationFrame(w)
++	if f == nil {
++		return "", ErrUpgrade
++	}
++	return f.value(h, name)
++}
++
++func (w *FreshRuntimeObservation) measureIdentity(h windows.Handle, sid string, directory, private, traversal bool) (runtimeStorageIdentity, error) {
++	f := newManagedObservationFrame(w)
++	if f == nil {
++		return runtimeStorageIdentity{}, ErrUpgrade
++	}
++	return f.identity(h, sid, directory, private, traversal)
++}
++
++// Existing original-source process rights perform the native mapping query.
++// Never call this while storage.mu or the same birth mutex is already held.
++func (w *FreshRuntimeObservation) checkOriginalBirthMappingLocked(ctx context.Context) error {
++	edge := w.birthBorrow
++	if !freshBoundedContext(ctx) || edge == nil || edge.witness != w || edge.birth == nil {
++		return ErrUpgrade
++	}
++	b := edge.birth
++	b.mu.Lock()
++	defer b.mu.Unlock()
++	count := 0
++	for _, v := range b.observationBorrows {
++		if v == edge {
++			count++
++		}
++	}
++	if count != 1 || edge.state.released || b.self != b || b.unknown || b.observationUnknown.Load() || !b.complete || b.closeAttempt.attempted || b.parent != w.owner.image || b.binding.owner != b || !edge.window.begin() {
++		return ErrUpgrade
++	}
++	e := b.binding.same()
++	known := e == nil && !b.unknown && !b.observationUnknown.Load() && runtimeStorageDomainKnown()
++	if !edge.window.settle(known) {
++		b.observationUnknown.Store(true)
++		b.parent.managedUnknown.Store(true)
++		w.fenceLocked()
++		return ErrUpgrade
++	}
++	return nil
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_authority_windows.go b/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
+index 41d4ee48f95877da0663d1e97cc9f49873c1dc1c..82018868a60a275f7ecdb654aa1c1b99595bdae4 100644
+--- a/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
++++ b/rdd/pkg/managementconfig/runtime_managed_authority_windows.go
+@@ -231,47 +231,82 @@ func (a *ManagedRuntimeAuthority) CaptureHostagent(ctx context.Context, original
+ 	n.created.mu.Lock()
+ 	defer n.created.mu.Unlock()
+ 	n.mu.Lock()
+-	if len(n.originals) == len(n.births) {
+-		originals, births := n.originals[:0], n.births[:0]
+-		for i, b := range n.births {
+-			if !b.closedForParent(n.image) {
+-				originals = append(originals, n.originals[i])
+-				births = append(births, b)
++	// Only the genuine unique prepared/started command may issue this birth.
++	if !n.admitted() || !freshBoundedContext(ctx) || n.capturing != 0 {
++		n.mu.Unlock()
++		return nil, ErrUpgrade
++	}
++	if len(n.originals) != len(n.births) {
++		n.fence()
++		n.mu.Unlock()
++		return nil, ErrUpgrade
++	}
++	originals, births := n.originals[:0], n.births[:0]
++	for index, b := range n.births {
++		if b == nil || !b.closedForParent(n.image) {
++			originals = append(originals, n.originals[index])
++			births = append(births, b)
++		}
++	}
++	n.originals, n.births = originals, births
++	var selected *ManagedHostagentLaunch
++	for _, l := range n.launches {
++		if l == nil {
++			continue
++		}
++		l.mu.Lock()
++		match := l.self == l && l.owner == n && l.cmd != nil && l.cmd.Process == original && l.startedOriginal == original
++		l.mu.Unlock()
++		if match {
++			if selected != nil {
++				n.mu.Unlock()
++				return nil, ErrUpgrade
+ 			}
++			selected = l
+ 		}
+-		n.originals, n.births = originals, births
+ 	}
+-	n.originals = append(n.originals, original)
+-	if !n.admitted() || !freshBoundedContext(ctx) {
+-		n.fence()
++	if selected == nil {
+ 		n.mu.Unlock()
+ 		return nil, ErrUpgrade
+ 	}
++	selected.mu.Lock()
++	allowed := selected.captureLineage.reserve(managedActualHostagentCommand(selected), selected.started, selected.complete && selected.startComplete, selected.unknown || selected.closeAttempt.attempted, selected.birth != nil || selected.boundOriginal != nil || selected.captureOriginal != nil)
++	if allowed {
++		selected.captureOriginal = original
++	}
++	selected.mu.Unlock()
++	if !allowed {
++		n.mu.Unlock()
++		return nil, ErrUpgrade
++	}
++	n.originals = append(n.originals, original)
+ 	n.capturing++
+ 	n.mu.Unlock()
+ 	defer func() {
+ 		n.mu.Lock()
+ 		defer n.mu.Unlock()
+ 		n.capturing--
++		selected.mu.Lock()
++		defer selected.mu.Unlock()
+ 		if recover() != nil {
+ 			result = ErrUpgrade
+ 		}
+ 		if out != nil {
++			exact := out.self == out && out.sourceLaunch == selected && out.original == original && out.parent == n.image && selected.captureOriginal == original && selected.cmd != nil && selected.cmd.Process == original && selected.startedOriginal == original && selected.birth == nil
+ 			n.births = append(n.births, out)
+-			for _, launch := range n.launches {
+-				launch.mu.Lock()
+-				if launch.cmd != nil && launch.cmd.Process == original {
+-					launch.birth = out
+-					launch.boundOriginal = original
+-				}
+-				launch.mu.Unlock()
++			if selected.captureLineage.attach(exact) {
++				selected.birth = out
++				selected.boundOriginal = original
++			} else {
++				result = ErrUpgrade
+ 			}
+ 		}
+ 		if result != nil {
++			selected.captureLineage.unknown = true
+ 			n.fence()
+ 		}
+ 	}()
+-	return n.image.CaptureManagedHostagent(ctx, original)
++	return n.image.captureOriginalManagedHostagent(ctx, original, selected)
+ }
+ 
+ func (a *ManagedRuntimeAuthority) closedForImage(image *ServingImageLease) bool {
+diff --git a/rdd/pkg/managementconfig/runtime_managed_birth_lineage.go b/rdd/pkg/managementconfig/runtime_managed_birth_lineage.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff4810d0ade88e26b59595710718a4aa7f07ad6a
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_birth_lineage.go
+@@ -0,0 +1,62 @@
++package managementconfig
++
++// Pure sequencing DATA. Native origin additionally requires the actual
++// authority/launch/cmd.Process pointer guards, never these booleans alone.
++type managedBirthLineageState struct{ reserved, attached, unknown bool }
++
++func (s *managedBirthLineageState) reserve(unique, started, complete, poisoned, existing bool) bool {
++	if s == nil || s.reserved || s.attached || s.unknown || !unique || !started || !complete || poisoned || existing {
++		return false
++	}
++	s.reserved = true
++	return true
++}
++func (s *managedBirthLineageState) attach(exact bool) bool {
++	if s == nil || !s.reserved || s.attached || s.unknown || !exact {
++		if s != nil {
++			s.unknown = true
++		}
++		return false
++	}
++	s.attached = true
++	return true
++}
++
++// Borrow sequencing only. Release is called by the actual witness after its
++// original resource Close loop positively completes, never decoded from DATA.
++type managedBirthBorrowState struct{ released, unknown bool }
++
++func (s *managedBirthBorrowState) release(exact, closed bool) bool {
++	if s == nil || s.released || s.unknown || !exact || !closed {
++		if s != nil {
++			s.unknown = true
++		}
++		return false
++	}
++	s.released = true
++	return true
++}
++func (s *managedBirthBorrowState) closedKnown() bool { return s != nil && s.released && !s.unknown }
++
++// Negative barrier for an original-source query window, NOT native retirement.
++// Birth.mu covers the window; native Wait/exit/offline proofs remain separate.
++type managedObservationWindowState struct{ active, unknown bool }
++
++func (s *managedObservationWindowState) begin() bool {
++	if s == nil || s.active || s.unknown {
++		return false
++	}
++	s.active = true
++	return true
++}
++func (s *managedObservationWindowState) settle(known bool) bool {
++	if s == nil || !s.active || s.unknown || !known {
++		if s != nil {
++			s.unknown = true
++		}
++		return false
++	}
++	s.active = false
++	return true
++}
++func (s *managedObservationWindowState) idleKnown() bool { return s != nil && !s.active && !s.unknown }
+diff --git a/rdd/pkg/managementconfig/runtime_managed_birth_lineage_test.go b/rdd/pkg/managementconfig/runtime_managed_birth_lineage_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..21e8b6112104a585f85dc1652b2546204bcd8716
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_birth_lineage_test.go
+@@ -0,0 +1,21 @@
++package managementconfig
++
++import "testing"
++
++func TestManagedBirthLineageOnceAndSubstitution(t *testing.T) {
++	s := managedBirthLineageState{}
++	if !s.reserve(true, true, true, false, false) || s.reserve(true, true, true, false, false) || !s.attach(true) || s.attach(true) {
++		t.Fatal("one original source/attachment")
++	}
++	for n := 0; n < 5; n++ {
++		s := managedBirthLineageState{}
++		if s.reserve(n != 0, n != 1, n != 2, n == 3, n == 4) {
++			t.Fatal("invalid source", n)
++		}
++	}
++	s = managedBirthLineageState{}
++	s.reserve(true, true, true, false, false)
++	if s.attach(false) || !s.unknown || s.attach(true) {
++		t.Fatal("changed original replay")
++	}
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_image_binding_windows.go b/rdd/pkg/managementconfig/runtime_managed_image_binding_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..b318684cb44ef54fc071070d528b3939a258cfa7
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_image_binding_windows.go
+@@ -0,0 +1,113 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"golang.org/x/sys/windows"
++	"runtime"
++	"unsafe"
++)
++
++// Borrowed process/image inputs; all native query output lives in retained
++// frames under the genuine birth or Fresh witness. No native handle getter.
++type managedObservationImageBinding struct {
++	owner         any
++	process, file windows.Handle
++	id            UpgradeObject
++	creation      uint64
++	captured      bool
++}
++
++func (b *managedObservationImageBinding) query(process, file windows.Handle, first bool) error {
++	if b == nil || process == 0 || file == 0 || first == b.captured {
++		return ErrUpgrade
++	}
++	f := newManagedObservationFrame(b.owner)
++	if f == nil || !f.begin() {
++		return ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.input = process
++	f.err = f.fileInformation(file)
++	if f.finish(f.err) != nil {
++		return ErrUpgrade
++	}
++	id := UpgradeObject{Volume: f.info.VolumeSerialNumber, High: f.info.FileIndexHigh, Low: f.info.FileIndexLow}
++	if !id.valid() {
++		f.fail()
++		return ErrUpgrade
++	}
++	q := newManagedObservationFrame(b.owner)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = process
++	q.err = q.processTimes(process)
++	if q.finish(q.err) != nil {
++		return ErrUpgrade
++	}
++	creation := uint64(q.created.HighDateTime)<<32 | uint64(q.created.LowDateTime)
++	w := newManagedObservationFrame(b.owner)
++	if w == nil || !w.begin() {
++		return ErrUpgrade
++	}
++	defer w.preservePanic()
++	w.input = process
++	w.err = w.processWait(process)
++	if w.finish(w.err) != nil {
++		return ErrUpgrade
++	}
++	if !first && (id != b.id || creation != b.creation) {
++		q.fail()
++		return ErrUpgrade
++	}
++	if w.wait == uint32(windows.WAIT_OBJECT_0) && !first {
++		if _, fresh := b.owner.(*FreshRuntimeObservation); !fresh {
++			return nil
++		}
++	}
++	if w.wait != uint32(windows.WAIT_TIMEOUT) {
++		return ErrUpgrade
++	}
++	if witness, ok := b.owner.(*FreshRuntimeObservation); ok {
++		edge := witness.birthBorrow
++		if edge == nil || edge.witness != witness || edge.state.released || edge.birth == nil {
++			return ErrUpgrade
++		}
++		source := edge.birth
++		if source.self != source || source.process == nil || !source.binding.captured || source.binding.owner != source || source.binding.process != source.process.handle || source.binding.id != id || source.binding.creation != creation {
++			return ErrUpgrade
++		}
++		if first {
++			b.process, b.file, b.id, b.creation, b.captured = process, file, id, creation, true
++		}
++		return nil
++	}
++	m := newManagedObservationFrame(b.owner)
++	if m == nil || !m.begin() {
++		return ErrUpgrade
++	}
++	defer m.preservePanic()
++	m.input = process
++	m.mapping = file
++	m.raw, _, _ = modernIncomingQueryProcess.Call(uintptr(process), 44, uintptr(unsafe.Pointer(&m.mapping)), unsafe.Sizeof(m.mapping), uintptr(unsafe.Pointer(&m.mappingLength)))
++	runtime.KeepAlive(m)
++	if !m.original() || uint32(m.raw) != 0 {
++		m.fail()
++		return ErrUpgrade
++	}
++	m.returned = true
++	if m.mapping != file {
++		m.fail()
++		return ErrUpgrade
++	}
++	if first {
++		b.process, b.file, b.id, b.creation, b.captured = process, file, id, creation, true
++	}
++	return nil
++}
++func (b *managedObservationImageBinding) capture(process, file windows.Handle) error {
++	return b.query(process, file, true)
++}
++func (b *managedObservationImageBinding) same() error { return b.query(b.process, b.file, false) }
+diff --git a/rdd/pkg/managementconfig/runtime_managed_launch_windows.go b/rdd/pkg/managementconfig/runtime_managed_launch_windows.go
+index 3bfd7f48e4eb3af1340a42fc90491b3d4d8b029a..180747c3e904987b1cd3ae58b335d57f89b82856 100644
+--- a/rdd/pkg/managementconfig/runtime_managed_launch_windows.go
++++ b/rdd/pkg/managementconfig/runtime_managed_launch_windows.go
+@@ -40,6 +40,11 @@ const managedInterruptRights = windows.EVENT_MODIFY_STATE | windows.SYNCHRONIZE
+ // actual partial output graph on any uncertainty. No public handle constructor
+ // or caller-supplied Start callback exists.
+ type ManagedHostagentLaunch struct {
++	startedOriginal            *os.Process // immutable pointer captured immediately from actual cmd.Start output
++	startComplete              bool        // only the actual normal-return successful Start publishes this
++	pipeRole                   *managedPipeRoleData
++	captureLineage             managedBirthLineageState
++	captureOriginal            *os.Process // original cmd.Process reserved BEFORE native capture
+ 	self                       *ManagedHostagentLaunch
+ 	mu                         sync.Mutex
+ 	owner                      *nativeManagedRuntimeAuthority
+@@ -109,6 +114,9 @@ func (a *ManagedRuntimeAuthority) PrepareHostagentLaunch(ctx context.Context, cm
+ 	n.launches = nil // every previous source cap has actual cached positive close
+ 	l := &ManagedHostagentLaunch{owner: n, cmd: cmd}
+ 	l.self = l
++	if !managedActualHostagentCommand(l) || len(cmd.Args) < 7 || len(cmd.Args) > 8 {
++		return nil, ErrUpgrade
++	}
+ 	n.launches = append(n.launches, l)
+ 	out = l
+ 	defer func() {
+@@ -223,11 +231,21 @@ func (l *ManagedHostagentLaunch) Start(ctx context.Context, proxy *AnchorTransfe
+ 	if l.unknown || !l.complete || l.started || l.closeAttempt.attempted || l.cmd == nil || l.cmd.Process != nil || l.owner.image.managedUnknown.Load() || !runtimeStorageDomainKnown() {
+ 		return ErrUpgrade
+ 	}
++	if !managedActualHostagentCommand(l) {
++		return ErrUpgrade
++	}
++	for _, arg := range l.cmd.Args {
++		if arg == "--orbwin-native-lifetime" {
++			return ErrUpgrade
++		}
++	}
+ 	l.started = true
+ 	defer func() {
+ 		if recover() != nil {
+ 			l.fence()
+ 			result = ErrUpgrade
++		} else if result == nil {
++			l.startComplete = true
+ 		}
+ 		runtime.KeepAlive(l.cmd)
+ 	}()
+@@ -248,6 +266,7 @@ func (l *ManagedHostagentLaunch) Start(ctx context.Context, proxy *AnchorTransfe
+ 		}
+ 		l.cmd.Args = append(l.cmd.Args, "--orbwin-native-lifetime", argument)
+ 		e = l.cmd.Start()
++		l.startedOriginal = l.cmd.Process
+ 		// Each child copy has independent handle flags. Stop the original
+ 		// parent's retained copies propagating to any later subprocess.
+ 		for _, r := range []*runtimeStorageResource{l.anchor, l.lock, l.interrupt} {
+@@ -278,7 +297,7 @@ func (l *ManagedHostagentLaunch) Close() error {
+ 	if l.unknown {
+ 		return ErrUpgrade
+ 	}
+-	if l.cmd != nil && l.cmd.Process != nil {
++	if l.startedOriginal != nil || l.cmd != nil && l.cmd.Process != nil {
+ 		return ErrUpgrade
+ 	}
+ 	if l.closeAttempt.attempted {
+@@ -312,8 +331,8 @@ func (l *ManagedHostagentLaunch) readyForAuthorityClose(a *nativeManagedRuntimeA
+ 	if l.unknown || l.closeAttempt.closeErr != nil || l.cmd == nil {
+ 		return false
+ 	}
+-	if l.cmd.Process != nil {
+-		return l.birth != nil && l.boundOriginal == l.cmd.Process && l.birth.closedForParent(a.image)
++	if l.startedOriginal != nil {
++		return l.cmd.Process == l.startedOriginal && l.birth != nil && l.boundOriginal == l.startedOriginal && l.birth.closedForParent(a.image)
+ 	}
+ 	return true
+ }
+@@ -327,8 +346,8 @@ func (l *ManagedHostagentLaunch) blocksNextLaunch(a *nativeManagedRuntimeAuthori
+ 	if l.unknown || l.cmd == nil {
+ 		return true
+ 	}
+-	if l.cmd.Process != nil {
+-		return l.birth == nil || l.boundOriginal != l.cmd.Process || !l.birth.closedForParent(a.image)
++	if l.startedOriginal != nil {
++		return l.cmd.Process != l.startedOriginal || l.birth == nil || l.boundOriginal != l.startedOriginal || !l.birth.closedForParent(a.image)
+ 	}
+ 	if !l.closeAttempt.attempted || l.closeAttempt.closeErr != nil {
+ 		return true
+diff --git a/rdd/pkg/managementconfig/runtime_managed_namespace_windows.go b/rdd/pkg/managementconfig/runtime_managed_namespace_windows.go
+index fdb1f9ca1817eb02281ed55588a8c1e06ef49bd2..f376f55fe94792a468e816d09084fe083524dfb4 100644
+--- a/rdd/pkg/managementconfig/runtime_managed_namespace_windows.go
++++ b/rdd/pkg/managementconfig/runtime_managed_namespace_windows.go
+@@ -4,7 +4,6 @@ package managementconfig
+ 
+ import (
+ 	"context"
+-	"encoding/binary"
+ 	"runtime"
+ 	"strings"
+ 	"sync"
+@@ -14,6 +13,7 @@ import (
+ )
+ 
+ type nativeManagedNamespace struct {
++	nativeFrames                          []*managedObservationFrame
+ 	self                                  *ManagedRuntimeNamespace
+ 	mu                                    sync.Mutex
+ 	created                               *Created
+@@ -67,7 +67,14 @@ func (n *nativeManagedNamespace) checkObject(o *runtimeStorageObject) error {
+ 	if o == nil || o.resource == nil || o.resource.handle == 0 || o.resource.attempted {
+ 		return ErrUpgrade
+ 	}
+-	id, e := runtimeStorageIdentityOf(o.resource.handle, n.sid, o.directory, o.private, o.traversal)
++	owned := false
++	for _, r := range n.resources {
++		owned = owned || r == o.resource
++	}
++	if !owned {
++		return ErrUpgrade
++	}
++	id, e := n.measureIdentity(o.resource.handle, n.sid, o.directory, o.private, o.traversal)
+ 	if e != nil {
+ 		return ErrUpgrade
+ 	}
+@@ -85,11 +92,16 @@ func (n *nativeManagedNamespace) duplicateObject(o *runtimeStorageObject) (*runt
+ 		return nil, ErrUpgrade
+ 	}
+ 	r := n.slot()
+-	e := windows.DuplicateHandle(windows.CurrentProcess(), o.resource.handle, windows.CurrentProcess(), &r.handle, 0, false, windows.DUPLICATE_SAME_ACCESS)
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return nil, ErrUpgrade
++	}
++	f.resource = r
++	e := f.duplicate(o.resource.handle)
+ 	if n.reply(r, e) != nil {
+ 		return nil, ErrUpgrade
+ 	}
+-	id, e := runtimeStorageIdentityOf(r.handle, n.sid, o.directory, o.private, o.traversal)
++	id, e := n.measureIdentity(r.handle, n.sid, o.directory, o.private, o.traversal)
+ 	if e != nil || id != o.identity {
+ 		return nil, ErrUpgrade
+ 	}
+@@ -102,26 +114,20 @@ func (n *nativeManagedNamespace) openChild(ctx context.Context, parent windows.H
+ 	if !n.known(ctx) {
+ 		return nil, ErrUpgrade
+ 	}
+-	text, e := windows.NewNTUnicodeString(name)
+-	if e != nil {
++	r := n.slot()
++	f := newManagedObservationFrame(n)
++	if f == nil {
+ 		return nil, ErrUpgrade
+ 	}
+-	oa := windows.OBJECT_ATTRIBUTES{RootDirectory: parent, ObjectName: text, Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE}
+-	oa.Length = uint32(unsafe.Sizeof(oa))
+-	options := uint32(windows.FILE_NON_DIRECTORY_FILE | windows.FILE_OPEN_REPARSE_POINT | windows.FILE_SYNCHRONOUS_IO_NONALERT)
+-	if directory {
+-		options = windows.FILE_DIRECTORY_FILE | windows.FILE_OPEN_REPARSE_POINT | windows.FILE_SYNCHRONOUS_IO_NONALERT
+-	}
+-	r := n.slot()
+-	var status windows.IO_STATUS_BLOCK
+-	e = windows.NtCreateFile(&r.handle, access|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, &oa, &status, nil, 0, share, windows.FILE_OPEN, options, 0, 0)
++	f.resource = r
++	e := f.fileOpen(parent, name, directory, access, share)
+ 	if e = n.reply(r, e); e != nil {
+ 		if n.unknown {
+ 			return nil, ErrUpgrade
+ 		}
+ 		return nil, e
+ 	}
+-	id, e := runtimeStorageIdentityOf(r.handle, n.sid, directory, false, directory)
++	id, e := n.measureIdentity(r.handle, n.sid, directory, false, directory)
+ 	if e != nil {
+ 		return nil, ErrUpgrade
+ 	}
+@@ -131,13 +137,14 @@ func (n *nativeManagedNamespace) openKey(ctx context.Context, parent windows.Han
+ 	if !n.known(ctx) {
+ 		return nil, ErrUpgrade
+ 	}
+-	text, e := windows.UTF16PtrFromString(name)
+-	if e != nil {
+-		return nil, ErrUpgrade
+-	}
+ 	r := &freshRegistryResource{}
+ 	n.keys = append(n.keys, r)
+-	e = windows.RegOpenKeyEx(parent, text, 0, windows.KEY_READ, &r.handle)
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return nil, ErrUpgrade
++	}
++	f.key = r
++	e := f.openKey(parent, name)
+ 	e = runtimeStorageOpenReply(e, r.handle != 0 && r.handle != windows.InvalidHandle, func() {}, n.fence)
+ 	if e != nil {
+ 		if n.unknown {
+@@ -167,18 +174,20 @@ func (n *nativeManagedNamespace) closeFile(r *runtimeStorageResource) error {
+ 	}, n.fence)
+ }
+ func (n *nativeManagedNamespace) registrationValues(key windows.Handle) (string, string, error) {
+-	name, e := freshRuntimeRegistryValue(key, "DistributionName")
++	name, e := n.registryValue(key, "DistributionName")
+ 	if e != nil {
+ 		return "", "", ErrUpgrade
+ 	}
+-	base, e := freshRuntimeRegistryValue(key, "BasePath")
++	base, e := n.registryValue(key, "BasePath")
+ 	if e != nil {
+ 		return "", "", ErrUpgrade
+ 	}
+-	var body [4]byte
+-	size, kind := uint32(4), uint32(0)
+-	value, _ := windows.UTF16PtrFromString("Version")
+-	if windows.RegQueryValueEx(key, value, nil, &kind, &body[0], &size) != nil || kind != windows.REG_DWORD || size != 4 || !runtimeFreshGuestRegistrationMatches(name, base, n.home, binary.LittleEndian.Uint32(body[:])) {
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return "", "", ErrUpgrade
++	}
++	version, e := f.version(key)
++	if e != nil || !runtimeFreshGuestRegistrationMatches(name, base, n.home, version) {
+ 		return "", "", ErrUpgrade
+ 	}
+ 	return name, base, nil
+@@ -197,16 +206,18 @@ func (n *nativeManagedNamespace) captureRegistration(ctx context.Context) error
+ 		if !n.known(ctx) {
+ 			return ErrUpgrade
+ 		}
+-		var text [64]uint16
+-		count := uint32(len(text))
+-		e := windows.RegEnumKeyEx(root.handle, i, &text[0], &count, nil, nil, nil, nil)
++		f := newManagedObservationFrame(n)
++		if f == nil {
++			return ErrUpgrade
++		}
++		text, e := f.enumKey(root.handle, i)
+ 		if e == windows.ERROR_NO_MORE_ITEMS {
+ 			return nil
+ 		}
+-		if e != nil || i == 512 || count == 0 || count >= 64 {
++		if e != nil || i == 512 {
+ 			return ErrUpgrade
+ 		}
+-		guid := strings.ToLower(windows.UTF16ToString(text[:count]))
++		guid := strings.ToLower(text)
+ 		if !freshRuntimeGUID(guid) {
+ 			return ErrUpgrade
+ 		}
+@@ -214,7 +225,7 @@ func (n *nativeManagedNamespace) captureRegistration(ctx context.Context) error
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+-		name, e := freshRuntimeRegistryValue(key.handle, "DistributionName")
++		name, e := n.registryValue(key.handle, "DistributionName")
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+@@ -266,8 +277,22 @@ func (n *nativeManagedNamespace) capture(ctx context.Context, home *runtimeStora
+ 		return ErrUpgrade
+ 	}
+ 	n.selfToken = n.slot()
+-	e := windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(token), windows.CurrentProcess(), &n.selfToken.handle, 0, false, windows.DUPLICATE_SAME_ACCESS)
+-	if n.reply(n.selfToken, e) != nil || windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &n.session) != nil || n.session == 0 || n.checkCurrentToken() != nil {
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	f.resource = n.selfToken
++	e := f.duplicate(windows.Handle(token))
++	q := newManagedObservationFrame(n)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	if n.reply(n.selfToken, e) != nil || q.sessionOf(windows.GetCurrentProcessId()) != nil || q.session == 0 {
++		return ErrUpgrade
++	}
++	n.session = q.session
++	if n.checkCurrentToken() != nil {
+ 		return ErrUpgrade
+ 	}
+ 	h, e := n.duplicateObject(home)
+@@ -304,6 +329,9 @@ func (f *freshCommittedStartupPermit) captureManagedNamespaceLocked(ctx context.
+ 	n := &nativeManagedNamespace{self: cap, created: c, sid: native.sid, home: native.home}
+ 	cap.native = n
+ 	c.managedNamespace = cap
++	managedObservationNamespaces.Lock()
++	managedObservationNamespaces.owners[n] = true
++	managedObservationNamespaces.Unlock()
+ 	defer func() {
+ 		if recover() != nil {
+ 			result = ErrUpgrade
+@@ -350,6 +378,9 @@ func (o *FreshSetupOwner) captureManagedNamespaceBeforeSealLocked(ctx context.Co
+ 	n := &nativeManagedNamespace{self: cap, created: c, authority: a, sid: o.storage.sid, home: o.storage.home, activated: true}
+ 	cap.native = n
+ 	c.managedNamespace = cap
++	managedObservationNamespaces.Lock()
++	managedObservationNamespaces.owners[n] = true
++	managedObservationNamespaces.Unlock()
+ 	defer func() {
+ 		if recover() != nil {
+ 			result = ErrUpgrade
+@@ -400,17 +431,35 @@ func (n *nativeManagedNamespace) checkCurrentToken() error {
+ 		return ErrUpgrade
+ 	}
+ 	thread := n.slot()
+-	e := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, (*windows.Token)(unsafe.Pointer(&thread.handle)))
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	f.resource = thread
++	e := f.token(windows.CurrentThread(), true)
+ 	if n.reply(thread, e) != windows.ERROR_NO_TOKEN {
+ 		return ErrUpgrade
+ 	}
+ 	current := n.slot()
+-	e = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&current.handle)))
++	f = newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	f.resource = current
++	e = f.token(windows.CurrentProcess(), false)
+ 	if n.reply(current, e) != nil || legacySDKOrdinaryToken(windows.Token(current.handle), n.sid, n.session) != nil {
+ 		return ErrUpgrade
+ 	}
+-	retainedID, retainedAuth, e := managedPrimaryTokenIdentity(windows.Token(n.selfToken.handle))
+-	currentID, currentAuth, currentErr := managedPrimaryTokenIdentity(windows.Token(current.handle))
++	f = newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	retainedID, retainedAuth, e := f.tokenIdentity(windows.Token(n.selfToken.handle))
++	f = newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	currentID, currentAuth, currentErr := f.tokenIdentity(windows.Token(current.handle))
+ 	if e != nil || currentErr != nil || retainedID != currentID || retainedAuth != currentAuth {
+ 		return ErrUpgrade
+ 	}
+@@ -476,9 +525,11 @@ func (n *nativeManagedNamespace) recheckRegistered(ctx context.Context) error {
+ 		if !n.known(ctx) {
+ 			return ErrUpgrade
+ 		}
+-		var text [64]uint16
+-		size := uint32(len(text))
+-		e := windows.RegEnumKeyEx(n.root.handle, i, &text[0], &size, nil, nil, nil, nil)
++		f := newManagedObservationFrame(n)
++		if f == nil {
++			return ErrUpgrade
++		}
++		text, e := f.enumKey(n.root.handle, i)
+ 		if e == windows.ERROR_NO_MORE_ITEMS {
+ 			if found != n.guid {
+ 				return ErrUpgrade
+@@ -489,10 +540,10 @@ func (n *nativeManagedNamespace) recheckRegistered(ctx context.Context) error {
+ 			}
+ 			return nil
+ 		}
+-		if e != nil || i == 512 || size == 0 || size >= uint32(len(text)) {
++		if e != nil || i == 512 {
+ 			return ErrUpgrade
+ 		}
+-		guid := strings.ToLower(windows.UTF16ToString(text[:size]))
++		guid := strings.ToLower(text)
+ 		if !freshRuntimeGUID(guid) {
+ 			return ErrUpgrade
+ 		}
+@@ -500,7 +551,7 @@ func (n *nativeManagedNamespace) recheckRegistered(ctx context.Context) error {
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+-		value, e := freshRuntimeRegistryValue(key.handle, "DistributionName")
++		value, e := n.registryValue(key.handle, "DistributionName")
+ 		if e != nil {
+ 			return ErrUpgrade
+ 		}
+@@ -533,30 +584,55 @@ func (n *nativeManagedNamespace) bindLivePeer(ctx context.Context, b *ManagedHos
+ 	if !b.complete || b.unknown || b.closeAttempt.attempted || b.process == nil || b.process.handle == 0 || b.token == nil || b.sid != n.sid || b.session != n.session || n.peer != nil && n.peer != b {
+ 		return ErrUpgrade
+ 	}
+-	path, e := windows.UTF16PtrFromString(freshDockerPipe)
+-	if e != nil {
++	r := n.slot()
++	pipe := newManagedObservationFrame(n)
++	if pipe == nil {
+ 		return ErrUpgrade
+ 	}
+-	r := n.slot()
+-	r.handle, e = windows.CreateFile(path, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.SECURITY_SQOS_PRESENT|windows.SECURITY_ANONYMOUS, 0)
++	pipe.resource = r
++	e := pipe.pipeOpen()
+ 	if n.reply(r, e) != nil {
+ 		return ErrUpgrade
+ 	}
+-	var pid uint32
+-	if windows.GetNamedPipeServerProcessId(r.handle, &pid) != nil || pid != b.pid || b.binding.same() != nil {
++	q := newManagedObservationFrame(n)
++	if q == nil || !q.begin() {
+ 		return ErrUpgrade
+ 	}
++	defer q.preservePanic()
++	if q.pipePID(r.handle) != nil || q.pid != b.pid || b.binding.same() != nil {
++		return ErrUpgrade
++	}
++
+ 	attached := n.slot()
+-	e = windows.OpenProcessToken(b.process.handle, windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&attached.handle)))
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	f.resource = attached
++	e = f.token(b.process.handle, false)
+ 	if n.reply(attached, e) != nil || legacySDKOrdinaryToken(windows.Token(attached.handle), n.sid, n.session) != nil {
+ 		return ErrUpgrade
+ 	}
+-	heldID, heldAuth, heldErr := managedPrimaryTokenIdentity(windows.Token(b.token.handle))
+-	attachedID, attachedAuth, attachedErr := managedPrimaryTokenIdentity(windows.Token(attached.handle))
++	f = newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	heldID, heldAuth, heldErr := f.tokenIdentity(windows.Token(b.token.handle))
++	f = newManagedObservationFrame(n)
++	if f == nil {
++		return ErrUpgrade
++	}
++	attachedID, attachedAuth, attachedErr := f.tokenIdentity(windows.Token(attached.handle))
+ 	if heldErr != nil || attachedErr != nil || heldID != attachedID || heldAuth != attachedAuth || n.closeFile(attached) != nil {
+ 		return ErrUpgrade
+ 	}
+-	state, e := windows.WaitForSingleObject(b.process.handle, 0)
++	q = newManagedObservationFrame(n)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	e = q.processWait(b.process.handle)
++	state := q.wait
+ 	if e != nil || state != uint32(windows.WAIT_TIMEOUT) || n.closeFile(r) != nil || ctx.Err() != nil {
+ 		return ErrUpgrade
+ 	}
+@@ -622,10 +698,16 @@ func (n *nativeManagedNamespace) close() error {
+ 	if n.closeAttempt.attempted {
+ 		return n.closeAttempt.closeErr
+ 	}
++	managedObservationNamespaces.Lock()
++	registered := managedObservationNamespaces.owners[n]
++	managedObservationNamespaces.Unlock()
++	if !registered || !runtimeStorageDomainKnown() {
++		return ErrUpgrade
++	}
+ 	if n.activated && !n.retired {
+ 		return ErrUpgrade
+ 	}
+-	return n.closeAttempt.run(func() error {
++	result := n.closeAttempt.run(func() error {
+ 		for i := len(n.keys) - 1; i >= 0; i-- {
+ 			if n.closeKey(n.keys[i]) != nil {
+ 				return ErrUpgrade
+@@ -638,4 +720,26 @@ func (n *nativeManagedNamespace) close() error {
+ 		}
+ 		return nil
+ 	}, n.fence)
++	if result == nil {
++		managedObservationNamespaces.Lock()
++		delete(managedObservationNamespaces.owners, n)
++		managedObservationNamespaces.Unlock()
++	}
++	return result
++}
++
++func (n *nativeManagedNamespace) registryValue(h windows.Handle, name string) (string, error) {
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return "", ErrUpgrade
++	}
++	return f.value(h, name)
++}
++
++func (n *nativeManagedNamespace) measureIdentity(h windows.Handle, sid string, directory, private, traversal bool) (runtimeStorageIdentity, error) {
++	f := newManagedObservationFrame(n)
++	if f == nil {
++		return runtimeStorageIdentity{}, ErrUpgrade
++	}
++	return f.identity(h, sid, directory, private, traversal)
+ }
+diff --git a/rdd/pkg/managementconfig/runtime_managed_observation_frame_test.go b/rdd/pkg/managementconfig/runtime_managed_observation_frame_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..ee59d454994fd11b2c8ce17b5bc1bdedd310009d
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_observation_frame_test.go
+@@ -0,0 +1,124 @@
++package managementconfig
++
++import "testing"
++
++func TestManagedObservationPendingAndPartialCuts(t *testing.T) {
++	for _, c := range []struct {
++		status, iosb uint32
++		info         uintptr
++		out, valid   bool
++		want         runtimeStorageNativeOpenReply
++	}{
++		{0, 0, 1, true, true, runtimeStorageNativeOpenSuccess},
++		{0x103, 0, 0, false, false, runtimeStorageNativeOpenUnknown},
++		{0, 0x103, 1, true, true, runtimeStorageNativeOpenUnknown},
++		{0, 0, 2, true, true, runtimeStorageNativeOpenUnknown},
++		{0xc0000034, 0, 0, false, false, runtimeStorageNativeOpenFailure},
++		{0xc0000034, 0, 0, true, true, runtimeStorageNativeOpenUnknown},
++		{1, 0, 0, false, false, runtimeStorageNativeOpenUnknown},
++	} {
++		kind := runtimeStorageClassifyNativeOpen(c.status, c.iosb, c.info, 1, c.out, c.valid)
++		if kind != c.want {
++			t.Fatal(c)
++		}
++		s := runtimeStorageNativeOpenState{entered: true}
++		settled := s.reply(kind)
++		if settled != (kind != runtimeStorageNativeOpenUnknown) || s.attach() != (kind == runtimeStorageNativeOpenSuccess) {
++			t.Fatal("pending/partial admission", c)
++		}
++		if s.reply(runtimeStorageNativeOpenSuccess) {
++			t.Fatal("late native reply accepted")
++		}
++	}
++}
++func TestManagedObservationWin32WidthAndUnknown(t *testing.T) {
++	for _, c := range []struct {
++		raw, out uintptr
++		code     uint32
++		known    bool
++		want     runtimeStorageNativeOpenReply
++	}{
++		{1, 19, 997, false, runtimeStorageNativeOpenSuccess},
++		{uintptr(1) << 32, 0, 997, true, runtimeStorageNativeOpenUnknown},
++		{0, 0, 996, true, runtimeStorageNativeOpenUnknown},
++		{0, 0, 5, true, runtimeStorageNativeOpenFailure},
++		{0, 19, 5, true, runtimeStorageNativeOpenUnknown},
++		{0, 0, 0, true, runtimeStorageNativeOpenUnknown},
++		{1, ^uintptr(0), 0, true, runtimeStorageNativeOpenUnknown},
++	} {
++		if runtimeStorageClassifyTokenOpen(c.raw, c.out, c.code, c.known) != c.want {
++			t.Fatal(c)
++		}
++	}
++}
++func TestManagedObservationBorrowCloseFailureCuts(t *testing.T) {
++	for cut := 0; cut < 5; cut++ {
++		s := managedBirthBorrowState{}
++		allClosed := false
++		func() {
++			defer func() {
++				if recover() != nil {
++					s.release(true, false)
++				}
++			}()
++			for n := 0; n < 5; n++ {
++				if n == cut {
++					panic("checked close cut")
++				}
++			}
++			allClosed = true
++		}()
++		if allClosed || s.closedKnown() || s.release(true, true) {
++			t.Fatal("panic released original parent", cut)
++		}
++	}
++	for _, c := range []struct{ exact, closed bool }{{false, true}, {true, false}, {false, false}} {
++		s := managedBirthBorrowState{}
++		if s.release(c.exact, c.closed) || s.closedKnown() || s.release(true, true) {
++			t.Fatal("bad edge/failed resource close replay")
++		}
++	}
++	s := managedBirthBorrowState{}
++	if !s.release(true, true) || !s.closedKnown() {
++		t.Fatal("complete checked release")
++	}
++}
++
++func TestManagedObservationRetirementOrderWithIndependentCopies(t *testing.T) {
++	source := managedObservationWindowState{}
++	copies := managedBirthBorrowState{}
++	if !source.begin() || source.idleKnown() {
++		t.Fatal("native source window not held")
++	}
++	if !source.settle(true) || !source.idleKnown() || copies.closedKnown() {
++		t.Fatal("settled source still depends on later copy Close")
++	}
++	// In production, birth.Close still needs original Wait/exit/offline evidence.
++	// This negative source barrier no longer waits for private w.Close, which is
++	// called only AFTER RetireHostagent in the real retirement order.
++	if !copies.release(true, true) || !source.idleKnown() {
++		t.Fatal("later independent checked Close")
++	}
++	for _, known := range []bool{false, true} {
++		s := managedObservationWindowState{}
++		s.begin()
++		if !known {
++			s.settle(false)
++		} // pending/contradictory source completion
++		if known {
++			func() {
++				defer func() {
++					if recover() != nil {
++						s.settle(false)
++					}
++				}()
++				panic("unreturned native window")
++			}()
++		}
++		c := managedBirthBorrowState{}
++		c.release(true, true)
++		if s.idleKnown() || s.begin() || s.settle(true) {
++			t.Fatal("copy close unlocked unknown source")
++		}
++	}
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows.go b/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..761f06c0c6ea51e33d7d2953b98fc816fdab5428
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows.go
+@@ -0,0 +1,677 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/binary"
++	"golang.org/x/sys/windows"
++	"runtime"
++	"sync"
++	"unsafe"
++)
++
++// A frame is rooted only by one of these three actual concrete native owners.
++// No callback/provider/DTO can register an owner or supply an output cell.
++type managedObservationFrame struct {
++	owner                         any
++	resource                      *runtimeStorageResource
++	key                           *freshRegistryResource
++	input, parent                 windows.Handle
++	desired                       uint32
++	name                          string
++	text                          *windows.NTUnicodeString
++	wide                          []uint16
++	oa                            windows.OBJECT_ATTRIBUTES
++	io                            windows.IO_STATUS_BLOCK
++	raw                           uintptr
++	err                           error
++	state                         runtimeStorageNativeOpenState
++	entered, returned, unknown    bool
++	pid, session, wait, exitCode  uint32
++	created, exited, kernel, user windows.Filetime
++	basic                         windows.PROCESS_BASIC_INFORMATION
++	size, kind, count             uint32
++	body                          [2048]byte
++	keyName                       [64]uint16
++	info                          windows.ByHandleFileInformation
++	mapping                       windows.Handle
++	mappingLength                 uint32
++	sd                            *windows.SECURITY_DESCRIPTOR
++	stats                         struct {
++		TokenID, AuthenticationID                                                 windows.LUID
++		Expiration                                                                int64
++		Type, Level, DynamicCharged, DynamicAvailable, GroupCount, PrivilegeCount uint32
++		Modified                                                                  windows.LUID
++	}
++}
++
++var managedOpenProcessToken = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenProcessToken")
++var managedOpenThreadToken = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenThreadToken")
++var managedRegOpenKey = windows.NewLazySystemDLL("advapi32.dll").NewProc("RegOpenKeyExW")
++var managedRegEnum = windows.NewLazySystemDLL("advapi32.dll").NewProc("RegEnumKeyExW")
++var managedRegQuery = windows.NewLazySystemDLL("advapi32.dll").NewProc("RegQueryValueExW")
++var managedGetTokenInfo = windows.NewLazySystemDLL("advapi32.dll").NewProc("GetTokenInformation")
++var managedGetPID = imageOutputKernel.NewProc("GetProcessId")
++var managedGetTimes = imageOutputKernel.NewProc("GetProcessTimes")
++var managedGetSession = imageOutputKernel.NewProc("ProcessIdToSessionId")
++var managedWait = imageOutputKernel.NewProc("WaitForSingleObject")
++var managedGetExit = imageOutputKernel.NewProc("GetExitCodeProcess")
++var managedGetPipePID = imageOutputKernel.NewProc("GetNamedPipeServerProcessId")
++var managedGetFileInfo = imageOutputKernel.NewProc("GetFileInformationByHandle")
++
++// Closed lifetime/provenance roots, populated only by the two actual native
++// namespace constructors after their original parent admission. Not a lookup
++// authority for caller handles, or a generic frame/actor registry.
++var managedObservationNamespaces = struct {
++	sync.Mutex
++	owners map[*nativeManagedNamespace]bool
++}{owners: make(map[*nativeManagedNamespace]bool)}
++
++func newManagedObservationFrame(owner any) *managedObservationFrame {
++	if !runtimeStorageDomainKnown() {
++		return nil
++	}
++	f := &managedObservationFrame{owner: owner}
++	switch o := owner.(type) {
++	case *ManagedHostagentBirth:
++		if o == nil || o.unknown {
++			return nil
++		}
++		o.nativeFrames = trimManagedObservationFrames(o.nativeFrames)
++		if len(o.nativeFrames) >= 8192 {
++			return nil
++		}
++		o.nativeFrames = append(o.nativeFrames, f)
++	case *FreshRuntimeObservation:
++		if o == nil || o.unknown || o.owner == nil || o.owner.unknown {
++			return nil
++		}
++		o.nativeFrames = trimManagedObservationFrames(o.nativeFrames)
++		o.keys = trimManagedObservationKeys(o.keys)
++		if len(o.nativeFrames) >= 8192 {
++			return nil
++		}
++		o.nativeFrames = append(o.nativeFrames, f)
++	case *nativeManagedNamespace:
++		if o == nil || o.unknown {
++			return nil
++		}
++		o.nativeFrames = trimManagedObservationFrames(o.nativeFrames)
++		o.keys = trimManagedObservationKeys(o.keys)
++		if len(o.nativeFrames) >= 8192 {
++			return nil
++		}
++		o.nativeFrames = append(o.nativeFrames, f)
++	default:
++		return nil
++	}
++	return f
++}
++
++// Only completed synchronous scratch queries or positively closed open outputs
++// may leave custody. Live outputs and every unreturned/pending/unknown frame
++// remain. Actual identity/admission DATA is stored by its owner, not this scratch
++// list. This prevents normal namespace rechecks exhausting a lifetime counter.
++func trimManagedObservationFrames(frames []*managedObservationFrame) []*managedObservationFrame {
++	kept := frames[:0]
++	for _, f := range frames {
++		if f == nil {
++			continue
++		}
++		safe := f.returned && !f.unknown && !f.state.unknown
++		if f.resource != nil {
++			safe = safe && f.resource.attempted && f.resource.closeErr == nil && f.resource.handle == 0
++		}
++		if f.key != nil {
++			safe = safe && f.key.attempted && f.key.closeErr == nil && f.key.handle == 0
++		}
++		if !safe {
++			kept = append(kept, f)
++		}
++	}
++	clear(frames[len(kept):])
++	return kept
++}
++func trimManagedObservationKeys(keys []*freshRegistryResource) []*freshRegistryResource {
++	kept := keys[:0]
++	for _, k := range keys {
++		if k == nil || !k.attempted || k.closeErr != nil || k.handle != 0 {
++			kept = append(kept, k)
++		}
++	}
++	clear(keys[len(kept):])
++	return kept
++}
++func (f *managedObservationFrame) original() bool {
++	if f == nil || f.unknown || !runtimeStorageDomainKnown() {
++		return false
++	}
++	switch o := f.owner.(type) {
++	case *ManagedHostagentBirth:
++		if o == nil {
++			return false
++		}
++		l := o.sourceLaunch
++		if o.self != o || o.original == nil || o.unknown || o.observationUnknown.Load() || o.closeAttempt.attempted || l == nil || l.self != l || l.owner == nil || l.owner.self == nil || l.owner.self.native != l.owner || l.owner.created == nil || l.owner.created.managedAuthority != l.owner.self || l.owner.image != o.parent || !l.complete || !l.started || !l.startComplete || !l.captureLineage.reserved || l.captureLineage.unknown || l.captureOriginal != o.original || l.startedOriginal != o.original || l.cmd == nil || l.cmd.Process != o.original || o.parent == nil || o.parent.captureSelf != o.parent || o.parent.managedUnknown.Load() {
++			return false
++		}
++		servingImageCaptures.Lock()
++		known := servingImageCaptures.owners[o.parent] && !servingImageCaptures.failed
++		servingImageCaptures.Unlock()
++		if !known {
++			return false
++		}
++		if f.key != nil {
++			return false
++		}
++		if f.resource != nil {
++			owned := false
++			for _, r := range o.resources {
++				owned = owned || r == f.resource
++			}
++			if !owned || f.resource.attempted {
++				return false
++			}
++		}
++		for _, v := range o.nativeFrames {
++			if v == f {
++				return true
++			}
++		}
++	case *FreshRuntimeObservation:
++		if o == nil || o.self != o || o.owner == nil || !o.exactLocked(o.owner, o.created, o.publisher) || !o.owner.nativeOutputsAdmittedLocked() || o.closed || o.unknown || o.owner.unknown || o.closeAttempt.attempted {
++			return false
++		}
++		if f.resource != nil {
++			owned := false
++			for _, r := range o.resources {
++				owned = owned || r == f.resource
++			}
++			if !owned || f.resource.attempted {
++				return false
++			}
++		}
++		if f.key != nil {
++			owned := false
++			for _, r := range o.keys {
++				owned = owned || r == f.key
++			}
++			if !owned || f.key.attempted {
++				return false
++			}
++		}
++		for _, v := range o.nativeFrames {
++			if v == f {
++				return true
++			}
++		}
++	case *nativeManagedNamespace:
++		if o == nil || o.self == nil || o.self.native != o || o.created == nil || o.created.managedNamespace != o.self || o.unknown || o.closeAttempt.attempted {
++			return false
++		}
++		managedObservationNamespaces.Lock()
++		known := managedObservationNamespaces.owners[o]
++		managedObservationNamespaces.Unlock()
++		if !known {
++			return false
++		}
++		if f.resource != nil {
++			owned := false
++			for _, r := range o.resources {
++				owned = owned || r == f.resource
++			}
++			if !owned || f.resource.attempted {
++				return false
++			}
++		}
++		if f.key != nil {
++			owned := false
++			for _, r := range o.keys {
++				owned = owned || r == f.key
++			}
++			if !owned || f.key.attempted {
++				return false
++			}
++		}
++		for _, v := range o.nativeFrames {
++			if v == f {
++				return true
++			}
++		}
++	}
++	return false
++}
++func (f *managedObservationFrame) fail() {
++	if f == nil {
++		return
++	}
++	f.unknown = true
++	f.state.unknown = true
++	switch o := f.owner.(type) {
++	case *ManagedHostagentBirth:
++		o.fence()
++	case *FreshRuntimeObservation:
++		if edge := o.birthBorrow; edge != nil && edge.witness == o && edge.birth != nil {
++			edge.birth.observationUnknown.Store(true)
++			if edge.birth.parent != nil {
++				edge.birth.parent.managedUnknown.Store(true)
++			}
++		}
++		o.fenceLocked()
++	case *nativeManagedNamespace:
++		o.fence()
++	}
++}
++func (f *managedObservationFrame) begin() bool {
++	if !f.original() || f.entered || f.returned {
++		return false
++	}
++	f.entered = true
++	return true
++}
++func (f *managedObservationFrame) finish(e error) error {
++	f.err = e
++	if !f.original() || e == windows.ERROR_IO_PENDING || e == windows.ERROR_IO_INCOMPLETE {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.returned = true
++	return e
++}
++func (f *managedObservationFrame) preservePanic() {
++	if p := recover(); p != nil {
++		f.fail()
++		panic(p)
++	}
++	runtime.KeepAlive(f)
++}
++func (f *managedObservationFrame) fileOpen(parent windows.Handle, name string, directory bool, access, share uint32) error {
++	if f == nil || f.resource == nil || f.resource.handle != 0 {
++		return ErrUpgrade
++	}
++	f.parent, f.name = parent, name
++	var e error
++	f.text, e = windows.NewNTUnicodeString(name)
++	if e != nil {
++		return ErrUpgrade
++	}
++	f.oa = windows.OBJECT_ATTRIBUTES{RootDirectory: parent, ObjectName: f.text, Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE}
++	f.oa.Length = uint32(unsafe.Sizeof(f.oa))
++	options := uint32(windows.FILE_SYNCHRONOUS_IO_NONALERT | windows.FILE_OPEN_REPARSE_POINT | windows.FILE_NON_DIRECTORY_FILE)
++	if directory {
++		options = windows.FILE_SYNCHRONOUS_IO_NONALERT | windows.FILE_OPEN_REPARSE_POINT | windows.FILE_DIRECTORY_FILE
++	}
++	if !f.begin() {
++		return ErrUpgrade
++	}
++	f.state.entered = true
++	defer f.preservePanic()
++	f.raw, _, _ = runtimeStorageCreateFile.Call(uintptr(unsafe.Pointer(&f.resource.handle)), uintptr(access|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE), uintptr(unsafe.Pointer(&f.oa)), uintptr(unsafe.Pointer(&f.io)), 0, 0, uintptr(share), uintptr(windows.FILE_OPEN), uintptr(options), 0, 0)
++	if !f.original() || uint32(f.raw) == 0x103 || uint32(f.io.Status) == 0x103 {
++		f.fail()
++		return ErrUpgrade
++	}
++	h := f.resource.handle
++	kind := runtimeStorageClassifyNativeOpen(uint32(f.raw), uint32(f.io.Status), f.io.Information, windows.FILE_OPEN, h != 0, h != 0 && h != windows.InvalidHandle)
++	if !f.state.reply(kind) {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.returned = true
++	if kind == runtimeStorageNativeOpenFailure {
++		return windows.NTStatus(uint32(f.raw))
++	}
++	if !f.state.attach() {
++		f.fail()
++		return ErrUpgrade
++	}
++	return nil
++}
++func (f *managedObservationFrame) winReply() error {
++	if !f.original() {
++		f.fail()
++		return ErrUpgrade
++	}
++	code, ok := f.err.(windows.Errno)
++	if uint32(f.raw) == 0 && (!ok || code == 997 || code == 996) {
++		f.fail()
++		return ErrUpgrade
++	}
++	kind := runtimeStorageClassifyTokenOpen(f.raw, uintptr(f.resource.handle), uint32(code), ok)
++	if !f.state.reply(kind) {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.returned = true
++	if kind == runtimeStorageNativeOpenFailure {
++		return code
++	}
++	if !f.state.attach() {
++		f.fail()
++		return ErrUpgrade
++	}
++	return nil
++}
++func (f *managedObservationFrame) duplicate(source windows.Handle) error {
++	return f.duplicateAccess(source, 0)
++}
++func (f *managedObservationFrame) duplicateAccess(source windows.Handle, access uint32) error {
++	if f == nil || f.resource == nil || f.resource.handle != 0 {
++		return ErrUpgrade
++	}
++	f.input = source
++	f.desired = access
++	if !f.begin() {
++		return ErrUpgrade
++	}
++	f.state.entered = true
++	defer f.preservePanic()
++	flags := uint32(windows.DUPLICATE_SAME_ACCESS)
++	if access != 0 {
++		flags = 0
++	}
++	f.raw, _, f.err = imageOutputDuplicate.Call(uintptr(windows.CurrentProcess()), uintptr(source), uintptr(windows.CurrentProcess()), uintptr(unsafe.Pointer(&f.resource.handle)), uintptr(access), 0, uintptr(flags))
++	return f.winReply()
++}
++func (f *managedObservationFrame) token(source windows.Handle, thread bool) error {
++	if f == nil || f.resource == nil || f.resource.handle != 0 {
++		return ErrUpgrade
++	}
++	f.input = source
++	if !f.begin() {
++		return ErrUpgrade
++	}
++	f.state.entered = true
++	defer f.preservePanic()
++	if thread {
++		f.raw, _, f.err = managedOpenThreadToken.Call(uintptr(source), windows.TOKEN_QUERY, 1, uintptr(unsafe.Pointer(&f.resource.handle)))
++	} else {
++		f.raw, _, f.err = managedOpenProcessToken.Call(uintptr(source), windows.TOKEN_QUERY, uintptr(unsafe.Pointer(&f.resource.handle)))
++	}
++	return f.winReply()
++}
++func (f *managedObservationFrame) openKey(parent windows.Handle, name string) error {
++	if f == nil || f.key == nil || f.key.handle != 0 {
++		return ErrUpgrade
++	}
++	f.parent, f.name = parent, name
++	var e error
++	f.wide, e = windows.UTF16FromString(name)
++	if e != nil {
++		return ErrUpgrade
++	}
++	if !f.begin() {
++		return ErrUpgrade
++	}
++	f.state.entered = true
++	defer f.preservePanic()
++	f.raw, _, _ = managedRegOpenKey.Call(uintptr(parent), uintptr(unsafe.Pointer(&f.wide[0])), 0, windows.KEY_READ, uintptr(unsafe.Pointer(&f.key.handle)))
++	if !f.original() || uint32(f.raw) == 997 || uint32(f.raw) == 996 {
++		f.fail()
++		return ErrUpgrade
++	}
++	h := f.key.handle
++	kind := runtimeStorageNativeOpenUnknown
++	if uint32(f.raw) == 0 && runtimeStorageRealWin32Output(uintptr(h)) {
++		kind = runtimeStorageNativeOpenSuccess
++	} else if uint32(f.raw) != 0 && h == 0 {
++		kind = runtimeStorageNativeOpenFailure
++	}
++	if !f.state.reply(kind) {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.returned = true
++	if kind == runtimeStorageNativeOpenFailure {
++		return windows.Errno(uint32(f.raw))
++	}
++	if !f.state.attach() {
++		f.fail()
++		return ErrUpgrade
++	}
++	return nil
++}
++func (f *managedObservationFrame) enumKey(h windows.Handle, index uint32) (string, error) {
++	if !f.begin() {
++		return "", ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.input = h
++	f.count = uint32(len(f.keyName))
++	f.raw, _, _ = managedRegEnum.Call(uintptr(h), uintptr(index), uintptr(unsafe.Pointer(&f.keyName[0])), uintptr(unsafe.Pointer(&f.count)), 0, 0, 0, 0)
++	var e error
++	if uint32(f.raw) != 0 {
++		e = windows.Errno(uint32(f.raw))
++	}
++	e = f.finish(e)
++	if e != nil {
++		return "", e
++	}
++	if f.count == 0 || f.count >= uint32(len(f.keyName)) {
++		f.fail()
++		return "", ErrUpgrade
++	}
++	return windows.UTF16ToString(f.keyName[:f.count]), nil
++}
++func (f *managedObservationFrame) value(h windows.Handle, name string) (string, error) {
++	f.input, f.name = h, name
++	var e error
++	f.wide, e = windows.UTF16FromString(name)
++	if e != nil || !f.begin() {
++		return "", ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.size = uint32(len(f.body))
++	f.raw, _, _ = managedRegQuery.Call(uintptr(h), uintptr(unsafe.Pointer(&f.wide[0])), 0, uintptr(unsafe.Pointer(&f.kind)), uintptr(unsafe.Pointer(&f.body[0])), uintptr(unsafe.Pointer(&f.size)))
++	if uint32(f.raw) != 0 {
++		e = windows.Errno(uint32(f.raw))
++	}
++	e = f.finish(e)
++	if e != nil || f.kind != windows.REG_SZ || f.size < 2 || f.size > uint32(len(f.body)) || f.size%2 != 0 {
++		return "", ErrUpgrade
++	}
++	u := make([]uint16, f.size/2)
++	for n := range u {
++		u[n] = binary.LittleEndian.Uint16(f.body[2*n:])
++	}
++	return freshRuntimeRegistryText(u)
++}
++func (f *managedObservationFrame) version(h windows.Handle) (uint32, error) {
++	f.input, f.name = h, "Version"
++	var e error
++	f.wide, e = windows.UTF16FromString(f.name)
++	if e != nil || !f.begin() {
++		return 0, ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.size = 4
++	f.raw, _, _ = managedRegQuery.Call(uintptr(h), uintptr(unsafe.Pointer(&f.wide[0])), 0, uintptr(unsafe.Pointer(&f.kind)), uintptr(unsafe.Pointer(&f.body[0])), uintptr(unsafe.Pointer(&f.size)))
++	if uint32(f.raw) != 0 {
++		e = windows.Errno(uint32(f.raw))
++	}
++	e = f.finish(e)
++	if e != nil || f.kind != windows.REG_DWORD || f.size != 4 {
++		return 0, ErrUpgrade
++	}
++	return binary.LittleEndian.Uint32(f.body[:4]), nil
++}
++func (f *managedObservationFrame) tokenIdentity(token windows.Token) (windows.LUID, windows.LUID, error) {
++	f.input = windows.Handle(token)
++	if token == 0 || !f.begin() {
++		return windows.LUID{}, windows.LUID{}, ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.raw, _, f.err = managedGetTokenInfo.Call(uintptr(token), windows.TokenStatistics, uintptr(unsafe.Pointer(&f.stats)), unsafe.Sizeof(f.stats), uintptr(unsafe.Pointer(&f.size)))
++	if f.boolReply() != nil || f.size != uint32(unsafe.Sizeof(f.stats)) || f.stats.Type != 1 {
++		return windows.LUID{}, windows.LUID{}, ErrUpgrade
++	}
++	return f.stats.TokenID, f.stats.AuthenticationID, nil
++}
++func (f *managedObservationFrame) identity(h windows.Handle, sid string, directory, private, traversal bool) (runtimeStorageIdentity, error) {
++	var zero runtimeStorageIdentity
++	if f == nil || !f.begin() {
++		return zero, ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.input = h
++	// Reuse unchanged policy and accepted synchronous security-wrapper contract.
++	var facts runtimeStorageRouteFacts
++	var e error
++	if private {
++		e = verifyPrivate(h, sid, directory)
++	} else {
++		facts, e = runtimeStoragePublicPolicyFacts(h, sid, directory, traversal)
++	}
++	if e != nil {
++		f.fail()
++		return zero, ErrUpgrade
++	}
++	if f.fileInformation(h) != nil {
++		return zero, ErrUpgrade
++	}
++	f.sd, f.err = windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	if f.finish(f.err) != nil || f.sd == nil || f.sd.Length() < 20 || f.sd.Length() > 65536 {
++		return zero, ErrUpgrade
++	}
++	control, _, e := f.sd.Control()
++	if e != nil || control&windows.SE_SELF_RELATIVE == 0 {
++		return zero, ErrUpgrade
++	}
++	id := runtimeStorageIdentity{f.info.VolumeSerialNumber, f.info.FileIndexHigh, f.info.FileIndexLow, f.info.FileAttributes, f.info.NumberOfLinks, uint64(f.info.FileSizeHigh)<<32 | uint64(f.info.FileSizeLow), f.info.LastWriteTime, sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(f.sd)), int(f.sd.Length())))}
++	if directory {
++		id.size = 0
++		id.written = windows.Filetime{}
++	}
++	if !private && !runtimeStorageRouteDescriptorMatches(facts, id.descriptor) {
++		return zero, ErrUpgrade
++	}
++	return id, nil
++}
++
++type managedBirthObservationBorrow struct {
++	birth   *ManagedHostagentBirth
++	witness *FreshRuntimeObservation
++	state   managedBirthBorrowState
++	window  managedObservationWindowState
++}
++
++// Context/pointer checks are separate from native original-output operations.
++func managedObservationContext(ctx context.Context) bool { return freshBoundedContext(ctx) }
++
++// These query methods run only below begin() on the original published frame.
++// A false/uncertain query fences before any output inspection. Success ignores
++// stale last-error and normalizes BOOL/DWORD only, never HANDLE/pointer width.
++func (f *managedObservationFrame) boolReply() error {
++	if !f.original() || !f.entered || uint32(f.raw) == 0 {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.err = nil
++	f.returned = true
++	return nil
++}
++func (f *managedObservationFrame) queryReady() bool {
++	if f == nil || !f.original() || !f.entered || f.unknown {
++		return false
++	}
++	f.returned = false
++	return true
++}
++func (f *managedObservationFrame) processID(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedGetPID.Call(uintptr(h))
++	if f.boolReply() != nil {
++		return ErrUpgrade
++	}
++	f.pid = uint32(f.raw)
++	return nil
++}
++func (f *managedObservationFrame) processTimes(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedGetTimes.Call(uintptr(h), uintptr(unsafe.Pointer(&f.created)), uintptr(unsafe.Pointer(&f.exited)), uintptr(unsafe.Pointer(&f.kernel)), uintptr(unsafe.Pointer(&f.user)))
++	return f.boolReply()
++}
++func (f *managedObservationFrame) sessionOf(pid uint32) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.pid = pid
++	f.raw, _, f.err = managedGetSession.Call(uintptr(pid), uintptr(unsafe.Pointer(&f.session)))
++	return f.boolReply()
++}
++func (f *managedObservationFrame) processWait(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedWait.Call(uintptr(h), 0)
++	if !f.original() || !f.entered || uint32(f.raw) != uint32(windows.WAIT_TIMEOUT) && uint32(f.raw) != uint32(windows.WAIT_OBJECT_0) {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.wait = uint32(f.raw)
++	f.err = nil
++	f.returned = true
++	return nil
++}
++func (f *managedObservationFrame) exitStatus(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedGetExit.Call(uintptr(h), uintptr(unsafe.Pointer(&f.exitCode)))
++	return f.boolReply()
++}
++func (f *managedObservationFrame) pipePID(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedGetPipePID.Call(uintptr(h), uintptr(unsafe.Pointer(&f.pid)))
++	return f.boolReply()
++}
++func (f *managedObservationFrame) fileInformation(h windows.Handle) error {
++	if !f.queryReady() {
++		return ErrUpgrade
++	}
++	f.input = h
++	f.raw, _, f.err = managedGetFileInfo.Call(uintptr(h), uintptr(unsafe.Pointer(&f.info)))
++	return f.boolReply()
++}
++func (f *managedObservationFrame) pipeOpen() error {
++	if f == nil || f.resource == nil || f.resource.handle != 0 {
++		return ErrUpgrade
++	}
++	f.name = freshDockerPipe
++	var e error
++	f.wide, e = windows.UTF16FromString(f.name)
++	if e != nil || !f.begin() {
++		return ErrUpgrade
++	}
++	defer f.preservePanic()
++	f.raw, _, f.err = imageOutputCreate.Call(uintptr(unsafe.Pointer(&f.wide[0])), windows.GENERIC_READ|windows.GENERIC_WRITE, 0, 0, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED|windows.SECURITY_SQOS_PRESENT|windows.SECURITY_ANONYMOUS, 0)
++	if !f.original() {
++		f.fail()
++		return ErrUpgrade
++	}
++	if runtimeStorageRealWin32Output(f.raw) {
++		f.resource.handle = windows.Handle(f.raw)
++		f.returned = true
++		return nil
++	}
++	code, ok := f.err.(windows.Errno)
++	if f.raw != ^uintptr(0) || !ok || code == 0 || code == 996 || code == 997 {
++		f.fail()
++		return ErrUpgrade
++	}
++	f.returned = true
++	return code
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows_test.go b/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows_test.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..d3db1e820e75da56a22e9081233046e097a2352e
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_observation_frame_windows_test.go
+@@ -0,0 +1,33 @@
++//go:build windows
++
++package managementconfig
++
++import "testing"
++
++// Compile-only native guard tests. No fabricated native owner reaches a syscall.
++func TestManagedObservationOriginalOwnerRefusals(t *testing.T) {
++	for _, owner := range []any{nil, (*ManagedHostagentBirth)(nil), (*FreshRuntimeObservation)(nil), (*nativeManagedNamespace)(nil), &ManagedHostagentBirth{}, &FreshRuntimeObservation{}, &nativeManagedNamespace{}} {
++		f := newManagedObservationFrame(owner)
++		if f != nil && (f.original() || f.begin()) {
++			t.Fatal("unborn owner accepted")
++		}
++	}
++	b := &ManagedHostagentBirth{}
++	b.self = b
++	f := newManagedObservationFrame(b)
++	if f.original() || f.begin() {
++		t.Fatal("self pointer is not actual launch origin")
++	}
++	n := &nativeManagedNamespace{}
++	n.self = &ManagedRuntimeNamespace{native: n}
++	n.created = &Created{managedNamespace: n.self}
++	f = newManagedObservationFrame(n)
++	if f.original() || f.begin() {
++		t.Fatal("unregistered namespace accepted")
++	}
++	copyBirth := &ManagedHostagentBirth{self: b}
++	f = newManagedObservationFrame(copyBirth)
++	if f.original() || f.begin() {
++		t.Fatal("copied native owner accepted")
++	}
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_pipe_role_windows.go b/rdd/pkg/managementconfig/runtime_managed_pipe_role_windows.go
+new file mode 100644
+index 0000000000000000000000000000000000000000..f17a87e41cedb435e443d5556326723160b81e5a
+--- /dev/null
++++ b/rdd/pkg/managementconfig/runtime_managed_pipe_role_windows.go
+@@ -0,0 +1,68 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"path/filepath"
++	"strings"
++)
++
++// Correlation DATA bound by the actual proxy-launch producer before its real
++// Start. This is NOT guest authentication or a substitute for native lineage.
++type managedPipeRoleData struct {
++	appUID, vmUID, epoch        string
++	appGeneration, vmGeneration int64
++}
++
++func (l *ManagedHostagentLaunch) BindProxyLaunchGeneration(ctx context.Context, appUID, vmUID, epoch string, appGeneration, vmGeneration int64) error {
++	if l == nil || l.self != l || !freshBoundedContext(ctx) {
++		return ErrUpgrade
++	}
++	l.mu.Lock()
++	defer l.mu.Unlock()
++	if l.owner == nil || l.cmd == nil || !l.complete || l.started || l.unknown || l.closeAttempt.attempted || l.pipeRole != nil || appUID == "" || vmUID == "" || len(appUID) > 128 || len(vmUID) > 128 || len(epoch) != 32 || appGeneration < 1 || vmGeneration < 1 {
++		return ErrUpgrade
++	}
++	for _, v := range []string{appUID, vmUID, epoch} {
++		for _, c := range v {
++			if c < 0x21 || c > 0x7e {
++				return ErrUpgrade
++			}
++		}
++	}
++	l.pipeRole = &managedPipeRoleData{appUID: appUID, vmUID: vmUID, epoch: epoch, appGeneration: appGeneration, vmGeneration: vmGeneration}
++	return nil
++}
++func managedActualHostagentCommand(l *ManagedHostagentLaunch) bool {
++	if l == nil || l.owner == nil || l.owner.image == nil || l.cmd == nil {
++		return false
++	}
++	image := l.owner.image
++	if len(image.captureParts) < 5 {
++		return false
++	}
++	path := filepath.Join(append([]string{image.captureVolume}, image.captureParts...)...)
++	home := filepath.Join(append([]string{image.captureVolume}, image.captureParts[:len(image.captureParts)-4]...)...)
++	a := l.cmd.Args
++	if len(a) < 7 || !strings.EqualFold(l.cmd.Path, path) || !strings.EqualFold(a[0], path) || a[1] != "hostagent" || a[2] != "--pidfile" || !strings.EqualFold(a[3], filepath.Join(home, ".rdorbwin", "lima", "orbwin", "ha.pid")) || a[4] != "--socket" || !strings.EqualFold(a[5], filepath.Join(home, ".rdorbwin", "lima", "orbwin", "ha.sock")) {
++		return false
++	}
++	p := 6
++	if p < len(a) && a[p] == "--debug" {
++		p++
++	}
++	if p >= len(a) || a[p] != "orbwin" {
++		return false
++	}
++	p++
++	seen := map[string]bool{}
++	for p < len(a) {
++		if p+1 >= len(a) || (a[p] != "--orbwin-proxy-binding" && a[p] != "--orbwin-native-lifetime") || seen[a[p]] || a[p+1] == "" || len(a[p+1]) > 2048 {
++			return false
++		}
++		seen[a[p]] = true
++		p += 2
++	}
++	return true
++}
+diff --git a/rdd/pkg/managementconfig/runtime_managed_retirement_windows.go b/rdd/pkg/managementconfig/runtime_managed_retirement_windows.go
+index bef9aa6e7ec7e4c60408c8041cca0fc545db51b5..4b8d46dff845e1539246b5abfb3ea5657ca7859f 100644
+--- a/rdd/pkg/managementconfig/runtime_managed_retirement_windows.go
++++ b/rdd/pkg/managementconfig/runtime_managed_retirement_windows.go
+@@ -7,6 +7,7 @@ import (
+ 	"os"
+ 	"runtime"
+ 	"sync"
++	"sync/atomic"
+ 	"unsafe"
+ 
+ 	"golang.org/x/sys/windows"
+@@ -17,13 +18,17 @@ import (
+ // does not certify guest retirement. Only the fixed original launch supplies
+ // os.Process; no PID, callback, hash or decoded native facts are accepted.
+ type ManagedHostagentBirth struct {
++	observationUnknown               atomic.Bool // uncertain source windows fence this SAME birth
++	nativeFrames                     []*managedObservationFrame
++	sourceLaunch                     *ManagedHostagentLaunch
++	observationBorrows               []*managedBirthObservationBorrow
+ 	self                             *ManagedHostagentBirth
+ 	mu                               sync.Mutex
+ 	parent                           *ServingImageLease
+ 	original                         *os.Process
+ 	resources                        []*runtimeStorageResource
+ 	process, image, token, selfToken *runtimeStorageResource
+-	binding                          upgradeObservedImageBinding
++	binding                          managedObservationImageBinding
+ 	pid, session                     uint32
+ 	creation                         uint64
+ 	sid                              string
+@@ -59,8 +64,13 @@ func (b *ManagedHostagentBirth) reply(r *runtimeStorageResource, e error) error
+ // The fixed callback only duplicates the ORIGINAL native handle. WithHandle's
+ // error is separate from the callback/native outcome. It protects its borrowed
+ // handle for the callback duration; we never store or close that borrowed value.
+-func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, original *os.Process) (out *ManagedHostagentBirth, result error) {
+-	if l == nil || l.captureSelf != l || original == nil || !freshBoundedContext(ctx) {
++// A standalone os.Process, including a PID-reopened wrapper, is not launch origin.
++func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, original *os.Process) (*ManagedHostagentBirth, error) {
++	return nil, ErrUpgrade
++}
++
++func (l *ServingImageLease) captureOriginalManagedHostagent(ctx context.Context, original *os.Process, launch *ManagedHostagentLaunch) (out *ManagedHostagentBirth, result error) {
++	if l == nil || l.captureSelf != l || original == nil || launch == nil || launch.self != launch || launch.owner == nil || launch.owner.image != l || launch.cmd == nil || launch.cmd.Process != original || launch.startedOriginal != original || launch.captureOriginal != original || !launch.captureLineage.reserved || launch.captureLineage.attached || launch.captureLineage.unknown || launch.unknown || !launch.complete || !launch.started || !launch.startComplete || launch.birth != nil || !freshBoundedContext(ctx) {
+ 		return nil, ErrUpgrade
+ 	}
+ 	l.mu.Lock()
+@@ -78,8 +88,9 @@ func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, origina
+ 	if len(retained) >= 32 {
+ 		return nil, ErrUpgrade
+ 	}
+-	b := &ManagedHostagentBirth{parent: l, original: original, waitDone: make(chan struct{})}
++	b := &ManagedHostagentBirth{parent: l, original: original, sourceLaunch: launch, waitDone: make(chan struct{})}
+ 	b.self = b
++	b.binding.owner = b
+ 	l.managedBirths = append(l.managedBirths, b) // strong custody BEFORE native output
+ 	out = b
+ 	defer func() {
+@@ -94,7 +105,12 @@ func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, origina
+ 	runtime.LockOSThread()
+ 	defer runtime.UnlockOSThread()
+ 	thread := b.slot()
+-	e := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, (*windows.Token)(unsafe.Pointer(&thread.handle)))
++	frame := newManagedObservationFrame(b)
++	if frame == nil {
++		return b, ErrUpgrade
++	}
++	frame.resource = thread
++	e := frame.token(windows.CurrentThread(), true)
+ 	if b.reply(thread, e) != windows.ERROR_NO_TOKEN {
+ 		return b, ErrUpgrade
+ 	}
+@@ -102,23 +118,44 @@ func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, origina
+ 	b.process = b.slot()
+ 	var duplicateErr error
+ 	withErr := original.WithHandle(func(h uintptr) {
+-		duplicateErr = windows.DuplicateHandle(windows.CurrentProcess(), windows.Handle(h), windows.CurrentProcess(), &b.process.handle, 0, false, windows.DUPLICATE_SAME_ACCESS)
++		frame = newManagedObservationFrame(b)
++		if frame == nil {
++			duplicateErr = ErrUpgrade
++			return
++		}
++		frame.resource = b.process
++		duplicateErr = frame.duplicate(windows.Handle(h))
+ 	})
+ 	if withErr != nil || b.reply(b.process, duplicateErr) != nil {
+ 		return b, ErrUpgrade
+ 	}
+ 	b.image = b.slot()
+-	e = windows.DuplicateHandle(windows.CurrentProcess(), l.chain[len(l.chain)-1], windows.CurrentProcess(), &b.image.handle, 0, false, windows.DUPLICATE_SAME_ACCESS)
++	frame = newManagedObservationFrame(b)
++	if frame == nil {
++		return b, ErrUpgrade
++	}
++	frame.resource = b.image
++	e = frame.duplicate(l.chain[len(l.chain)-1])
+ 	if b.reply(b.image, e) != nil {
+ 		return b, ErrUpgrade
+ 	}
+ 	b.token = b.slot()
+-	e = windows.OpenProcessToken(b.process.handle, windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&b.token.handle)))
++	frame = newManagedObservationFrame(b)
++	if frame == nil {
++		return b, ErrUpgrade
++	}
++	frame.resource = b.token
++	e = frame.token(b.process.handle, false)
+ 	if b.reply(b.token, e) != nil {
+ 		return b, ErrUpgrade
+ 	}
+ 	b.selfToken = b.slot()
+-	e = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, (*windows.Token)(unsafe.Pointer(&b.selfToken.handle)))
++	frame = newManagedObservationFrame(b)
++	if frame == nil {
++		return b, ErrUpgrade
++	}
++	frame.resource = b.selfToken
++	e = frame.token(windows.CurrentProcess(), false)
+ 	if b.reply(b.selfToken, e) != nil {
+ 		return b, ErrUpgrade
+ 	}
+@@ -127,30 +164,64 @@ func (l *ServingImageLease) CaptureManagedHostagent(ctx context.Context, origina
+ 		return b, ErrUpgrade
+ 	}
+ 	b.sid = user.User.Sid.String()
+-	pid, e := windows.GetProcessId(b.process.handle)
+-	var created, exit, kernel, userTime windows.Filetime
+-	if e != nil || pid == 0 || pid == windows.GetCurrentProcessId() || windows.ProcessIdToSessionId(pid, &b.session) != nil || b.session == 0 || windows.GetProcessTimes(b.process.handle, &created, &exit, &kernel, &userTime) != nil {
++	q := newManagedObservationFrame(b)
++	if q == nil || !q.begin() {
++		return b, ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.input = b.process.handle
++	q.err = q.processID(q.input)
++	if q.finish(q.err) != nil || q.pid == 0 || q.pid == windows.GetCurrentProcessId() {
++		return b, ErrUpgrade
++	}
++	q.err = q.sessionOf(q.pid)
++	if q.finish(q.err) != nil || q.session == 0 {
++		return b, ErrUpgrade
++	}
++	q.err = q.processTimes(q.input)
++	if q.finish(q.err) != nil {
+ 		return b, ErrUpgrade
+ 	}
+-	b.pid = pid
+-	b.creation = uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+-	var parentCreated windows.Filetime
+-	if windows.GetProcessTimes(windows.CurrentProcess(), &parentCreated, &exit, &kernel, &userTime) != nil || b.creation < uint64(parentCreated.HighDateTime)<<32|uint64(parentCreated.LowDateTime) {
++	b.pid, b.session, b.creation = q.pid, q.session, uint64(q.created.HighDateTime)<<32|uint64(q.created.LowDateTime)
++	parent := newManagedObservationFrame(b)
++	if parent == nil || !parent.begin() {
+ 		return b, ErrUpgrade
+ 	}
+-	var selfSession uint32
+-	if b.creation == 0 || windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &selfSession) != nil || selfSession != b.session || legacySDKOrdinaryToken(windows.Token(b.token.handle), b.sid, b.session) != nil || legacySDKOrdinaryToken(windows.Token(b.selfToken.handle), b.sid, b.session) != nil {
++	defer parent.preservePanic()
++	parent.err = parent.processTimes(windows.CurrentProcess())
++	if parent.finish(parent.err) != nil || b.creation < uint64(parent.created.HighDateTime)<<32|uint64(parent.created.LowDateTime) {
+ 		return b, ErrUpgrade
+ 	}
+-	var basic windows.PROCESS_BASIC_INFORMATION
+-	var size uint32
+-	if windows.NtQueryInformationProcess(b.process.handle, 0, unsafe.Pointer(&basic), uint32(unsafe.Sizeof(basic)), &size) != nil || size != uint32(unsafe.Sizeof(basic)) || basic.UniqueProcessId != uintptr(pid) || basic.InheritedFromUniqueProcessId != uintptr(windows.GetCurrentProcessId()) || b.binding.capture(b.process.handle, b.image.handle) != nil || ctx.Err() != nil {
++	parent.err = parent.sessionOf(windows.GetCurrentProcessId())
++	if parent.finish(parent.err) != nil || b.creation == 0 || parent.session != b.session || legacySDKOrdinaryToken(windows.Token(b.token.handle), b.sid, b.session) != nil || legacySDKOrdinaryToken(windows.Token(b.selfToken.handle), b.sid, b.session) != nil {
+ 		return b, ErrUpgrade
+ 	}
+-	state, e := windows.WaitForSingleObject(b.process.handle, 0)
+-	if e != nil || state != uint32(windows.WAIT_TIMEOUT) || ctx.Err() != nil {
++	basic := newManagedObservationFrame(b)
++	if basic == nil || !basic.begin() {
+ 		return b, ErrUpgrade
+ 	}
++	defer basic.preservePanic()
++	basic.input = b.process.handle
++	basic.raw, _, _ = modernIncomingQueryProcess.Call(uintptr(basic.input), 0, uintptr(unsafe.Pointer(&basic.basic)), unsafe.Sizeof(basic.basic), uintptr(unsafe.Pointer(&basic.size)))
++	runtime.KeepAlive(basic)
++	if !basic.original() || uint32(basic.raw) != 0 {
++		basic.fail()
++		return b, ErrUpgrade
++	}
++	basic.returned = true
++	if basic.size != uint32(unsafe.Sizeof(basic.basic)) || basic.basic.UniqueProcessId != uintptr(b.pid) || basic.basic.InheritedFromUniqueProcessId != uintptr(windows.GetCurrentProcessId()) || b.binding.capture(b.process.handle, b.image.handle) != nil || ctx.Err() != nil {
++		return b, ErrUpgrade
++	}
++	q = newManagedObservationFrame(b)
++	if q == nil || !q.begin() {
++		return b, ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.err = q.processWait(b.process.handle)
++	if q.finish(q.err) != nil || q.wait != uint32(windows.WAIT_TIMEOUT) || ctx.Err() != nil {
++		return b, ErrUpgrade
++	}
++
+ 	b.complete = true
+ 	return b, nil
+ }
+@@ -161,7 +232,7 @@ func (b *ManagedHostagentBirth) closedForParent(parent *ServingImageLease) bool
+ 	}
+ 	b.mu.Lock()
+ 	defer b.mu.Unlock()
+-	if b.unknown || !b.closeAttempt.attempted || b.closeAttempt.closeErr != nil {
++	if b.unknown || b.observationUnknown.Load() || !b.closeAttempt.attempted || b.closeAttempt.closeErr != nil {
+ 		return false
+ 	}
+ 	for _, r := range b.resources {
+@@ -208,18 +279,31 @@ func (b *ManagedHostagentBirth) CheckExited(ctx context.Context) (result error)
+ 			result = ErrUpgrade
+ 		}
+ 	}()
+-	if !b.complete || b.unknown || b.parent == nil || b.parent.managedUnknown.Load() || !runtimeStorageDomainKnown() || b.closeAttempt.attempted || b.process == nil || b.process.handle == 0 {
++	if !b.complete || b.unknown || b.observationUnknown.Load() || b.parent == nil || b.parent.managedUnknown.Load() || !runtimeStorageDomainKnown() || b.closeAttempt.attempted || b.process == nil || b.process.handle == 0 {
+ 		return ErrUpgrade
+ 	}
+-	state, e := windows.WaitForSingleObject(b.process.handle, 0)
++	q := newManagedObservationFrame(b)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.err = q.processWait(b.process.handle)
++	q.returned = true
++	state, e := q.wait, q.err
+ 	if b.waitReply(state, e) != nil {
+ 		return ErrUpgrade
+ 	}
+-	var code uint32
+-	if b.queryReply(windows.GetExitCodeProcess(b.process.handle, &code)) != nil {
++	q = newManagedObservationFrame(b)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.err = q.exitStatus(b.process.handle)
++	q.returned = true
++	if b.queryReply(q.err) != nil {
+ 		return ErrUpgrade
+ 	}
+-	if code != 0 {
++	if q.exitCode != 0 {
+ 		return ErrUpgrade
+ 	}
+ 	if b.queryReply(b.binding.same()) != nil || ctx.Err() != nil {
+@@ -245,9 +329,14 @@ func (b *ManagedHostagentBirth) Close() (result error) {
+ 			result = ErrUpgrade
+ 		}
+ 	}()
+-	if b.unknown {
++	if b.unknown || b.observationUnknown.Load() {
+ 		return ErrUpgrade
+ 	}
++	for _, edge := range b.observationBorrows {
++		if edge == nil || edge.birth != b || !edge.window.idleKnown() {
++			return ErrUpgrade
++		}
++	}
+ 	if b.closeAttempt.attempted {
+ 		return b.closeAttempt.closeErr
+ 	}
+@@ -257,7 +346,14 @@ func (b *ManagedHostagentBirth) Close() (result error) {
+ 	if b.process == nil || b.process.handle == 0 {
+ 		return ErrUpgrade
+ 	}
+-	state, e := windows.WaitForSingleObject(b.process.handle, 0)
++	q := newManagedObservationFrame(b)
++	if q == nil || !q.begin() {
++		return ErrUpgrade
++	}
++	defer q.preservePanic()
++	q.err = q.processWait(b.process.handle)
++	q.returned = true
++	state, e := q.wait, q.err
+ 	if b.waitReply(state, e) != nil {
+ 		return ErrUpgrade
+ 	}
+diff --git a/rdd/pkg/networkproxy/hostagent_launch_windows.go b/rdd/pkg/networkproxy/hostagent_launch_windows.go
+index 48fc710438cbec61804d8a0ace5583b4f6c847e8..89e82eef6bd7f103ef064e8d710cb65e9cc348d5 100644
+--- a/rdd/pkg/networkproxy/hostagent_launch_windows.go
++++ b/rdd/pkg/networkproxy/hostagent_launch_windows.go
+@@ -82,6 +82,9 @@ func startHostagentObserved(ctx context.Context, cmd *exec.Cmd, serving *Serving
+ 		if e != nil {
+ 			return nil, startBare()
+ 		}
++		if launch.BindProxyLaunchGeneration(ctx, metadata.AppUID, metadata.LimaUID, metadata.Epoch, owner.Generation, vm.Generation) != nil {
++			return nil, ErrManagement
++		}
+ 		cmd.Args = append(cmd.Args, "--orbwin-proxy-binding", argument)
+ 		err = launch.Start(ctx, real)
+ 		bound = err == nil

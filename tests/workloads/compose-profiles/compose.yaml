@@ -1,0 +1,18 @@
+services:
+  app:
+    image: alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+    command: ["sleep", "300"]
+    environment:
+      MERGE_MARKER: base
+    volumes:
+      - data:/data
+  debug:
+    image: alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+    command: ["sleep", "300"]
+    profiles: [dev]
+  hidden:
+    image: alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+    command: ["sleep", "300"]
+    profiles: [hidden]
+volumes:
+  data:

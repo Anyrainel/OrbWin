@@ -1,4 +1,6 @@
 import {
+  composeSpec,
+  wslComposeSpec,
   containerActionSpec,
   removalDescriptions,
   removalRequest,
@@ -8,7 +10,10 @@ import {
   type OperationSpec,
 } from "../Operations";
 import {
-  composeFile,
+  composeInputs,
+  composeServiceInputs,
+  wslComposeInputs,
+  labels,
   containerActionUnavailable,
   containerRemovalUnavailable,
   isRunning,
@@ -75,6 +80,33 @@ function removeSpec(page: Page, rows: Row[], note = ""): OperationSpec {
 export function actionsFor(page: Page, rows: Row[]): Action[] {
   if (!rows.length) return [];
   const actions: Action[] = [];
+  if (page === "volumes" && rows.length === 1) {
+    const volume = String(rows[0].Name ?? "");
+    actions.push({
+      id: "clone-volume",
+      label: "Clone volume…",
+      spec: {
+        title: `Clone ${volume}`,
+        request: { kind: "cloneVolume", volume, name: "" },
+        description:
+          "Creates a full verified copy in a distinct new local volume. Stop writable users during snapshot capture; no workload is stopped automatically. Uses the same 64-GiB/100,000-entry portable metadata rules as export/restore. Allow a full guest copy plus metadata and roughly twice the payload size in temporary host staging. This is not copy-on-write. Interrupted copies retain a snapshot and/or isolated pending destination for explicit recovery.",
+        fields: [{ key: "name", label: "New volume name" }],
+      },
+    });
+    actions.push({
+      id: "export-volume",
+      label: "Export portable data…",
+      spec: {
+        title: `Export ${volume}`,
+        request: { kind: "exportVolume", volume, destination: "" },
+        description:
+          "Stop writable users before exporting. Reads this ordinary local volume without changing it; external clients must keep it quiesced. Creates a new checksummed portable package, never overwriting a file. Supports up to 64 GiB and 100,000 entries, numeric ownership, modes, modification times and contained relative links. Extended attributes/ACLs, devices and escaping links refuse. Data may contain secrets. Host staging needs roughly twice the data size; interruption can retain named partial files.",
+        fields: [
+          { key: "destination", label: "New Windows package file", save: true },
+        ],
+      },
+    });
+  }
   if (page === "containers") {
     const stopped = rows.filter((row) => !containerRemovalUnavailable(row));
     const activeCount = rows.length - stopped.length;
@@ -132,6 +164,49 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
               "Stop active containers and verify their state before removing them.",
           },
     );
+    if (rows.length === 1) {
+      const inputs = composeServiceInputs(rows[0]);
+      if (inputs)
+        for (const action of ["logs", "up", "pull"] as const)
+          actions.push({
+            id: `compose-service-${action}`,
+            label: `Compose service ${action}…`,
+            spec: composeSpec(
+              action,
+              inputs,
+              "Selects the exact service label reported by this container, including its replicas. Up may also start dependencies and may recreate containers; this does not target only the selected container.",
+            ),
+          });
+      const wsl = wslComposeInputs(
+        labels(rows[0])["com.docker.compose.project"],
+        [rows[0]],
+      );
+      const service = labels(rows[0])["com.docker.compose.service"];
+      if (
+        wsl &&
+        wsl.signature &&
+        service &&
+        /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(service) &&
+        labels(rows[0])["com.docker.compose.oneoff"]?.toLowerCase() !== "true"
+      ) {
+        for (const action of ["logs", "up", "pull"] as const)
+          actions.push({
+            id: `wsl-compose-service-${action}`,
+            label: `WSL service ${action}…`,
+            spec: wslComposeSpec(wsl.distribution, wsl.source, action, {
+              ...wsl,
+              services: [service],
+            }),
+          });
+      }
+      if (wsl && !wsl.signature)
+        actions.push({
+          id: "wsl-review-connection",
+          label: "WSL service actions…",
+          unavailable:
+            "These older project labels have no source identity. Inspect the intended project in WSL distributions before running its Compose workflow.",
+        });
+    }
     return actions;
   }
   if (page === "images" && rows.length === 1) {
@@ -145,6 +220,24 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
       label: "Run…",
       spec: runContainerSpec(reference),
     });
+    actions.push({
+      id: "export-image",
+      label: "Export image archive…",
+      spec: {
+        title: `Export ${reference}`,
+        request: {
+          kind: "exportImage",
+          image: String(row.ID),
+          reference,
+          destination: "",
+        },
+        description:
+          "Saves the reviewed image to a new uncompressed Docker .tar archive, up to 64 GiB. Verifies config and layer identities before publication. Existing files are never replaced. Allow space for the full archive plus headroom. Source images/tags are unchanged. Untagged exports retain content IDs; architectures in an archive do not imply runtime emulation support. Cancellation can leave a named partial file for inspection.",
+        fields: [
+          { key: "destination", label: "New .tar archive path", save: true },
+        ],
+      },
+    });
   }
   actions.push({
     id: "remove",
@@ -155,39 +248,65 @@ export function actionsFor(page: Page, rows: Row[]): Action[] {
   return actions;
 }
 
-// Compose-level actions only when the engine recorded one Windows Compose file;
-// otherwise the group acts through its listed containers and says so.
+// Discovery only prefills an editable review; inconsistent metadata never chooses a winner.
 export function groupActions(project: string, rows: Row[]): Action[] {
-  const file = composeFile(rows);
+  const wsl = wslComposeInputs(project, rows);
+  if (wsl && !wsl.signature)
+    return [
+      ...actionsFor("containers", rows).filter(
+        (action) => !action.port && !action.copy,
+      ),
+      {
+        id: "wsl-review-connection",
+        label: "WSL Compose actions…",
+        unavailable:
+          "These older project labels have no source identity. Inspect the intended project in WSL distributions before running its Compose workflow.",
+      },
+    ];
+  if (wsl)
+    return [
+      ...actionsFor("containers", rows).filter(
+        (action) => !action.port && !action.copy,
+      ),
+      ...(["validate", "up", "pull", "logs", "down"] as const).map(
+        (action) => ({
+          id: `wsl-compose-${action}`,
+          label: `WSL Compose ${action}…`,
+          destructive: action === "down",
+          spec: wslComposeSpec(wsl.distribution, wsl.source, action, wsl),
+        }),
+      ),
+    ];
+  const inputs = composeInputs(project, rows);
   const compose = (
-    action: "logs" | "down",
+    action: "validate" | "up" | "pull" | "logs" | "down",
     label: string,
-    destructive = false,
-  ): Action =>
-    file
-      ? {
-          id: `compose-${action}`,
-          label,
-          destructive,
-          spec: {
-            title: `Compose ${action} ${project}${destructive ? "?" : ""}`,
-            request: { kind: "compose", file, project, action },
-            destructive,
-            description: `Uses the Compose file recorded by the engine: ${file}. If it was moved, edited or deleted, the command fails or applies the current file.${destructive ? " Stops and removes this project's containers and networks. Volumes are retained." : ""}`,
-          },
-        }
-      : {
-          id: `compose-${action}`,
-          label,
-          destructive,
-          unavailable:
-            "The engine did not record a single Windows Compose file for this project. Use per-container actions instead.",
-        };
+  ): Action => ({
+    id: `compose-${action}`,
+    label,
+    destructive: action === "down",
+    spec: composeSpec(
+      action,
+      inputs ?? {
+        project,
+        file: "",
+        overrides: [],
+        profiles: [],
+        directory: "",
+      },
+      inputs
+        ? "Prefilled from consistent engine labels. Profiles are not inferred from running services."
+        : "Project labels are missing, conflicting, ambiguous or use unsupported paths/environment files. Supply the intended project inputs explicitly; per-container actions remain available.",
+    ),
+  });
   return [
     ...actionsFor("containers", rows).filter(
       (action) => !action.port && !action.copy,
     ),
+    compose("validate", "Validate project…"),
+    compose("up", "Compose up…"),
+    compose("pull", "Pull project images…"),
     compose("logs", "Project logs…"),
-    compose("down", "Compose down…", true),
+    compose("down", "Compose down…"),
   ];
 }

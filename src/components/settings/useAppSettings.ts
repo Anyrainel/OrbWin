@@ -69,7 +69,11 @@ export function useAppSettings() {
   useEffect(() => {
     const changed = () => void reload();
     window.addEventListener("orbwin:cluster-changed", changed);
-    return () => window.removeEventListener("orbwin:cluster-changed", changed);
+    window.addEventListener("orbwin:app-settings-changed", changed);
+    return () => {
+      window.removeEventListener("orbwin:cluster-changed", changed);
+      window.removeEventListener("orbwin:app-settings-changed", changed);
+    };
   }, [reload]);
   return { read, reload };
 }

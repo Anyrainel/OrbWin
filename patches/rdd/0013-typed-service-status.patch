@@ -1,0 +1,790 @@
+diff --git a/rdd/cmd/rdd/service.go b/rdd/cmd/rdd/service.go
+index 4f28f64c0..c986c00a9 100644
+--- a/rdd/cmd/rdd/service.go
++++ b/rdd/cmd/rdd/service.go
+@@ -6,6 +6,7 @@ package main
+ 
+ import (
+ 	"context"
++	"encoding/json"
+ 	"fmt"
+ 	"path/filepath"
+ 	"strconv"
+@@ -391,7 +392,17 @@ func newServiceStatusCommand() *cobra.Command {
+ 	command := &cobra.Command{
+ 		Use:  "status",
+ 		Long: "Show control plane status",
+-		RunE: func(*cobra.Command, []string) error {
++		RunE: func(cmd *cobra.Command, _ []string) error {
++			output, err := cmd.Flags().GetString("output")
++			if err != nil {
++				return err
++			}
++			if output == "json" {
++				return json.NewEncoder(cmd.OutOrStdout()).Encode(service.ReadOnlyStatus())
++			}
++			if output != "" {
++				return fmt.Errorf("unsupported status output format %q", output)
++			}
+ 			logrus.SetLevel(logrus.InfoLevel)
+ 			logrus.Infof("%q control plane has been created: %v", instance.Name(), service.Exists())
+ 			logrus.Infof("%q control plane has been started: %v", instance.Name(), service.Running())
+@@ -402,6 +413,8 @@ func newServiceStatusCommand() *cobra.Command {
+ 			return nil
+ 		},
+ 	}
++	command.Args = cobra.NoArgs
++	command.Flags().String("output", "", "Output format: json (nonmutating diagnostic observation)")
+ 	return command
+ }
+ 
+diff --git a/rdd/pkg/service/cmd/service.go b/rdd/pkg/service/cmd/service.go
+index 4c6f46840..8ab8a94b7 100644
+--- a/rdd/pkg/service/cmd/service.go
++++ b/rdd/pkg/service/cmd/service.go
+@@ -705,6 +705,13 @@ func NewServeCommand(ctx context.Context) *cobra.Command {
+ 				return fmt.Errorf("failed to write %q: %w", instance.PIDFile(), err)
+ 			}
+ 
++			// Diagnostic failure must not prevent the existing lifecycle from running.
++			if release, observeErr := registerServiceObservation(); observeErr != nil {
++				logrus.WithError(observeErr).Warn("Read-only process generation evidence unavailable")
++			} else {
++				defer release()
++			}
++
+ 			verflag.PrintAndExitIfRequested()
+ 			fs := cmd.Flags()
+ 
+diff --git a/rdd/pkg/service/cmd/status_readonly.go b/rdd/pkg/service/cmd/status_readonly.go
+new file mode 100644
+index 000000000..e4a881245
+--- /dev/null
++++ b/rdd/pkg/service/cmd/status_readonly.go
+@@ -0,0 +1,270 @@
++// SPDX-License-Identifier: Apache-2.0
++package service
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"runtime"
++	"strconv"
++	"strings"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/instance"
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/util/process"
++)
++
++const diagnosticGeneration = "rdd-service-identity-v1"
++
++type generationReceipt struct {
++	Schema     int                        `json:"schema"`
++	Generation string                     `json:"generation"`
++	Instance   string                     `json:"instance"`
++	Directory  string                     `json:"directory"`
++	PID        int                        `json:"pid"`
++	Identity   process.DiagnosticIdentity `json:"identity"`
++}
++
++// ServiceObservation is an instantaneous diagnostic observation, not a desired
++// state or authorization token. Unknown must never cause automatic service start.
++type ServiceObservation struct {
++	Schema     int    `json:"schema"`
++	Generation string `json:"generation"`
++	Instance   string `json:"instance"`
++	Directory  string `json:"directory"`
++	Executable string `json:"executable"`
++	PID        int    `json:"pid"`
++	State      string `json:"state"`
++	Reason     string `json:"reason"`
++}
++
++func generationPath() string { return filepath.Join(instance.Dir(), "status-generation.json") }
++
++func registerServiceObservation() (func(), error) {
++	if runtime.GOOS != "windows" {
++		return func() {}, nil
++	}
++	identity, release, err := process.RegisterDiagnosticIdentity(instance.Dir())
++	if err != nil {
++		return nil, err
++	}
++	if err = writeGenerationReceipt(identity); err != nil {
++		release()
++		return nil, err
++	}
++	return release, nil
++}
++
++// writeGenerationReceipt is called only by the already-starting serve process.
++// Existing lifecycle code neither reads nor relies on this diagnostic receipt.
++func writeGenerationReceipt(identity process.DiagnosticIdentity) error {
++	directory, err := filepath.EvalSymlinks(instance.Dir())
++	if err != nil {
++		return err
++	}
++	receipt := generationReceipt{1, diagnosticGeneration, instance.Name(), directory, os.Getpid(), identity}
++	return persistGenerationReceipt(directory, receipt)
++}
++
++func persistGenerationReceipt(directory string, receipt generationReceipt) error {
++	data, err := json.Marshal(receipt)
++	if err != nil {
++		return err
++	}
++	file, err := os.CreateTemp(directory, ".status-generation-")
++	if err != nil {
++		return err
++	}
++	path := file.Name()
++	defer os.Remove(path)
++	if err = file.Chmod(0600); err == nil {
++		_, err = file.Write(append(data, '\n'))
++	}
++	if err == nil {
++		err = file.Sync()
++	}
++	closeErr := file.Close()
++	if err == nil {
++		err = closeErr
++	}
++	if err != nil {
++		return err
++	}
++	// Windows replacement is not claimed as an atomic/durable transaction. Any
++	// missing/partial/concurrent receipt is rejected by the read-only observer.
++	return os.Rename(path, filepath.Join(directory, "status-generation.json"))
++}
++
++func boundedOrdinaryRead(path string, limit int64) ([]byte, error) {
++	return boundedOrdinaryReadUsing(path, limit, io.ReadAll)
++}
++func boundedOrdinaryReadUsing(path string, limit int64, read func(io.Reader) ([]byte, error)) ([]byte, error) {
++	info, err := os.Lstat(path)
++	if err != nil {
++		return nil, err
++	}
++	if !info.Mode().IsRegular() {
++		return nil, fmt.Errorf("nonregular diagnostic file")
++	}
++	file, err := os.Open(path)
++	if err != nil {
++		return nil, err
++	}
++	defer file.Close()
++	opened, err := file.Stat()
++	if err != nil {
++		return nil, err
++	}
++	if !sameDiagnosticMetadata(info, opened) {
++		return nil, fmt.Errorf("diagnostic file changed during open")
++	}
++	bytes, err := read(io.LimitReader(file, limit+1))
++	if err != nil {
++		return nil, err
++	}
++	if int64(len(bytes)) > limit {
++		return nil, fmt.Errorf("diagnostic file too large")
++	}
++	after, err := file.Stat()
++	if err != nil {
++		return nil, err
++	}
++	current, err := os.Lstat(path)
++	if err != nil {
++		return nil, err
++	}
++	if !sameDiagnosticMetadata(opened, after) || !sameDiagnosticMetadata(after, current) || int64(len(bytes)) != after.Size() {
++		return nil, fmt.Errorf("diagnostic file changed during read")
++	}
++	return bytes, nil
++}
++func sameDiagnosticMetadata(a, b os.FileInfo) bool {
++	return a.Mode().IsRegular() && b.Mode().IsRegular() && os.SameFile(a, b) && a.Size() == b.Size() && a.Mode() == b.Mode() && a.ModTime().Equal(b.ModTime())
++}
++
++// Schema-specific objects reject duplicate, case-aliased and unknown keys before
++// typed decoding. There are only two object layers in this bounded receipt.
++func receiptObject(raw []byte, allowed ...string) (map[string]json.RawMessage, error) {
++	dec := json.NewDecoder(bytes.NewReader(raw))
++	token, err := dec.Token()
++	if err != nil || token != json.Delim('{') {
++		return nil, fmt.Errorf("receipt object required")
++	}
++	keys := map[string]bool{}
++	for _, key := range allowed {
++		keys[key] = true
++	}
++	out := map[string]json.RawMessage{}
++	for dec.More() {
++		token, err := dec.Token()
++		if err != nil {
++			return nil, err
++		}
++		key, ok := token.(string)
++		if !ok || !keys[key] {
++			return nil, fmt.Errorf("unknown receipt field")
++		}
++		if _, exists := out[key]; exists {
++			return nil, fmt.Errorf("duplicate receipt field")
++		}
++		var value json.RawMessage
++		if err := dec.Decode(&value); err != nil {
++			return nil, err
++		}
++		out[key] = value
++	}
++	if _, err = dec.Token(); err != nil {
++		return nil, err
++	}
++	if err = dec.Decode(new(any)); err != io.EOF {
++		return nil, fmt.Errorf("multiple receipts")
++	}
++	return out, nil
++}
++func validateReceiptObjects(raw []byte) error {
++	object, err := receiptObject(raw, "schema", "generation", "instance", "directory", "pid", "identity")
++	if err != nil {
++		return err
++	}
++	_, err = receiptObject(object["identity"], "executable", "created")
++	return err
++}
++
++func sameDiagnosticPath(a, b string) bool {
++	if runtime.GOOS == "windows" {
++		return strings.EqualFold(a, b)
++	}
++	return a == b
++}
++
++// observeService has read-only dependencies, permitting faults without process
++// mutation in tests. In particular it never calls PID(), Running(), or Start().
++func observeService(directory, image, name string, read func(string, int64) ([]byte, error), probe func(string, int, process.DiagnosticIdentity) (string, string)) ServiceObservation {
++	out := ServiceObservation{Schema: 1, Generation: diagnosticGeneration, Instance: name, Directory: directory, Executable: image, State: "unknown", Reason: "generationUnavailable"}
++	before, err := read(filepath.Join(directory, "status-generation.json"), 4096)
++	if err != nil {
++		return out
++	}
++	if err := validateReceiptObjects(before); err != nil {
++		out.Reason = "generationMalformed"
++		return out
++	}
++	var receipt generationReceipt
++	decoder := json.NewDecoder(bytes.NewReader(before))
++	decoder.DisallowUnknownFields()
++	if err = decoder.Decode(&receipt); err != nil {
++		out.Reason = "generationMalformed"
++		return out
++	}
++	if err = decoder.Decode(new(any)); err != io.EOF {
++		out.Reason = "generationMalformed"
++		return out
++	}
++	if receipt.Schema != 1 || receipt.Generation != diagnosticGeneration || receipt.Instance != name || !sameDiagnosticPath(receipt.Directory, directory) || !sameDiagnosticPath(receipt.Identity.Executable, image) || receipt.PID <= 0 || receipt.Identity.Created == 0 {
++		out.Reason = "generationIdentityMismatch"
++		return out
++	}
++	pidBefore, err := read(filepath.Join(directory, "rdd.pid"), 64)
++	if err != nil {
++		out.Reason = "pidUnavailable"
++		return out
++	}
++	pid, err := strconv.Atoi(string(pidBefore))
++	if err != nil || pid != receipt.PID {
++		out.Reason = "pidMismatch"
++		return out
++	}
++	out.PID = pid
++	state, reason := probe(directory, pid, receipt.Identity)
++	pidAfter, pidErr := read(filepath.Join(directory, "rdd.pid"), 64)
++	after, receiptErr := read(filepath.Join(directory, "status-generation.json"), 4096)
++	if pidErr != nil || receiptErr != nil || !bytes.Equal(pidBefore, pidAfter) || !bytes.Equal(before, after) {
++		out.Reason = "diagnosticChangedDuringProbe"
++		return out
++	}
++	if state != "running" && state != "stopped" && state != "unknown" {
++		out.Reason = "invalidProcessObservation"
++		return out
++	}
++	out.State, out.Reason = state, reason
++	return out
++}
++
++func ReadOnlyStatus() ServiceObservation {
++	out := ServiceObservation{Schema: 1, Generation: diagnosticGeneration, Instance: instance.Name(), State: "unknown", Reason: "identityPathsUnavailable"}
++	directory, err := filepath.EvalSymlinks(instance.Dir())
++	if err != nil {
++		return out
++	}
++	image, err := os.Executable()
++	if err != nil {
++		return out
++	}
++	image, err = filepath.EvalSymlinks(image)
++	if err != nil {
++		return out
++	}
++	return observeService(directory, image, instance.Name(), boundedOrdinaryRead, process.ProbeDiagnosticIdentity)
++}
+diff --git a/rdd/pkg/service/cmd/status_readonly_test.go b/rdd/pkg/service/cmd/status_readonly_test.go
+new file mode 100644
+index 000000000..c9d0e8cca
+--- /dev/null
++++ b/rdd/pkg/service/cmd/status_readonly_test.go
+@@ -0,0 +1,245 @@
++// SPDX-License-Identifier: Apache-2.0
++package service
++
++import (
++	"encoding/json"
++	"errors"
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/util/process"
++	"io"
++	"os"
++	"path/filepath"
++	"reflect"
++	"strings"
++	"syscall"
++	"testing"
++)
++
++func TestReadOnlyGenerationFailuresAndObservations(t *testing.T) {
++	directory := filepath.Join(t.TempDir(), "home")
++	image := filepath.Join(directory, "rdd.exe")
++	receipt := generationReceipt{1, diagnosticGeneration, "rancher-desktop-orbwin", directory, 123, process.DiagnosticIdentity{Executable: image, Created: 456}}
++	bytes, _ := json.Marshal(receipt)
++	for _, test := range []struct {
++		name, expected string
++		alter          func(map[string][]byte)
++		readErr        error
++		state, reason  string
++		change         bool
++	}{
++		{name: "running", expected: "running", state: "running", reason: "identityVerified"},
++		{name: "confirmed supported generation exited", expected: "stopped", state: "stopped", reason: "processExited"},
++		{name: "legacy missing receipt", expected: "unknown", alter: func(files map[string][]byte) { delete(files, "status-generation.json") }},
++		{name: "missing PID", expected: "unknown", alter: func(files map[string][]byte) { delete(files, "rdd.pid") }},
++		{name: "malformed PID", expected: "unknown", alter: func(files map[string][]byte) { files["rdd.pid"] = []byte("bad") }},
++		{name: "foreign PID", expected: "unknown", alter: func(files map[string][]byte) { files["rdd.pid"] = []byte("999") }},
++		{name: "malformed receipt", expected: "unknown", alter: func(files map[string][]byte) { files["status-generation.json"] = []byte("{") }},
++		{name: "foreign receipt", expected: "unknown", alter: func(files map[string][]byte) {
++			foreign := receipt
++			foreign.Directory = "foreign"
++			files["status-generation.json"], _ = json.Marshal(foreign)
++		}},
++		{name: "permission denied", expected: "unknown", readErr: os.ErrPermission},
++		{name: "process access denied", expected: "unknown", state: "unknown", reason: "processInspectionFailed"},
++		{name: "recycled PID", expected: "unknown", state: "unknown", reason: "processIdentityMismatch"},
++		{name: "legacy live process", expected: "unknown", state: "unknown", reason: "ownershipMarkerUnavailable"},
++		{name: "changed during probe", expected: "unknown", state: "running", reason: "identityVerified", change: true},
++	} {
++		t.Run(test.name, func(t *testing.T) {
++			files := map[string][]byte{"status-generation.json": bytes, "rdd.pid": []byte("123")}
++			if test.alter != nil {
++				test.alter(files)
++			}
++			original := map[string][]byte{}
++			for name, bytes := range files {
++				original[name] = append([]byte{}, bytes...)
++			}
++			probed := false
++			read := func(path string, _ int64) ([]byte, error) {
++				if test.readErr != nil {
++					return nil, test.readErr
++				}
++				name := filepath.Base(path)
++				bytes, ok := files[name]
++				if !ok {
++					return nil, os.ErrNotExist
++				}
++				if test.change && probed && name == "rdd.pid" {
++					return []byte("124"), nil
++				}
++				return bytes, nil
++			}
++			out := observeService(directory, image, receipt.Instance, read, func(string, int, process.DiagnosticIdentity) (string, string) {
++				probed = true
++				return test.state, test.reason
++			})
++			if out.State != test.expected {
++				t.Fatal(out)
++			}
++			if !reflect.DeepEqual(files, original) {
++				t.Fatal("probe changed diagnostic files")
++			}
++		})
++	}
++}
++
++func TestBoundedOrdinaryReadNeverDeletesMalformedOrSymlinkFiles(t *testing.T) {
++	directory := t.TempDir()
++	pid := filepath.Join(directory, "rdd.pid")
++	data := []byte("not a PID")
++	if err := os.WriteFile(pid, data, 0600); err != nil {
++		t.Fatal(err)
++	}
++	if got, err := boundedOrdinaryRead(pid, 64); err != nil || string(got) != string(data) {
++		t.Fatal(string(got), err)
++	}
++	if _, err := boundedOrdinaryRead(pid, 1); err == nil {
++		t.Fatal("unbounded read")
++	}
++	if got, err := os.ReadFile(pid); err != nil || string(got) != string(data) {
++		t.Fatal("file changed", err)
++	}
++	if _, err := boundedOrdinaryRead(filepath.Join(directory, "missing"), 64); !errors.Is(err, os.ErrNotExist) {
++		t.Fatal(err)
++	}
++	if _, err := boundedOrdinaryRead(directory, 64); err == nil {
++		t.Fatal("directory accepted")
++	}
++	link := filepath.Join(directory, "linked.pid")
++	if err := os.Symlink(pid, link); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := boundedOrdinaryRead(link, 64); err == nil {
++		t.Fatal("symlink accepted")
++	}
++	if got, err := os.ReadFile(pid); err != nil || string(got) != string(data) {
++		t.Fatal("symlink target changed", err)
++	}
++}
++
++func TestGenerationReceiptReplacesExistingFileAndRejectsDirectory(t *testing.T) {
++	directory := t.TempDir()
++	receipt := generationReceipt{Schema: 1, Generation: diagnosticGeneration, PID: 123}
++	if err := persistGenerationReceipt(directory, receipt); err != nil {
++		t.Fatal(err)
++	}
++	receipt.PID = 124
++	if err := persistGenerationReceipt(directory, receipt); err != nil {
++		t.Fatal(err)
++	}
++	bytes, err := boundedOrdinaryRead(filepath.Join(directory, "status-generation.json"), 4096)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var got generationReceipt
++	if err = json.Unmarshal(bytes, &got); err != nil || got.PID != 124 {
++		t.Fatal(got, err)
++	}
++	blocked := t.TempDir()
++	if err := os.Mkdir(filepath.Join(blocked, "status-generation.json"), 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := persistGenerationReceipt(blocked, receipt); err == nil {
++		t.Fatal("directory replacement accepted")
++	}
++	entries, err := os.ReadDir(blocked)
++	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
++		t.Fatal("temporary receipt leaked", entries, err)
++	}
++}
++
++func TestReceiptObjectsRejectAmbiguousKeysBeforeProcessProbe(t *testing.T) {
++	directory := t.TempDir()
++	image := filepath.Join(directory, "rdd.exe")
++	receipt := generationReceipt{1, diagnosticGeneration, "rancher-desktop-orbwin", directory, 123, process.DiagnosticIdentity{Executable: image, Created: 456}}
++	valid, _ := json.Marshal(receipt)
++	variants := []string{
++		string(valid[:len(valid)-1]) + `,"pid":999}`,
++		string(valid[:len(valid)-1]) + `,"PID":999}`,
++		strings.Replace(string(valid), `"created":456`, `"created":123,"created":456`, 1),
++		strings.Replace(string(valid), `"created":456`, `"Created":456`, 1),
++		strings.Replace(string(valid), `"created":456`, `"created":456,"unknown":true`, 1),
++	}
++	for _, raw := range variants {
++		reads := 0
++		out := observeService(directory, image, receipt.Instance, func(path string, _ int64) ([]byte, error) {
++			reads++
++			if filepath.Base(path) == "status-generation.json" {
++				return []byte(raw), nil
++			}
++			return []byte("123"), nil
++		}, func(string, int, process.DiagnosticIdentity) (string, string) {
++			t.Fatal("process probe admitted ambiguous receipt")
++			return "stopped", "processExited"
++		})
++		if out.State != "unknown" || out.Reason != "generationMalformed" || reads != 1 {
++			t.Fatal(out, reads)
++		}
++	}
++	if err := validateReceiptObjects(valid); err != nil {
++		t.Fatal(err)
++	}
++}
++func TestDiagnosticMetadataRejectsChangedBytesShapeAndPathReplacement(t *testing.T) {
++	path := filepath.Join(t.TempDir(), "receipt")
++	if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	before, err := os.Lstat(path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !sameDiagnosticMetadata(before, before) {
++		t.Fatal("stable file refused")
++	}
++	if err := os.WriteFile(path, []byte("longer-after"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	changed, _ := os.Lstat(path)
++	if sameDiagnosticMetadata(before, changed) {
++		t.Fatal("changed metadata accepted")
++	}
++	replacement := filepath.Join(filepath.Dir(path), "replacement")
++	if err := os.WriteFile(replacement, []byte("longer-after"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	other, _ := os.Lstat(replacement)
++	if sameDiagnosticMetadata(changed, other) {
++		t.Fatal("different file identity accepted")
++	}
++}
++
++func TestBoundedOrdinaryReadRejectsChangeAndReplacementDuringRead(t *testing.T) {
++	for _, replace := range []bool{false, true} {
++		path := filepath.Join(t.TempDir(), "receipt")
++		if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
++			t.Fatal(err)
++		}
++		expected := "changed-after-read"
++		_, err := boundedOrdinaryReadUsing(path, 64, func(reader io.Reader) ([]byte, error) {
++			data, err := io.ReadAll(reader)
++			if err != nil {
++				return nil, err
++			}
++			if replace {
++				if err = os.Rename(path, path+".retained"); err != nil {
++					if os.IsPermission(err) || errors.Is(err, syscall.Errno(32)) {
++						expected = "before"
++						return nil, err
++					}
++					return nil, err
++				}
++			}
++			if err = os.WriteFile(path, []byte("changed-after-read"), 0600); err != nil {
++				return nil, err
++			}
++			return data, nil
++		})
++		if err == nil {
++			t.Fatal("file changed during read was accepted", replace)
++		}
++		current, e := os.ReadFile(path)
++		if e != nil || string(current) != expected {
++			t.Fatal("reader mutated or deleted changed file", e)
++		}
++	}
++}
+diff --git a/rdd/pkg/util/process/service_identity_other.go b/rdd/pkg/util/process/service_identity_other.go
+new file mode 100644
+index 000000000..962c16c78
+--- /dev/null
++++ b/rdd/pkg/util/process/service_identity_other.go
+@@ -0,0 +1,18 @@
++//go:build !windows
++
++// SPDX-License-Identifier: Apache-2.0
++package process
++
++import "fmt"
++
++type DiagnosticIdentity struct {
++	Executable string `json:"executable"`
++	Created    uint64 `json:"created"`
++}
++
++func RegisterDiagnosticIdentity(string) (DiagnosticIdentity, func(), error) {
++	return DiagnosticIdentity{}, nil, fmt.Errorf("diagnostic process generations unsupported on this platform")
++}
++func ProbeDiagnosticIdentity(string, int, DiagnosticIdentity) (string, string) {
++	return "unknown", "unsupportedPlatform"
++}
+diff --git a/rdd/pkg/util/process/service_identity_windows.go b/rdd/pkg/util/process/service_identity_windows.go
+new file mode 100644
+index 000000000..2c0eb5d94
+--- /dev/null
++++ b/rdd/pkg/util/process/service_identity_windows.go
+@@ -0,0 +1,128 @@
++// SPDX-License-Identifier: Apache-2.0
++package process
++
++import (
++	"crypto/sha256"
++	"errors"
++	"fmt"
++	"golang.org/x/sys/windows"
++	"os"
++	"path/filepath"
++	"strings"
++)
++
++// DiagnosticIdentity is process-generation evidence, not lifecycle state.
++type DiagnosticIdentity struct {
++	Executable string `json:"executable"`
++	Created    uint64 `json:"created"`
++}
++
++func diagnosticProcess(pid int) (DiagnosticIdentity, bool, error) {
++	var identity DiagnosticIdentity
++	if pid <= 0 || uint64(pid) > uint64(^uint32(0)) {
++		return identity, false, fmt.Errorf("invalid process ID")
++	}
++	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
++	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
++		return identity, false, nil
++	}
++	if err != nil {
++		return identity, false, err
++	}
++	defer windows.CloseHandle(handle)
++	wait, err := windows.WaitForSingleObject(handle, 0)
++	if err != nil {
++		return identity, false, err
++	}
++	if wait != windows.WAIT_OBJECT_0 && wait != uint32(windows.WAIT_TIMEOUT) {
++		return identity, false, fmt.Errorf("unexpected process wait result")
++	}
++	var creation, exit, kernel, user windows.Filetime
++	if err = windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
++		return identity, false, err
++	}
++	buffer := make([]uint16, 32768)
++	size := uint32(len(buffer))
++	if err = windows.QueryFullProcessImageName(handle, 0, &buffer[0], &size); err != nil {
++		return identity, false, err
++	}
++	image, err := filepath.EvalSymlinks(windows.UTF16ToString(buffer[:size]))
++	if err != nil {
++		return identity, false, err
++	}
++	identity = DiagnosticIdentity{Executable: image, Created: uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime)}
++	return identity, wait == uint32(windows.WAIT_TIMEOUT), nil
++}
++
++func diagnosticKey(directory string, identity DiagnosticIdentity) (string, error) {
++	directory, err := filepath.EvalSymlinks(directory)
++	if err != nil {
++		return "", err
++	}
++	// Windows identity names are case insensitive; paths cannot contain NUL.
++	sum := sha256.Sum256([]byte(strings.ToLower(directory) + "\x00" + strings.ToLower(identity.Executable) + fmt.Sprintf("\x00%d", identity.Created)))
++	return fmt.Sprintf("diagnostic-v1-%x", sum), nil
++}
++
++// RegisterDiagnosticIdentity holds a nonsignalled, generation-scoped named event.
++// Only the serve process calls this; no state file is consulted to run a service.
++func RegisterDiagnosticIdentity(directory string) (DiagnosticIdentity, func(), error) {
++	identity, live, err := diagnosticProcess(os.Getpid())
++	if err != nil {
++		return identity, nil, err
++	}
++	if !live {
++		return identity, nil, fmt.Errorf("current process exited")
++	}
++	key, err := diagnosticKey(directory, identity)
++	if err != nil {
++		return identity, nil, err
++	}
++	name, err := windows.UTF16PtrFromString(interruptEventName(key, os.Getpid()))
++	if err != nil {
++		return identity, nil, err
++	}
++	handle, err := windows.CreateEvent(nil, 1, 0, name)
++	if err != nil {
++		if handle != 0 {
++			windows.CloseHandle(handle)
++		}
++		return identity, nil, err
++	}
++	return identity, func() { windows.CloseHandle(handle) }, nil
++}
++
++// ProbeDiagnosticIdentity never signals an event or changes a PID file. Errors,
++// foreign/recycled PIDs and absent ownership markers are all unknown, not stopped.
++func ProbeDiagnosticIdentity(directory string, pid int, want DiagnosticIdentity) (string, string) {
++	actual, live, err := diagnosticProcess(pid)
++	if err != nil {
++		return "unknown", "processInspectionFailed"
++	}
++	if actual.Created != 0 && (!strings.EqualFold(actual.Executable, want.Executable) || actual.Created != want.Created) {
++		return "unknown", "processIdentityMismatch"
++	}
++	if !live {
++		return "stopped", "processExited"
++	}
++	key, err := diagnosticKey(directory, want)
++	if err != nil {
++		return "unknown", "homeInspectionFailed"
++	}
++	name, err := windows.UTF16PtrFromString(interruptEventName(key, pid))
++	if err != nil {
++		return "unknown", "identityNameFailed"
++	}
++	handle, err := windows.OpenEvent(windows.SYNCHRONIZE, false, name)
++	if err != nil {
++		return "unknown", "ownershipMarkerUnavailable"
++	}
++	defer windows.CloseHandle(handle)
++	// Check process generation again after opening the marker, so a process that
++	// exited/recycled during observation cannot be reported as confirmed running.
++	after, live, err := diagnosticProcess(pid)
++	if err != nil || !live || after != actual {
++		return "unknown", "processChangedDuringProbe"
++	}
++	return "running", "identityVerified"
++}
+diff --git a/rdd/pkg/util/process/service_identity_windows_test.go b/rdd/pkg/util/process/service_identity_windows_test.go
+new file mode 100644
+index 000000000..11b821f36
+--- /dev/null
++++ b/rdd/pkg/util/process/service_identity_windows_test.go
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: Apache-2.0
++package process
++
++import (
++	"os"
++	"testing"
++)
++
++// These checks inspect only the test process and hold nonsignalled diagnostic
++// events. They never launch, signal, kill or inspect an engine/service process.
++func TestDiagnosticIdentityMarkerAndGeneration(t *testing.T) {
++	directory := t.TempDir()
++	identity, release, err := RegisterDiagnosticIdentity(directory)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, duplicateRelease, err := RegisterDiagnosticIdentity(directory); err == nil {
++		duplicateRelease()
++		release()
++		t.Fatal("duplicate marker registration accepted")
++	}
++	state, reason := ProbeDiagnosticIdentity(directory, os.Getpid(), identity)
++	if state != "running" {
++		release()
++		t.Fatal(state, reason)
++	}
++	foreign := identity
++	foreign.Created++
++	if state, _ := ProbeDiagnosticIdentity(directory, os.Getpid(), foreign); state != "unknown" {
++		release()
++		t.Fatal(state)
++	}
++	if state, _ := ProbeDiagnosticIdentity(t.TempDir(), os.Getpid(), identity); state != "unknown" {
++		release()
++		t.Fatal(state)
++	}
++	release()
++	if state, _ := ProbeDiagnosticIdentity(directory, os.Getpid(), identity); state != "unknown" {
++		t.Fatal(state)
++	}
++}

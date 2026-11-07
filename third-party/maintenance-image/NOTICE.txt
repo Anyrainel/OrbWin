@@ -1,0 +1,46 @@
+OrbWin bundled Alpine maintenance image
+
+Image: docker.io/library/alpine:3.21@sha256:bbfcd601d7cd20d35bb0b8b866ad1a8a0d107ca3e1c20870c75c5ce2c1186d30
+Archive SHA-256: 4a785a3d0998a81d8f0bf2d4d2949bc4905b54170bd20fd4d17707525de392cf
+
+The upstream image is unmodified. OrbWin removes image-name metadata from its
+transport archive and loads it by immutable digest. No upstream program is
+executed while collecting these sources or notices.
+
+Package-specific license/copyright texts are in LICENSE/. SOURCE-INVENTORY.json
+records the image packages, exact aports revisions and checked input hashes.
+SOURCES.tar.gz accompanies this notice and contains upstream source archives,
+aports recipes/patches/configuration and this notice inventory. Its paths and
+outer tar modes/timestamps are normalized; enclosed upstream archives are verbatim.
+Use the recorded Alpine abuild recipes/toolchain for the target linux/amd64.
+An identical binary rebuild or a complete historical build-tool inventory has
+not been demonstrated. utmps/skalibs source contexts at the BusyBox recipe's
+revision are included because that recipe explicitly requests static libraries.
+
+Standard MIT/MPL texts are supplementary. MIT template placeholders have not
+been replaced with invented authors or used to replace original copyright
+notices. Component/source notices and package-declared licenses are preserved.
+No separate copyright notices occur in the included Alpine signing-key data;
+their recipe and declared MIT license are retained verbatim. System compiler
+and ordinary build tools are not bundled here. Individual source files may have
+additional notices; their complete archives and patches remain available below.
+
+Installed image packages (declared licenses):
+- alpine-baselayout 3.6.8-r1: GPL-2.0-only (origin alpine-baselayout, 5f0cd7890349e7fe11128478ac506c709805224d)
+- alpine-baselayout-data 3.6.8-r1: GPL-2.0-only (origin alpine-baselayout, 5f0cd7890349e7fe11128478ac506c709805224d)
+- alpine-keys 2.5-r0: MIT (origin alpine-keys, 6d473fb38effb2389f567b29fb7eb27039b3a279)
+- alpine-release 3.21.9-r0: MIT (origin alpine-base, 1aef8de1bd86c1af5b0ae7877ee6a65167e32a34)
+- apk-tools 2.14.6-r3: GPL-2.0-only (origin apk-tools, 41847d6ccff08940b5bf1ba0d6005e95897039f9)
+- busybox 1.37.0-r14: GPL-2.0-only (origin busybox, 284d827a2793963e6dcf88324bd1eb81adff579c)
+- busybox-binsh 1.37.0-r14: GPL-2.0-only (origin busybox, 284d827a2793963e6dcf88324bd1eb81adff579c)
+- ca-certificates-bundle 20261020-r0: MPL-2.0 AND MIT (origin ca-certificates, 660f223b42ca35e7d2a76ce568e15c847b92d33d)
+- libcrypto3 3.3.7-r2: Apache-2.0 (origin openssl, a254386dfe34f70a05bdb8b2a3d7a5b20b6f076e)
+- libssl3 3.3.7-r2: Apache-2.0 (origin openssl, a254386dfe34f70a05bdb8b2a3d7a5b20b6f076e)
+- musl 1.2.5-r12: MIT (origin musl, 5245849e14d213abe18d589b4b80d65793327940)
+- musl-utils 1.2.5-r12: MIT AND BSD-2-Clause AND GPL-2.0-or-later (origin musl, 5245849e14d213abe18d589b4b80d65793327940)
+- scanelf 1.3.8-r1: GPL-2.0-only (origin pax-utils, 398a5aee3025ec8a4d0d761e448dc86ac777fa09)
+- ssl_client 1.37.0-r14: GPL-2.0-only (origin busybox, 284d827a2793963e6dcf88324bd1eb81adff579c)
+- zlib 1.3.2-r1: Zlib (origin zlib, c973d294927355eac1d2a6e97d86e41fbab8ffda)
+
+These third-party terms apply to their respective components. They do not
+replace the licensing of OrbWin or other bundled dependencies.

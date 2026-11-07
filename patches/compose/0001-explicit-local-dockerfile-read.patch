@@ -1,0 +1,191 @@
+diff --git a/pkg/compose/build_bake.go b/pkg/compose/build_bake.go
+index 0530d72..241aafe 100644
+--- a/pkg/compose/build_bake.go
++++ b/pkg/compose/build_bake.go
+@@ -366,9 +366,39 @@ func localBuildPaths(buildConfig types.BuildConfig) []string {
+ 			local = append(local, path)
+ 		}
+ 	}
++	// A selected Dockerfile can legitimately live outside a local context, as
++	// happens with Dev Containers' generated feature Dockerfile. Grant only its
++	// resolved regular file, never the containing directory or a wildcard. Keep
++	// the grant fixed if a symlink is changed before Bake validates its inputs.
++	if path, ok := localDockerfileReadPath(buildConfig); ok {
++		local = append(local, path)
++	}
+ 	return local
+ }
+ 
++func localDockerfileReadPath(buildConfig types.BuildConfig) (string, bool) {
++	if buildConfig.Context == "" || buildConfig.Dockerfile == "" || buildConfig.DockerfileInline != "" || strings.Contains(buildConfig.Context, "://") {
++		return "", false
++	}
++	if _, _, err := gitutil.ParseGitRef(buildConfig.Context); err == nil {
++		return "", false
++	}
++	path := dockerFilePath(buildConfig.Context, buildConfig.Dockerfile)
++	path, err := filepath.Abs(path)
++	if err != nil {
++		return "", false
++	}
++	path, err = filepath.EvalSymlinks(path)
++	if err != nil {
++		return "", false
++	}
++	info, err := os.Stat(path)
++	if err != nil || !info.Mode().IsRegular() {
++		return "", false
++	}
++	return path, true
++}
++
+ // bakeMetadataPath picks a fresh temporary path for bake's --metadata-file.
+ // We don't use os.CreateTemp here as we need a temporary file name, but don't
+ // want it actually created, as bake relies on atomicwriter and this creates
+diff --git a/pkg/compose/build_bake_orbwin_test.go b/pkg/compose/build_bake_orbwin_test.go
+new file mode 100644
+index 0000000..e2ed4d0
+--- /dev/null
++++ b/pkg/compose/build_bake_orbwin_test.go
+@@ -0,0 +1,141 @@
++/*
++Copyright 2026 OrbWin contributors
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++	http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++package compose
++
++import (
++	"os"
++	"path/filepath"
++	"runtime"
++	"slices"
++	"testing"
++
++	"github.com/compose-spec/compose-go/v2/types"
++	"github.com/docker/compose/v5/pkg/api"
++)
++
++func TestOrbWinDockerfileReadGrantIsOneSelectedFile(t *testing.T) {
++	root := t.TempDir()
++	context := filepath.Join(root, "context")
++	outside := filepath.Join(root, "generated")
++	if err := os.Mkdir(context, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(outside, 0700); err != nil {
++		t.Fatal(err)
++	}
++	file := filepath.Join(outside, "Dockerfile-with-features")
++	if err := os.WriteFile(file, []byte("FROM scratch\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	resolved, err := filepath.EvalSymlinks(file)
++	if err != nil {
++		t.Fatal(err)
++	}
++	relative, err := filepath.Rel(context, file)
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, selected := range []string{file, relative, filepath.ToSlash(file), filepath.ToSlash(relative)} {
++		config := types.BuildConfig{Context: context, Dockerfile: selected}
++		got, ok := localDockerfileReadPath(config)
++		if !ok || got != resolved {
++			t.Fatalf("%q selected %q %t, want exact %q", selected, got, ok, resolved)
++		}
++		paths := localBuildPaths(config)
++		if !slices.Contains(paths, resolved) || slices.Contains(paths, outside) || slices.Contains(paths, root) || slices.Contains(paths, "*") {
++			t.Fatalf("grant broadened or missing: %v", paths)
++		}
++	}
++	if runtime.GOOS == "windows" && filepath.VolumeName(file) == "" {
++		t.Fatal("Windows drive coverage missing")
++	}
++}
++
++func TestOrbWinDockerfileReadGrantRejectsNonlocalOrAbsentInputs(t *testing.T) {
++	root := t.TempDir()
++	file := filepath.Join(root, "Dockerfile")
++	if err := os.WriteFile(file, []byte("FROM scratch\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	cases := []types.BuildConfig{
++		{Context: root}, {Context: root, Dockerfile: filepath.Join(root, "missing")},
++		{Context: root, Dockerfile: root}, {Context: root, Dockerfile: file, DockerfileInline: "FROM scratch"},
++		{Context: "https://example.invalid/context.tar", Dockerfile: file},
++		{Context: "https://github.com/example/project.git", Dockerfile: file},
++		{Context: "git@github.com:example/project.git", Dockerfile: file},
++		{Context: "", Dockerfile: file},
++	}
++	for _, config := range cases {
++		if path, ok := localDockerfileReadPath(config); ok {
++			t.Fatalf("unexpected grant %q for %#v", path, config)
++		}
++	}
++	config := types.BuildConfig{Context: root, Dockerfile: file, AdditionalContexts: map[string]string{"remote": "https://example.invalid/context.tar", "local": filepath.Join(root, "additional")}}
++	paths := localBuildPaths(config)
++	if !slices.Contains(paths, config.AdditionalContexts["local"]) || slices.Contains(paths, config.AdditionalContexts["remote"]) {
++		t.Fatal(paths)
++	}
++}
++
++func TestOrbWinDockerfileSymlinkGrantDoesNotBroadenToParent(t *testing.T) {
++	root := t.TempDir()
++	context := filepath.Join(root, "context")
++	outside := filepath.Join(root, "private")
++	if err := os.Mkdir(context, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Mkdir(outside, 0700); err != nil {
++		t.Fatal(err)
++	}
++	selected := filepath.Join(context, "Dockerfile")
++	target := filepath.Join(outside, "selected")
++	if err := os.WriteFile(target, []byte("FROM scratch\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(target, selected); err != nil {
++		t.Skipf("symlink creation unavailable without additional privilege: %v", err)
++	}
++	config := types.BuildConfig{Context: context, Dockerfile: selected}
++	grant, ok := localDockerfileReadPath(config)
++	if !ok {
++		t.Fatal("selected regular symlink target not granted")
++	}
++	resolved, err := filepath.EvalSymlinks(target)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if grant != resolved {
++		t.Fatalf("grant %q differs from selected target %q", grant, resolved)
++	}
++	paths := localBuildPaths(config)
++	if slices.Contains(paths, outside) || slices.Contains(paths, root) {
++		t.Fatal(paths)
++	}
++	// A later link replacement cannot rewrite the already generated exact grant.
++	if err := os.Remove(selected); err != nil {
++		t.Fatal(err)
++	}
++	other := filepath.Join(outside, "other")
++	if err := os.WriteFile(other, []byte("FROM scratch\n"), 0600); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.Symlink(other, selected); err != nil {
++		t.Fatal(err)
++	}
++	args := bakeArgs(&bakeBuild{localPaths: paths}, "metadata.json", api.BuildOptions{})
++	if !slices.Contains(args, "fs.read="+grant) || slices.Contains(args, "fs.read="+other) || slices.Contains(args, "fs.read="+outside) {
++		t.Fatalf("Bake permission did not preserve exactly the selected file after link replacement: %v", args)
++	}
++}
