@@ -1,0 +1,177 @@
+{
+  "schema": 1,
+  "component": "setup-parent-source2-go",
+  "selected": false,
+  "orderedSeries": false,
+  "parents": {
+    "parentRawManifestSHA256": "c43df8117061deee32a9927ed91aeaabfa9bdfb44f4e9329b8965867d09cbd8a",
+    "targetRawManifestSHA256": "f2e8e72e579f654dcfc64048964d8e82813a7897986cf212908317588528093c",
+    "sourceReceiptSHA256": "593d0af514b877d52c7445fbbedc353af86a661047509e76c2a1db0363dba7c0",
+    "blockedSource1PeerSHA256": "6c110ab20cfa2b7f8bb5c917ae5e0890de53d9802b2b009e86cc1be6c82879b3",
+    "source2Peer": "pending-separate"
+  },
+  "projection": "LF for textual rdd source; four fixed historical exclusions omitted",
+  "excluded": [
+    "pkg/guestagent/lima-guestagent.amd64.gz",
+    "upgrade_PROGRESS.md",
+    "upgrade_SDK_TRANSITION.md",
+    "upgrade_boot_fence_snapshot.json"
+  ],
+  "beforeFiles": 1240,
+  "afterFiles": 1244,
+  "beforeManifestSHA256": "39ede98be75c6fda7b0736cff35fd3ba001ebdbf530459e52480f83e80756614",
+  "afterManifestSHA256": "202a76cd6d80d6cf59f859c194ee3e754a208e97fe5c9cb990710d191c8b18d5",
+  "patchSHA256": "f8a16549218eb8bf6ef6153863a1a0ccabae545615f440093caea7e946919725",
+  "changedFiles": 9,
+  "changes": [
+    {
+      "path": "cmd/rdd/runtime_setup_route.go",
+      "before": {
+        "bytes": 837,
+        "sha256": "a4c47ce74232fc138fa9db03bdb120c79de1f67bab26ecbf3b1786f18e4814ed"
+      },
+      "after": {
+        "bytes": 1493,
+        "sha256": "b4d17cc079a30227a00a2de2b55c7052a6cc7494be15693d6224d31499f35778"
+      },
+      "rawBefore": {
+        "bytes": 837,
+        "sha256": "a4c47ce74232fc138fa9db03bdb120c79de1f67bab26ecbf3b1786f18e4814ed"
+      },
+      "rawAfter": {
+        "bytes": 1493,
+        "sha256": "b4d17cc079a30227a00a2de2b55c7052a6cc7494be15693d6224d31499f35778"
+      }
+    },
+    {
+      "path": "cmd/rdd/runtime_setup_route_test.go",
+      "before": {
+        "bytes": 2179,
+        "sha256": "33a6fb9ecbbaea244ab65a19da80613bb9a08b76a8fe4a4c8334b122ac899f38"
+      },
+      "after": {
+        "bytes": 2789,
+        "sha256": "c82ed132b93ed55358c7bca619f0294e1e4d6ee25269aba57e1fb6b96cc2a87c"
+      },
+      "rawBefore": {
+        "bytes": 2179,
+        "sha256": "33a6fb9ecbbaea244ab65a19da80613bb9a08b76a8fe4a4c8334b122ac899f38"
+      },
+      "rawAfter": {
+        "bytes": 2789,
+        "sha256": "c82ed132b93ed55358c7bca619f0294e1e4d6ee25269aba57e1fb6b96cc2a87c"
+      }
+    },
+    {
+      "path": "cmd/rdd/runtime_setup_windows.go",
+      "before": {
+        "bytes": 1111,
+        "sha256": "be2d686c220eaf7f57b100330996bff2c74f132febbeb63201463bd7fefec94c"
+      },
+      "after": {
+        "bytes": 1141,
+        "sha256": "e06d35accdc6de21290f0b6313e38f3b20ea5e9200a34f9b9391f6a0fec51f35"
+      },
+      "rawBefore": {
+        "bytes": 1111,
+        "sha256": "be2d686c220eaf7f57b100330996bff2c74f132febbeb63201463bd7fefec94c"
+      },
+      "rawAfter": {
+        "bytes": 1141,
+        "sha256": "e06d35accdc6de21290f0b6313e38f3b20ea5e9200a34f9b9391f6a0fec51f35"
+      }
+    },
+    {
+      "path": "cmd/rdd/runtime_setup_windows_test.go",
+      "before": {
+        "bytes": 554,
+        "sha256": "cf39abeca5642d8a48f9fc79eb4b1f61c0da509cf5abfc767fffdec1afc241b2"
+      },
+      "after": {
+        "bytes": 597,
+        "sha256": "defc8f814702fa64eacd31e82c184a1617a26cb3a89b82d4e7a8f436a7fefa4d"
+      },
+      "rawBefore": {
+        "bytes": 554,
+        "sha256": "cf39abeca5642d8a48f9fc79eb4b1f61c0da509cf5abfc767fffdec1afc241b2"
+      },
+      "rawAfter": {
+        "bytes": 597,
+        "sha256": "defc8f814702fa64eacd31e82c184a1617a26cb3a89b82d4e7a8f436a7fefa4d"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_setup_parent.go",
+      "before": null,
+      "after": {
+        "bytes": 1207,
+        "sha256": "ea899ba7cfdbb266285817da65edc9078e59e0c2063c1c50c095cf2f02a535c6"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 1207,
+        "sha256": "ea899ba7cfdbb266285817da65edc9078e59e0c2063c1c50c095cf2f02a535c6"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_setup_parent_test.go",
+      "before": null,
+      "after": {
+        "bytes": 3417,
+        "sha256": "a61aa097222af94f33151b0c7efdccf31985941f38076cabb3fed9a6e35c5abd"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 3417,
+        "sha256": "a61aa097222af94f33151b0c7efdccf31985941f38076cabb3fed9a6e35c5abd"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_setup_parent_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 10452,
+        "sha256": "473866e55ae282711d63592ca8fc7191e096b34815a989ef76e9eccbef513230"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 10452,
+        "sha256": "473866e55ae282711d63592ca8fc7191e096b34815a989ef76e9eccbef513230"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_setup_parent_windows_test.go",
+      "before": null,
+      "after": {
+        "bytes": 566,
+        "sha256": "8c4932d8b3d7b644153362325949373e0636af740b466644519b5190cc3ee2d0"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 590,
+        "sha256": "3e1926f199970856826627ae8bd23000aa331bab9a7eabeea9c4ae2b0f01cdeb"
+      }
+    },
+    {
+      "path": "pkg/service/cmd/fresh_setup_windows.go",
+      "before": {
+        "bytes": 7386,
+        "sha256": "1d87ba6f359308277c4f61b1a477f1a78f19e16ba68ccde6029ff9758085a8d4"
+      },
+      "after": {
+        "bytes": 8911,
+        "sha256": "f2b36b44ba82b7ef089d5320d28c23e18262d8b290cf6164a49bcc3afe3cf112"
+      },
+      "rawBefore": {
+        "bytes": 7386,
+        "sha256": "1d87ba6f359308277c4f61b1a477f1a78f19e16ba68ccde6029ff9758085a8d4"
+      },
+      "rawAfter": {
+        "bytes": 8911,
+        "sha256": "f2b36b44ba82b7ef089d5320d28c23e18262d8b290cf6164a49bcc3afe3cf112"
+      }
+    }
+  ],
+  "strictPatchReplay": true,
+  "freshFilesystemExactTarget": true
+}

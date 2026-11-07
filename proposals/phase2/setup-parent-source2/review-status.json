@@ -1,0 +1,8 @@
+{
+  "source1": "blocked-preserved",
+  "source1PeerSHA256": "6c110ab20cfa2b7f8bb5c917ae5e0890de53d9802b2b009e86cc1be6c82879b3",
+  "source2": "finite-source-peer-pass",
+  "source2PeerSHA256": "77b131d9098936823a7cf53cfd089cdd0d1f62a64bcdf4fed5d179a68a9a6f71",
+  "findingResolved": "EDGE-A-PRECAPTURE-01",
+  "nativeOrActivationAcceptance": false
+}

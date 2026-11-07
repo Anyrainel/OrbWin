@@ -1,0 +1,9 @@
+# Guest mandatory entry: isolated development proposal
+
+Not selected/activated. rdd.patch independently targets exact canonical23 rdd source after declared LF/four-exclusion projection. It is NOT ordered after native-initial-scope3. The separate repo.patch targets ONLY declared before-repo8 subset, producing repo13; it does not target an arbitrary current checkout and requires explicit parent/hash checks and Root composition. No selected lock or recipe is changed by this export.
+
+Actual selected guest source has closed Docker/containerd role entry via private stdin; legacy entry is excluded under selected tag. Packaging source selects the tag, derives fixed unit masks/template and keeps identical guest output feeding overlay plus embedding. No real private host delivery, bootstrap/SSH/auth/driver connection is implemented by these DATA/source changes. Existing archives cannot be relabeled; require a coherent rebuild and NEW original immutable archive capture.
+
+Source receipt c839ea6d5989b6c32ad3ae294a6b104823e02f1a638231a7788e5c5f8acf5ecf; checks summary38383542e89e47fbc1739cd1e5e1527b0d32446ce83d974f4fe52de728c51ad6 reports33 Go pure normal/race,25 Node,5 Rust pure tests plus selected/legacy guest and template compile-only checks. This export verifies reconstruction only, does not rerun those checks or execute archive/guest/native code. Packaging independent peer is pending/separate unless Root supplies a later exact receipt.
+
+Required gates: independent packaging peer, coherent composition/reseal of actual build/SDK/offers, genuine archive rebuild/snapshot, native original delivery/network+SSH before provision and final role delivery after provision joins, real workload/native qualification and existing-root migration. No complete-protocol/authority/Phase2 claim. Preserve upstream copyright/license/tests; LF projection is explicit.

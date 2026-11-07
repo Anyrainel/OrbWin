@@ -1,0 +1,622 @@
+{
+  "schema": 1,
+  "component": "native-initial-scope3",
+  "selected": false,
+  "orderedSeries": false,
+  "parents": {
+    "canonical": "23",
+    "canonicalGitTree": "5300e3fff0cfa965301f261be311ba93241d2045",
+    "rawSourceManifestSHA256": "c75ca01e63934fdd3af6b33fefe2947e99c22335452482449cf447e3d5dbc9a7",
+    "canonicalExclusions": [
+      "pkg/guestagent/lima-guestagent.amd64.gz",
+      "upgrade_PROGRESS.md",
+      "upgrade_SDK_TRANSITION.md",
+      "upgrade_boot_fence_snapshot.json"
+    ],
+    "targetRawManifestSHA256": "6591da268091dcf96759a46c9169cd4a13d7c04a3129da7d238e275ba222b322",
+    "targetRestorations": [
+      {
+        "path": "pkg/managementconfig/runtime_fresh_observation_windows.go",
+        "historicalScopeSHA256": "ebd15b508fd9f7cb38a51951b882405891d4da127dd61a618d2c971a7e8d86f4",
+        "restoredCanonical23SHA256": "4c235f5cae6aee77b20fcd11170130e7d285b9a9219ff022c5dfde05b75cff8c"
+      },
+      {
+        "path": "pkg/managementconfig/runtime_fresh_transport_windows.go",
+        "historicalScopeSHA256": "59c11073bebb1592d8398482729cad8e420bc6b037182948a79480532c26441b",
+        "restoredCanonical23SHA256": "8492a929b0e313ba0b6ffbf635a47cf297d0c75a830fbe68a3ac6fa686aa12f7"
+      }
+    ],
+    "sourceReceiptSHA256": "aa286205b3c8f099fec0b9639e360bee753b90f7a831fafbc0a264fb0fad32b8",
+    "finiteSystemWalkPeerSHA256": "93ec1e15f034268bfe9abf38ebc505a6fb3e6001c8046d184d4f0d12d7d14f05"
+  },
+  "projection": "LF for textual rdd source; four fixed historical exclusions omitted",
+  "excluded": [
+    "pkg/guestagent/lima-guestagent.amd64.gz",
+    "upgrade_PROGRESS.md",
+    "upgrade_SDK_TRANSITION.md",
+    "upgrade_boot_fence_snapshot.json"
+  ],
+  "beforeFiles": 1210,
+  "afterFiles": 1238,
+  "beforeManifestSHA256": "c5f21bfd7bfe561a7b257d3deb9819d83028f577c1e6d5645c71ddfafa9eae83",
+  "afterManifestSHA256": "4a74eb67478d8d61caafbbec8269b73f528dd28054b46bdf3524681eaa094501",
+  "patchSHA256": "60d89a17136759de15fefd9310bf6968c487e550173e5dbb0ecebbc6c379b1bf",
+  "changedFiles": 39,
+  "changes": [
+    {
+      "path": "cmd/rdd/guest_guard_other.go",
+      "before": null,
+      "after": {
+        "bytes": 181,
+        "sha256": "2eca62c49763db523e89df6d1fec15296f73e1419de7594f2afdca339e0ce088"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 181,
+        "sha256": "2eca62c49763db523e89df6d1fec15296f73e1419de7594f2afdca339e0ce088"
+      }
+    },
+    {
+      "path": "cmd/rdd/guest_guard_route.go",
+      "before": null,
+      "after": {
+        "bytes": 246,
+        "sha256": "d176c891f74c06af0fa90a2e615811f29774b24f6f408d750ac1a513e75e74e3"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 246,
+        "sha256": "d176c891f74c06af0fa90a2e615811f29774b24f6f408d750ac1a513e75e74e3"
+      }
+    },
+    {
+      "path": "cmd/rdd/guest_guard_route_test.go",
+      "before": null,
+      "after": {
+        "bytes": 593,
+        "sha256": "b470d36ae888e10f3012d22f8555af7c9a5baf23ddad97a9b889cfcefc6337fd"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 593,
+        "sha256": "b470d36ae888e10f3012d22f8555af7c9a5baf23ddad97a9b889cfcefc6337fd"
+      }
+    },
+    {
+      "path": "cmd/rdd/guest_guard_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 444,
+        "sha256": "d2c3fc75748f296d0202bff390eb334dabe6a93cb176071adb8062bf8d48cc5b"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 444,
+        "sha256": "d2c3fc75748f296d0202bff390eb334dabe6a93cb176071adb8062bf8d48cc5b"
+      }
+    },
+    {
+      "path": "cmd/rdd/main.go",
+      "before": {
+        "bytes": 7392,
+        "sha256": "426609b590d0749d9ac3fcfff62cecfb3a4416a8773c19650dde62677d44e79f"
+      },
+      "after": {
+        "bytes": 7508,
+        "sha256": "8bd3c67e55579915c32cff5ee87d3bbfb2ba9ce529561ae2022ca3cddb4c4b77"
+      },
+      "rawBefore": {
+        "bytes": 7392,
+        "sha256": "426609b590d0749d9ac3fcfff62cecfb3a4416a8773c19650dde62677d44e79f"
+      },
+      "rawAfter": {
+        "bytes": 7508,
+        "sha256": "8bd3c67e55579915c32cff5ee87d3bbfb2ba9ce529561ae2022ca3cddb4c4b77"
+      }
+    },
+    {
+      "path": "pkg/authoritypath/product_exit_state.go",
+      "before": null,
+      "after": {
+        "bytes": 192,
+        "sha256": "1912aecdb8bc1b2c741d9f2d36bbf08d73b90813b3e308555098e32e51ef2c03"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 192,
+        "sha256": "1912aecdb8bc1b2c741d9f2d36bbf08d73b90813b3e308555098e32e51ef2c03"
+      }
+    },
+    {
+      "path": "pkg/authoritypath/product_exit_state_test.go",
+      "before": null,
+      "after": {
+        "bytes": 374,
+        "sha256": "8c4abba8e4a9857a9dc1cad936096df3c213872e3500a6465b874ff8cd968028"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 374,
+        "sha256": "8c4abba8e4a9857a9dc1cad936096df3c213872e3500a6465b874ff8cd968028"
+      }
+    },
+    {
+      "path": "pkg/authoritypath/product_exit_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 418,
+        "sha256": "4c051f6c60b733efde10cd3b56c13f1596c0a79eaa73a2dc85b957e0bf50ee59"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 418,
+        "sha256": "4c051f6c60b733efde10cd3b56c13f1596c0a79eaa73a2dc85b957e0bf50ee59"
+      }
+    },
+    {
+      "path": "pkg/controllers/lima/limavm/controllers/limavm_controller.go",
+      "before": {
+        "bytes": 32274,
+        "sha256": "18b7196a7c75d12a2a96fa271cc1e3c58c042624c8bec7dc26754126fc764c11"
+      },
+      "after": {
+        "bytes": 32370,
+        "sha256": "770eb1f8feb09e4d91546f96ee9fb7df7381f2dece60b737b132247bc079f393"
+      },
+      "rawBefore": {
+        "bytes": 32274,
+        "sha256": "18b7196a7c75d12a2a96fa271cc1e3c58c042624c8bec7dc26754126fc764c11"
+      },
+      "rawAfter": {
+        "bytes": 32370,
+        "sha256": "770eb1f8feb09e4d91546f96ee9fb7df7381f2dece60b737b132247bc079f393"
+      }
+    },
+    {
+      "path": "pkg/controllers/lima/limavm/controllers/managed_hostagent_windows.go",
+      "before": {
+        "bytes": 5687,
+        "sha256": "34972344aa7eabc6cc293cd9325833aa417a87e587d92c04d50a9e5327c03278"
+      },
+      "after": {
+        "bytes": 5859,
+        "sha256": "f7d56d1cac647757f7c07f1a97d6d86efb36416582508b025db81cae5ca42d46"
+      },
+      "rawBefore": {
+        "bytes": 5687,
+        "sha256": "34972344aa7eabc6cc293cd9325833aa417a87e587d92c04d50a9e5327c03278"
+      },
+      "rawAfter": {
+        "bytes": 5859,
+        "sha256": "f7d56d1cac647757f7c07f1a97d6d86efb36416582508b025db81cae5ca42d46"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/guestnegative/guard.go",
+      "before": null,
+      "after": {
+        "bytes": 13289,
+        "sha256": "16e8d947ee1754dfcda5104546cb6e87c4357d3b59e49ad240c77ce4bf3bb9a1"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 13289,
+        "sha256": "16e8d947ee1754dfcda5104546cb6e87c4357d3b59e49ad240c77ce4bf3bb9a1"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/guestnegative/guard_test.go",
+      "before": null,
+      "after": {
+        "bytes": 11690,
+        "sha256": "c375965c6a6f73c4111e8fafa6840d3e0daa9bf5eef38e045b7bcb4e4c8fbaa2"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 11690,
+        "sha256": "c375965c6a6f73c4111e8fafa6840d3e0daa9bf5eef38e045b7bcb4e4c8fbaa2"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/initialization_windows.go",
+      "before": {
+        "bytes": 8391,
+        "sha256": "bdbe594b921273c9949cad52e068ec20e4dc5bb8ea81036b14f1478f7f66dcb6"
+      },
+      "after": {
+        "bytes": 8475,
+        "sha256": "3050e223cbfd4032296d69384f11afeb161b39c6dc2f6ac9df520bafc243ce05"
+      },
+      "rawBefore": {
+        "bytes": 8391,
+        "sha256": "bdbe594b921273c9949cad52e068ec20e4dc5bb8ea81036b14f1478f7f66dcb6"
+      },
+      "rawAfter": {
+        "bytes": 8475,
+        "sha256": "3050e223cbfd4032296d69384f11afeb161b39c6dc2f6ac9df520bafc243ce05"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/private_windows.go",
+      "before": {
+        "bytes": 13494,
+        "sha256": "47acac8f0a208677d4bb52852e53a2675e3753913cf5a56c4edc930987678e67"
+      },
+      "after": {
+        "bytes": 13780,
+        "sha256": "c88975540b523b3b3a1631727fd75358dcf312c22607fca1a8895ade2f79393d"
+      },
+      "rawBefore": {
+        "bytes": 13494,
+        "sha256": "47acac8f0a208677d4bb52852e53a2675e3753913cf5a56c4edc930987678e67"
+      },
+      "rawAfter": {
+        "bytes": 13780,
+        "sha256": "c88975540b523b3b3a1631727fd75358dcf312c22607fca1a8895ade2f79393d"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_fresh_owner_windows.go",
+      "before": {
+        "bytes": 15412,
+        "sha256": "f338f1f5285f30ce63c825fd49581e88f06c61c00c19753b7df58b041b555800"
+      },
+      "after": {
+        "bytes": 15978,
+        "sha256": "9266be38fbcee9a13c29eaab4b375394b700f444a439b24f58024ad13408ec6e"
+      },
+      "rawBefore": {
+        "bytes": 15412,
+        "sha256": "f338f1f5285f30ce63c825fd49581e88f06c61c00c19753b7df58b041b555800"
+      },
+      "rawAfter": {
+        "bytes": 15978,
+        "sha256": "9266be38fbcee9a13c29eaab4b375394b700f444a439b24f58024ad13408ec6e"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_fresh_startup_windows.go",
+      "before": {
+        "bytes": 9102,
+        "sha256": "79f752f2dc6e18a9ee17944bf51f612f7cbcddd2d3687aeb18491e703728d768"
+      },
+      "after": {
+        "bytes": 9182,
+        "sha256": "ad37525a96a0d4fd3d9770ffce2440dae236f0b7e73142fbbe0202bdbce1ae64"
+      },
+      "rawBefore": {
+        "bytes": 9102,
+        "sha256": "79f752f2dc6e18a9ee17944bf51f612f7cbcddd2d3687aeb18491e703728d768"
+      },
+      "rawAfter": {
+        "bytes": 9182,
+        "sha256": "ad37525a96a0d4fd3d9770ffce2440dae236f0b7e73142fbbe0202bdbce1ae64"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_abi_windows_amd64_test.go",
+      "before": null,
+      "after": {
+        "bytes": 213,
+        "sha256": "501516f2957a97c1704fe86b4d9eb1901f584d4ad4a4704d8b16da9f8cf4828b"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 213,
+        "sha256": "501516f2957a97c1704fe86b4d9eb1901f584d4ad4a4704d8b16da9f8cf4828b"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_model.go",
+      "before": null,
+      "after": {
+        "bytes": 1200,
+        "sha256": "d8bc5585f1360f71ee19ef5cf318a1931898b71f5c94efe021f4f4fa676a42ac"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 1200,
+        "sha256": "d8bc5585f1360f71ee19ef5cf318a1931898b71f5c94efe021f4f4fa676a42ac"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_model_test.go",
+      "before": null,
+      "after": {
+        "bytes": 6249,
+        "sha256": "1ab850bbbd10ec66898a579e31dde9616516c61d056729bc779db6ecc14b94be"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 6249,
+        "sha256": "1ab850bbbd10ec66898a579e31dde9616516c61d056729bc779db6ecc14b94be"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_producer_model.go",
+      "before": null,
+      "after": {
+        "bytes": 3026,
+        "sha256": "12aa353ef74d2a5119a69b4e328400d574d83e975c32abb8cad3d436df6abe27"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 3026,
+        "sha256": "12aa353ef74d2a5119a69b4e328400d574d83e975c32abb8cad3d436df6abe27"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_producer_model_test.go",
+      "before": null,
+      "after": {
+        "bytes": 4957,
+        "sha256": "b5ebc33193e70670ad921f45eb26333883c9de4f801b4a98442d7bdcdd3fa506"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 4957,
+        "sha256": "b5ebc33193e70670ad921f45eb26333883c9de4f801b4a98442d7bdcdd3fa506"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_producer_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 17806,
+        "sha256": "cc1681dace8ac63e529c60475e685a00ead06b8e08bd5d098b9ba16c8b9304d3"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 17806,
+        "sha256": "cc1681dace8ac63e529c60475e685a00ead06b8e08bd5d098b9ba16c8b9304d3"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_producer_windows_test.go",
+      "before": null,
+      "after": {
+        "bytes": 1204,
+        "sha256": "02fae0b983b79a10b5f62419cd3e7e4da136b4987fe76d4aac1c11bb7e1661af"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 1204,
+        "sha256": "02fae0b983b79a10b5f62419cd3e7e4da136b4987fe76d4aac1c11bb7e1661af"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_reader_other.go",
+      "before": null,
+      "after": {
+        "bytes": 253,
+        "sha256": "6c05a046e1bf138115a4eb82f8e88d1bb08d09ef0db41302eb0c7beee614de77"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 253,
+        "sha256": "6c05a046e1bf138115a4eb82f8e88d1bb08d09ef0db41302eb0c7beee614de77"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_reader_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 17680,
+        "sha256": "a0d066056abd06e13862ee232abd243a683dffc05e1b460c3c0540a8167b7c93"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 17680,
+        "sha256": "a0d066056abd06e13862ee232abd243a683dffc05e1b460c3c0540a8167b7c93"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_guard_reader_windows_test.go",
+      "before": null,
+      "after": {
+        "bytes": 618,
+        "sha256": "b109afa8614de7e4168a9c249cb0f7091599f61dd25ba481b169b81b3ba56b75"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 618,
+        "sha256": "b109afa8614de7e4168a9c249cb0f7091599f61dd25ba481b169b81b3ba56b75"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_archive_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 7646,
+        "sha256": "7eba50a2b7c0661aac2ff47b3a9352c742ef36b1a594d4058ed681034c67b988"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 7646,
+        "sha256": "7eba50a2b7c0661aac2ff47b3a9352c742ef36b1a594d4058ed681034c67b988"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_command_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 8752,
+        "sha256": "e4898f8e938f1bccaf2493a0a741e33190c8485cf138c97f77ec34cee23eeb74"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 8752,
+        "sha256": "e4898f8e938f1bccaf2493a0a741e33190c8485cf138c97f77ec34cee23eeb74"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_model.go",
+      "before": null,
+      "after": {
+        "bytes": 7466,
+        "sha256": "2963a4329a3760a348f5a6f1bda25b02a56e77f8565d6f8e1f411279d32d826b"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 7466,
+        "sha256": "2963a4329a3760a348f5a6f1bda25b02a56e77f8565d6f8e1f411279d32d826b"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_model_test.go",
+      "before": null,
+      "after": {
+        "bytes": 11191,
+        "sha256": "f20309a8a7d21571068717c960c0c85f594804917fbf376c83616f7abf13734d"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 11191,
+        "sha256": "f20309a8a7d21571068717c960c0c85f594804917fbf376c83616f7abf13734d"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_registry_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 7766,
+        "sha256": "b8eeb2c433212b22280cecef3dbfb422ff9854efbbe867fdc49f9a5610d60014"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 7766,
+        "sha256": "b8eeb2c433212b22280cecef3dbfb422ff9854efbbe867fdc49f9a5610d60014"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_scope_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 17417,
+        "sha256": "ec1f8062f6d57667f5459d5d95ce02ece589c25d7cac07ab3b7b82390e2b97cc"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 17417,
+        "sha256": "ec1f8062f6d57667f5459d5d95ce02ece589c25d7cac07ab3b7b82390e2b97cc"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_source_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 4059,
+        "sha256": "94b862da46e73247b96a30e47fc99351d3976d279b43f6a371763cc4fb71ae16"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 4059,
+        "sha256": "94b862da46e73247b96a30e47fc99351d3976d279b43f6a371763cc4fb71ae16"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_system_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 3917,
+        "sha256": "ca064acb8f1169d2d4cca0d2929ab35e732f33fca0c822188865481d6203179a"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 3917,
+        "sha256": "ca064acb8f1169d2d4cca0d2929ab35e732f33fca0c822188865481d6203179a"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_guest_initial_windows_test.go",
+      "before": null,
+      "after": {
+        "bytes": 2116,
+        "sha256": "bbca6de5f135e8ad71d358a4a5a4b8c9d750a96337d0f6a19e31b8a28600fff5"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 2116,
+        "sha256": "bbca6de5f135e8ad71d358a4a5a4b8c9d750a96337d0f6a19e31b8a28600fff5"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_inspection_cli_windows.go",
+      "before": {
+        "bytes": 393,
+        "sha256": "5bcc94d3a5d16835b587ba6c34a99083726ef771b3e4496a917d53834dcbd547"
+      },
+      "after": {
+        "bytes": 526,
+        "sha256": "7c848690b802f35c997659ff264a6a2b86d0897d6b172318516a126a07e98ebd"
+      },
+      "rawBefore": {
+        "bytes": 393,
+        "sha256": "5bcc94d3a5d16835b587ba6c34a99083726ef771b3e4496a917d53834dcbd547"
+      },
+      "rawAfter": {
+        "bytes": 526,
+        "sha256": "7c848690b802f35c997659ff264a6a2b86d0897d6b172318516a126a07e98ebd"
+      }
+    },
+    {
+      "path": "pkg/managementconfig/runtime_managed_authority_windows.go",
+      "before": {
+        "bytes": 16759,
+        "sha256": "acd5808aecdce464e6415e554bee25498f6d065dc872ce992debee3a3c5584b0"
+      },
+      "after": {
+        "bytes": 17778,
+        "sha256": "6701ab83260dff0ca0b3fde920a80da866a3de9d6f2a6a4779ef082079d29c7e"
+      },
+      "rawBefore": {
+        "bytes": 16759,
+        "sha256": "acd5808aecdce464e6415e554bee25498f6d065dc872ce992debee3a3c5584b0"
+      },
+      "rawAfter": {
+        "bytes": 17778,
+        "sha256": "6701ab83260dff0ca0b3fde920a80da866a3de9d6f2a6a4779ef082079d29c7e"
+      }
+    },
+    {
+      "path": "pkg/service/cmd/fresh_setup_windows.go",
+      "before": {
+        "bytes": 7180,
+        "sha256": "8d7bdc85ea622e4d6050a6b004b03894f8e0a3016ef287178cb04c0e7b68d9a9"
+      },
+      "after": {
+        "bytes": 7386,
+        "sha256": "1d87ba6f359308277c4f61b1a477f1a78f19e16ba68ccde6029ff9758085a8d4"
+      },
+      "rawBefore": {
+        "bytes": 7180,
+        "sha256": "8d7bdc85ea622e4d6050a6b004b03894f8e0a3016ef287178cb04c0e7b68d9a9"
+      },
+      "rawAfter": {
+        "bytes": 7386,
+        "sha256": "1d87ba6f359308277c4f61b1a477f1a78f19e16ba68ccde6029ff9758085a8d4"
+      }
+    },
+    {
+      "path": "pkg/service/cmd/managed_runtime_windows.go",
+      "before": {
+        "bytes": 1284,
+        "sha256": "e515a7e0fe7b52b48f943c3e961737353719dfe36bd3c37b66c0d99216920939"
+      },
+      "after": {
+        "bytes": 1378,
+        "sha256": "ff390986764a05fb7b68372873151675314af31bf4fc50407c9d997c3a5d8049"
+      },
+      "rawBefore": {
+        "bytes": 1284,
+        "sha256": "e515a7e0fe7b52b48f943c3e961737353719dfe36bd3c37b66c0d99216920939"
+      },
+      "rawAfter": {
+        "bytes": 1378,
+        "sha256": "ff390986764a05fb7b68372873151675314af31bf4fc50407c9d997c3a5d8049"
+      }
+    }
+  ],
+  "strictPatchReplay": true,
+  "freshFilesystemExactTarget": true
+}

@@ -1,0 +1,67 @@
+[
+  {
+    "path": "scripts/backend-guest-input.mjs",
+    "bytes": 10429,
+    "sha256": "559533c1a69f1cdf3ac7bf0a621ee64c11fb4e9f4d1c9757a150b05cd2801a44"
+  },
+  {
+    "path": "scripts/build-backend.mjs",
+    "bytes": 17137,
+    "sha256": "f4222fb12b4bba95228961d640c1d5d91120d1c58742cad92fe82d0441b29ae0"
+  },
+  {
+    "path": "scripts/selected-guest-build-input.mjs",
+    "bytes": 5646,
+    "sha256": "f350533661e79712a71f2d397bfcc41b1a0302df520b1d6b42fde4ec49f069bc"
+  },
+  {
+    "path": "scripts/selected-guest-build-input.test.mjs",
+    "bytes": 5347,
+    "sha256": "ceaf7db2c07d060705aa93e16f392ad62edfa391ba0dc8e60e52fe44aeab4286"
+  },
+  {
+    "path": "scripts/test-data/selected-guest/README.md",
+    "bytes": 374,
+    "sha256": "d08a5a4a4edfa4948eb98427872721803bcede905f39fd0750ad92a9db78bcab"
+  },
+  {
+    "path": "scripts/test-data/selected-guest/base-lima-template.yaml",
+    "bytes": 12045,
+    "sha256": "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5"
+  },
+  {
+    "path": "scripts/test-data/selected-guest/base-manifest.yaml",
+    "bytes": 11024,
+    "sha256": "7565bfc06cf11e103a09c6d98ce431a5045d14c9bb2a610958ae23d08e4a9679"
+  },
+  {
+    "path": "scripts/winio-build-input-fs.mjs",
+    "bytes": 15649,
+    "sha256": "14f8b6ac127210319035fcbb2aa604a9efb49e88c98db622221569fdabff2289"
+  },
+  {
+    "path": "scripts/winio-build-input.mjs",
+    "bytes": 28565,
+    "sha256": "2583f6c088feaec9d87a7000e262afdb861377e227f6263b00fb7dcf2dd46490"
+  },
+  {
+    "path": "scripts/winio-build-input.test.mjs",
+    "bytes": 17570,
+    "sha256": "928fc8a659c3facfd017b0934efe36f00945543714cd9766cc15c764e8a7b67f"
+  },
+  {
+    "path": "src-tauri/src/runtime_winio_provenance.rs",
+    "bytes": 21124,
+    "sha256": "48b7ddc2151d2570f00e2ac42a4ae9e660514b4133d62fc3afcb7cd3282f60cf"
+  },
+  {
+    "path": "winio-custody.lock.json",
+    "bytes": 41540,
+    "sha256": "33182ccdd2a3a603c5793af424ebdfd447da63182af5a60dc908c6f9ce788687"
+  },
+  {
+    "path": "winio-runtime-offer.json",
+    "bytes": 1740,
+    "sha256": "b302421aaa81072469f477551a0922d1382c8991967750524e28598cc3e96f6b"
+  }
+]

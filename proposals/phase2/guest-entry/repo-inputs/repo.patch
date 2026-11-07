@@ -1,0 +1,4304 @@
+--- a/scripts/build-backend.mjs
++++ b/scripts/build-backend.mjs
+@@ -1,470 +1,476 @@
+-import { execFileSync } from "node:child_process";
+-import { createHash } from "node:crypto";
+-import {
+-  readFileSync,
+-  writeFileSync,
+-  mkdirSync,
+-  openSync,
+-  closeSync,
+-  renameSync,
+-  existsSync,
+-  copyFileSync,
+-  constants,
+-} from "node:fs";
+-import { resolve } from "node:path";
+-import { fileURLToPath } from "node:url";
+-import { gzipSync } from "node:zlib";
+-import { kubernetesBuildVersion } from "./kubernetes-build-version.mjs";
+-import {
+-  buildOutput,
+-  buildArguments,
+-  freshOutputPath,
+-} from "./build-output.mjs";
+-import { buildRddForwarder } from "./rdd-forwarder-build.mjs";
+-import { upgradeSdkBuildInput } from "./upgrade-sdk-build-input.mjs";
+-import {
+-  stageBackendGuestInputs,
+-  guestLicenseNames,
+-  captureBackendSourceFiles,
+-  verifyBackendSourceFiles,
+-} from "./backend-guest-input.mjs";
+-import {
+-  backendExecutionOrigin,
+-  isolatedUpstreamInput,
+-} from "./package-contract.mjs";
+-import {
+-  limaBuildEnvironment,
+-  prepareLimaWsl2BuildInput,
+-} from "./lima-wsl2-build-input.mjs";
+-import { projectWinioGoListData, winioBuildEnvironment } from "./winio-build-input.mjs";
+-const childEnv = winioBuildEnvironment(limaBuildEnvironment(process.env));
+-const root = fileURLToPath(new URL("../", import.meta.url));
+-freshOutputPath(
+-  root,
+-  buildArguments(process.argv.slice(2), ["--with-distro"]).requested,
+-);
+-const winioRuntimeOfferSource = readFileSync(resolve(root,"winio-runtime-offer.json"));
+-const lockSource = readFileSync(resolve(root, "upstream.lock.json"));
+-const lock = JSON.parse(lockSource);
+-const upstream = isolatedUpstreamInput(root, process.env.ORBWIN_UPSTREAM_DIR);
+-const guestPackagesLockSource = readFileSync(
+-  resolve(root, "guest-packages.lock.json"),
+-);
+-const guestPackagesLock = JSON.parse(guestPackagesLockSource);
+-execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
+-  env: childEnv,
+-  stdio: "inherit",
+-});
+-const go = resolve(root, `.tools/go${lock.go.version}/go/bin/go.exe`);
+-const ccDir = resolve(root, ".tools/mingw/ucrt64/bin");
+-const source = resolve(upstream, "rdd");
+-const gitlinks = new Set([
+-  "bats/lib/bats-assert",
+-  "bats/lib/bats-core",
+-  "bats/lib/bats-file",
+-  "bats/lib/bats-support",
+-]);
+-const sourceNames = () =>
+-  execFileSync(
+-    "git",
+-    [
+-      "ls-files",
+-      "--cached",
+-      "--others",
+-      "--exclude-standard",
+-      "-z",
+-      "--",
+-      "rdd",
+-    ],
+-    {
+-      cwd: upstream,
+-      encoding: "utf8",
+-    },
+-  )
+-    .split("\0")
+-    .filter(Boolean)
+-    .map((name) => {
+-      if (!name.startsWith("rdd/"))
+-        throw new Error("Backend source inventory escaped rdd");
+-      return name.slice(4);
+-    })
+-    .filter((name) => !gitlinks.has(name));
+-const canonicalSource = captureBackendSourceFiles(source, sourceNames());
+-if (canonicalSource.length !== 1210)
+-  throw new Error("Expected complete current 1210-file backend source");
+-const buildScriptNames = [
+-  "build-backend.mjs",
+-  "build-output.mjs",
+-  "backend-guest-input.mjs",
+-  "rdd-forwarder-build.mjs",
+-  "upgrade-sdk-build-input.mjs",
+-  "package-contract.mjs",
+-  "kubernetes-build-version.mjs",
+-  "lima-wsl2-build-input.mjs",
+-  "winio-build-input.mjs",
+-  "winio-build-input-fs.mjs",
+-];
+-const recipeHash = (name) =>
+-  createHash("sha256")
+-    .update(readFileSync(resolve(root, "scripts", name)))
+-    .digest("hex");
+-const buildScripts = Object.fromEntries(
+-  buildScriptNames.map((name) => [name, recipeHash(name)]),
+-);
+-// The SDK bundle must be produced first. Legacy/source-only builds without the
+-// cold SDK reader keep their existing behavior; successor builds require all
+-// five verified files and the signing key before compiling rdd.
+-const hasUpgradeSDKReader = existsSync(
+-  resolve(source, "pkg/managementconfig/upgrade_sdk_image.go"),
+-);
+-const requestedSDKBundle = process.env.ORBWIN_UPGRADE_SDK_BUNDLE;
+-if (requestedSDKBundle && !hasUpgradeSDKReader)
+-  throw new Error("Selected backend source has no compiled SDK upgrade reader");
+-const upgradeSDK = hasUpgradeSDKReader
+-  ? upgradeSdkBuildInput(root, requestedSDKBundle)
+-  : undefined;
+-const origin = hasUpgradeSDKReader
+-  ? backendExecutionOrigin(root, source, lock)
+-  : {};
+-const selectedOutput = buildOutput(root, process.argv.slice(2), [
+-  "--with-distro",
+-]);
+-const output = selectedOutput.directory;
+-const withDistro = selectedOutput.flags.has("--with-distro");
+-const moduleCache = execFileSync(go, ["env", "GOMODCACHE"], {
+-  cwd: source,
+-  env: childEnv,
+-  encoding: "utf8",
+-}).trim();
+-const lima = prepareLimaWsl2BuildInput({
+-  root,
+-  source,
+-  output,
+-  moduleCache,
+-  environment: childEnv,
+-});
+-const guestInputs = withDistro
+-  ? stageBackendGuestInputs(root, source, output, guestPackagesLockSource)
+-  : undefined;
+-const forwarder = buildRddForwarder(root, source, output);
+-const run = (args, env) =>
+-  execFileSync(go, args, {
+-    cwd: source,
+-    env: { ...lima.childEnvironment, ...env },
+-    stdio: "inherit",
+-  });
+-// Only the root-rdd module consumes this modfile. Nested -C src modules below
+-// retain their own module graph and receive no rootModuleFlags.
+-const runRoot = ([command, ...args], env) =>
+-  run([command, ...lima.rootModuleFlags, ...args], env);
+-runRoot(
+-  [
+-    "build",
+-    "-p",
+-    "4",
+-    "-trimpath",
+-    "-ldflags=-s -w",
+-    "-o",
+-    "pkg/guestagent/lima-guestagent.amd64",
+-    "github.com/lima-vm/lima/v2/cmd/lima-guestagent",
+-  ],
+-  { GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
+-);
+-const guest = resolve(source, "pkg/guestagent/lima-guestagent.amd64");
+-writeFileSync(guest + ".gz", gzipSync(readFileSync(guest)));
+-const guestOutput = resolve(source, "overlay/build/guest");
+-mkdirSync(guestOutput, { recursive: true });
+-// Keep the upstream Makefile's module/build boundaries. All guest components
+-// are built from the same patched source, even in the management-only bundle.
+-for (const [module, target, name] of [
+-  ["wsl-guestagent", ".", "rancher-desktop-guest-agent"],
+-  ["networking", "./cmd/network", "network-setup"],
+-  ["networking", "./cmd/vm", "vm-switch"],
+-  ["networking", "./cmd/proxy", "wsl-proxy"],
+-  ["rd-init", ".", "rd-init"],
+-  ["rdd-guest", ".", "rdd-guest"],
+-]) {
+-  run(
+-    [
+-      "-C",
+-      resolve(source, "src", module),
+-      "build",
+-      "-p",
+-      "4",
+-      "-trimpath",
+-      "-ldflags=-s -w",
+-      "-o",
+-      resolve(guestOutput, name),
+-      target,
+-    ],
+-    { GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
+-  );
+-}
+-// Existing WSL disks are not reimported during an upgrade. Carry the matching
+-// guest bridge separately so owned provisioning can update executable code
+-// without replacing the user's root/data disk.
+-writeFileSync(
+-  resolve(source, "pkg/embedded/rdd-guest.amd64"),
+-  readFileSync(resolve(guestOutput, "rdd-guest")),
+-);
+-const packageName =
+-  "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/version";
+-if (withDistro) {
+-  const xz = process.env.ORBWIN_XZ ?? "C:/msys64/usr/bin/xz.exe";
+-  // Exact offline inputs were verified/staged before compiler effects. These
+-  // generated copies belong only to the explicitly isolated source checkout.
+-  for (const name of ["distro.tar.xz", "mkcert", "nerdctl-full.tar.gz"])
+-    copyFileSync(
+-      resolve(guestInputs.upstream, name),
+-      resolve(source, "overlay/build", name),
+-      constants.COPYFILE_EXCL,
+-    );
+-  const packages = guestInputs.packages;
+-  const licenses = resolve(output, "licenses/guest-packages");
+-  mkdirSync(licenses, { recursive: true });
+-  for (const entry of Object.values(guestPackagesLock)) {
+-    const asset = entry.assets[0];
+-    const payload = readFileSync(resolve(packages, asset.filename));
+-    if (
+-      `sha256:${createHash("sha256").update(payload).digest("hex")}` !==
+-      asset.checksum
+-    )
+-      throw new Error(`Guest package checksum differs: ${asset.filename}`);
+-    const destination = asset.filename.endsWith("-source.rpm")
+-      ? resolve(licenses, asset.filename)
+-      : resolve(source, "pkg/embedded", asset.filename);
+-    writeFileSync(destination, payload);
+-  }
+-  for (const [rpm, member, filename] of [
+-    ["socat.rpm", "./usr/share/licenses/socat/COPYING", "socat-COPYING"],
+-    [
+-      "socat.rpm",
+-      "./usr/share/licenses/socat/COPYING.OpenSSL",
+-      "socat-COPYING.OpenSSL",
+-    ],
+-    [
+-      "libwrap.rpm",
+-      "./usr/share/doc/packages/libwrap0/DISCLAIMER",
+-      "libwrap-DISCLAIMER",
+-    ],
+-  ])
+-    writeFileSync(
+-      resolve(licenses, filename),
+-      execFileSync("tar.exe", ["-xOf", resolve(packages, rpm), member]),
+-    );
+-  writeFileSync(
+-    resolve(licenses, "guest-packages.lock.json"),
+-    guestPackagesLockSource,
+-  );
+-  const nerdctl = resolve(source, "overlay/build/nerdctl");
+-  mkdirSync(nerdctl, { recursive: true });
+-  execFileSync(
+-    "tar.exe",
+-    [
+-      "-xzf",
+-      resolve(source, "overlay/build/nerdctl-full.tar.gz"),
+-      "-C",
+-      nerdctl,
+-      "bin/buildctl",
+-      "bin/buildkitd",
+-      "bin/nerdctl",
+-    ],
+-    { stdio: "inherit" },
+-  );
+-  function xzToFile(args, destination) {
+-    const temporary = destination + ".partial";
+-    const fd = openSync(temporary, "w");
+-    try {
+-      execFileSync(xz, args, { stdio: ["ignore", fd, "inherit"] });
+-    } finally {
+-      closeSync(fd);
+-    }
+-    renameSync(temporary, destination);
+-  }
+-  const pristine = resolve(source, "overlay/build/distro.tar.xz");
+-  const working = resolve(source, "overlay/build/distro.tar");
+-  xzToFile(["--decompress", "--stdout", pristine], working);
+-  const mtime = execFileSync(
+-    "git",
+-    ["show", "-s", "--format=%ct", lock.commit],
+-    { cwd: source, encoding: "utf8" },
+-  ).trim();
+-  runRoot(
+-    [
+-      "run",
+-      "./cmd/distro-overlay",
+-      "--manifest",
+-      "overlay/manifest.yaml",
+-      "--source",
+-      "overlay",
+-      "--profile",
+-      "wsl",
+-      "--mtime",
+-      mtime,
+-      "--in-place",
+-      working,
+-    ],
+-    { GOOS: "windows", GOARCH: "amd64", CGO_ENABLED: "0" },
+-  );
+-  xzToFile(
+-    ["-1", "--threads=2", "--stdout", working],
+-    resolve(source, "pkg/embedded/distro.tar.xz"),
+-  );
+-}
+-const kubernetesComponents = ["k8s.io/component-base", "k8s.io/client-go"].map(
+-  (module) =>
+-    kubernetesBuildVersion(
+-      JSON.parse(
+-        execFileSync(
+-          go,
+-          ["list", ...lima.rootModuleFlags, "-m", "-json", module],
+-          {
+-            cwd: source,
+-            env: lima.childEnvironment,
+-            encoding: "utf8",
+-          },
+-        ),
+-      ),
+-    ),
+-);
+-const kubernetesFlags = kubernetesComponents
+-  .map((component) => {
+-    const namespace =
+-      component.module +
+-      (component.module.endsWith("client-go") ? "/pkg/version" : "/version");
+-    return `-X ${namespace}.gitVersion=${component.version} -X ${namespace}.gitMajor=${component.major} -X ${namespace}.gitMinor=${component.minor} -X ${namespace}.gitCommit= -X ${namespace}.gitTreeState=archive`;
+-  })
+-  .join(" ");
+-const ldflags = `-s -w -X ${packageName}.Version=v0.1.0-orbwin-dev -X ${packageName}.GitCommit=${lock.commit} -X github.com/rancher-sandbox/rancher-desktop-daemon/pkg/binlinks.expectedForwarderSHA256=${forwarder.binarySha256} ${kubernetesFlags} ${upgradeSDK?.linkerFlags ?? ""}`;
+-const nativeRootEnvironment = {
+-    GOOS: "windows",
+-    GOARCH: "amd64",
+-    CGO_ENABLED: "1",
+-    CC: resolve(ccDir, "gcc.exe"),
+-    PATH: `${ccDir};${process.env.PATH ?? process.env.Path}`,
+-    CGO_CFLAGS: "-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_USE_ALLOCA=1",
+-  };
+-const nativeRootTags = `sqlite_omit_load_extension${withDistro ? ",with_distro" : ""}`;
+-const nativeRootFlags = { cgo: "1", tags: nativeRootTags.split(",") };
+-function captureRootWinio() {
+-  const env = { ...lima.childEnvironment, ...nativeRootEnvironment };
+-  const options = { cwd: source, env, windowsHide: true, maxBuffer: 32 << 20 };
+-  const moduleBytes = execFileSync(go, ["list", ...lima.rootModuleFlags, "-m", "-json", "github.com/Microsoft/go-winio"], options);
+-  const packageBytes = execFileSync(go, ["list", ...lima.rootModuleFlags, "-p=4", `-tags=${nativeRootTags}`, "-compiled", "-deps", "-json=ImportPath,Dir,Module,GoFiles,CgoFiles,CompiledGoFiles,EmbedFiles,Error,DepsErrors", "./cmd/rdd"], options);
+-  const digest = (body) => createHash("sha256").update(body).digest("hex");
+-  const context = {
+-    artifact: "rdd.exe", main: "github.com/rancher-sandbox/rancher-desktop-daemon",
+-    goos: env.GOOS, goarch: env.GOARCH, goamd64: env.GOAMD64, ...nativeRootFlags,
+-    package: "./cmd/rdd", modMode: "readonly", modfile: lima.winio.manifest.modfile,
+-    modSHA256: digest(readFileSync(lima.winio.manifest.modfile)),
+-    sumSHA256: digest(readFileSync(lima.winio.manifest.modfile.replace(/\.mod$/, ".sum"))),
+-    sourceRoot: source, winioRoot: lima.winio.manifest.winioRoot,
+-  };
+-  const projected = projectWinioGoListData(moduleBytes, packageBytes, context);
+-  lima.winio.recordEffectiveClosure(projected.record, nativeRootFlags);
+-  return projected;
+-}
+-const winioBefore = captureRootWinio();
+-runRoot([
+-    "build",
+-    "-p",
+-    "4",
+-    "-trimpath",
+-    "-buildvcs=false",
+-    `-tags=sqlite_omit_load_extension${withDistro ? ",with_distro" : ""}`,
+-    `-ldflags=${ldflags}`,
+-    "-o",
+-    resolve(output, "rdd.exe"),
+-    "./cmd/rdd",
+-  ], nativeRootEnvironment);
+-const winioAfter = captureRootWinio();
+-const winioEffective = lima.winio.verifyEffectiveClosure(winioBefore.record, winioAfter.record, nativeRootFlags);
+-
+-const hash = (path) =>
+-  createHash("sha256").update(readFileSync(path)).digest("hex");
+-if (!readFileSync(resolve(root, "upstream.lock.json")).equals(lockSource))
+-  throw new Error(
+-    "Upstream lock changed during build. No new manifest was published; rebuild from a stable source tree.",
+-  );
+-if (
+-  !readFileSync(resolve(root, "guest-packages.lock.json")).equals(
+-    guestPackagesLockSource,
+-  )
+-)
+-  throw new Error(
+-    "Guest package lock changed during build. Rebuild before publishing a manifest.",
+-  );
+-execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
+-  env: childEnv,
+-  stdio: "inherit",
+-});
+-if (!readFileSync(resolve(root,"winio-runtime-offer.json")).equals(winioRuntimeOfferSource)) throw new Error("Runtime source offer changed during build");
+-upgradeSDK?.assertUnchanged();
+-guestInputs?.assertUnchanged();
+-lima.assertUnchanged();
+-verifyBackendSourceFiles(source, canonicalSource, sourceNames());
+-for (const name of buildScriptNames)
+-  if (recipeHash(name) !== buildScripts[name])
+-    throw new Error("Backend build recipe changed during build");
+-writeFileSync(
+-  resolve(output, "build-manifest.json"),
+-  JSON.stringify(
+-    {
+-      sourceCommit: lock.commit,
+-      sourceCheckout: upstream,
+-      canonicalSource,
+-      buildScripts,
+-      ...origin,
+-      go: lock.go.version,
+-      kubernetesComponents,
+-      guestPackagesLockSha256: createHash("sha256")
+-        .update(guestPackagesLockSource)
+-        .digest("hex"),
+-      distroEmbedded: withDistro,
+-      purpose: withDistro
+-        ? "Guest-capable development artifact; runtime coexistence remains unqualified."
+-        : "Management-only development build. Guest startup unsupported.",
+-      patches: lock.patches.map((path) => ({
+-        path,
+-        sha256: hash(resolve(root, path)),
+-      })),
+-      binarySha256: hash(resolve(output, "rdd.exe")),
+-      forwarder,
+-      limaWsl2: lima.manifest,
+-      portableLima: lima.portable,
+-      portableWinio: lima.portableWinio,
+-      winioRuntimeOfferSHA256: createHash("sha256").update(winioRuntimeOfferSource).digest("hex"),
+-      winioInput: lima.winio.manifest,
+-      winioEffective: { before: winioBefore, after: winioAfter, checked: winioEffective },
+-      ...(guestInputs
+-        ? {
+-            guestInputs: {
+-              ...guestInputs.manifest,
+-              licenses: Object.fromEntries(
+-                guestLicenseNames.map((name) => [
+-                  name,
+-                  hash(resolve(output, "licenses/guest-packages", name)),
+-                ]),
+-              ),
+-            },
+-          }
+-        : {}),
+-      ...(upgradeSDK ? { upgradeSDK: upgradeSDK.manifest } : {}),
+-      guestBinaries: [
+-        "rancher-desktop-guest-agent",
+-        "network-setup",
+-        "vm-switch",
+-        "wsl-proxy",
+-        "rd-init",
+-        "rdd-guest",
+-      ].map((name) => ({ name, sha256: hash(resolve(guestOutput, name)) })),
+-    },
+-    null,
+-    2,
+-  ),
+-);
+-console.log(
+-  withDistro
+-    ? "Built guest-capable rdd. Guest startup remains gated on isolation qualification."
+-    : "Built native rdd management binary. A guest-capable bundle remains required.",
+-);
++import { stageSelectedGuestBuildProfile, selectedRootBuildTags, selectedNestedGuestTags } from "./selected-guest-build-input.mjs";
++import { execFileSync } from "node:child_process";
++import { createHash } from "node:crypto";
++import {
++  readFileSync,
++  writeFileSync,
++  mkdirSync,
++  openSync,
++  closeSync,
++  renameSync,
++  existsSync,
++  copyFileSync,
++  constants,
++} from "node:fs";
++import { resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { gzipSync } from "node:zlib";
++import { kubernetesBuildVersion } from "./kubernetes-build-version.mjs";
++import {
++  buildOutput,
++  buildArguments,
++  freshOutputPath,
++} from "./build-output.mjs";
++import { buildRddForwarder } from "./rdd-forwarder-build.mjs";
++import { upgradeSdkBuildInput } from "./upgrade-sdk-build-input.mjs";
++import {
++  stageBackendGuestInputs,
++  guestLicenseNames,
++  captureBackendSourceFiles,
++  verifyBackendSourceFiles,
++} from "./backend-guest-input.mjs";
++import {
++  backendExecutionOrigin,
++  isolatedUpstreamInput,
++} from "./package-contract.mjs";
++import {
++  limaBuildEnvironment,
++  prepareLimaWsl2BuildInput,
++} from "./lima-wsl2-build-input.mjs";
++import { projectWinioGoListData, winioBuildEnvironment } from "./winio-build-input.mjs";
++const childEnv = winioBuildEnvironment(limaBuildEnvironment(process.env));
++const root = fileURLToPath(new URL("../", import.meta.url));
++freshOutputPath(
++  root,
++  buildArguments(process.argv.slice(2), ["--with-distro"]).requested,
++);
++const winioRuntimeOfferSource = readFileSync(resolve(root,"winio-runtime-offer.json"));
++const lockSource = readFileSync(resolve(root, "upstream.lock.json"));
++const lock = JSON.parse(lockSource);
++const upstream = isolatedUpstreamInput(root, process.env.ORBWIN_UPSTREAM_DIR);
++const guestPackagesLockSource = readFileSync(
++  resolve(root, "guest-packages.lock.json"),
++);
++const guestPackagesLock = JSON.parse(guestPackagesLockSource);
++execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
++  env: childEnv,
++  stdio: "inherit",
++});
++const go = resolve(root, `.tools/go${lock.go.version}/go/bin/go.exe`);
++const ccDir = resolve(root, ".tools/mingw/ucrt64/bin");
++const source = resolve(upstream, "rdd");
++const gitlinks = new Set([
++  "bats/lib/bats-assert",
++  "bats/lib/bats-core",
++  "bats/lib/bats-file",
++  "bats/lib/bats-support",
++]);
++const sourceNames = () =>
++  execFileSync(
++    "git",
++    [
++      "ls-files",
++      "--cached",
++      "--others",
++      "--exclude-standard",
++      "-z",
++      "--",
++      "rdd",
++    ],
++    {
++      cwd: upstream,
++      encoding: "utf8",
++    },
++  )
++    .split("\0")
++    .filter(Boolean)
++    .map((name) => {
++      if (!name.startsWith("rdd/"))
++        throw new Error("Backend source inventory escaped rdd");
++      return name.slice(4);
++    })
++    .filter((name) => !gitlinks.has(name));
++const canonicalSource = captureBackendSourceFiles(source, sourceNames());
++if (canonicalSource.length !== 1228)
++  throw new Error("Expected complete current 1228-file selected backend source");
++const buildScriptNames = [
++  "build-backend.mjs",
++  "build-output.mjs",
++  "backend-guest-input.mjs",
++  "selected-guest-build-input.mjs",
++  "rdd-forwarder-build.mjs",
++  "upgrade-sdk-build-input.mjs",
++  "package-contract.mjs",
++  "kubernetes-build-version.mjs",
++  "lima-wsl2-build-input.mjs",
++  "winio-build-input.mjs",
++  "winio-build-input-fs.mjs",
++];
++const recipeHash = (name) =>
++  createHash("sha256")
++    .update(readFileSync(resolve(root, "scripts", name)))
++    .digest("hex");
++const buildScripts = Object.fromEntries(
++  buildScriptNames.map((name) => [name, recipeHash(name)]),
++);
++// The SDK bundle must be produced first. Legacy/source-only builds without the
++// cold SDK reader keep their existing behavior; successor builds require all
++// five verified files and the signing key before compiling rdd.
++const hasUpgradeSDKReader = existsSync(
++  resolve(source, "pkg/managementconfig/upgrade_sdk_image.go"),
++);
++const requestedSDKBundle = process.env.ORBWIN_UPGRADE_SDK_BUNDLE;
++if (requestedSDKBundle && !hasUpgradeSDKReader)
++  throw new Error("Selected backend source has no compiled SDK upgrade reader");
++const upgradeSDK = hasUpgradeSDKReader
++  ? upgradeSdkBuildInput(root, requestedSDKBundle)
++  : undefined;
++const origin = hasUpgradeSDKReader
++  ? backendExecutionOrigin(root, source, lock)
++  : {};
++const selectedOutput = buildOutput(root, process.argv.slice(2), [
++  "--with-distro",
++]);
++const output = selectedOutput.directory;
++const withDistro = selectedOutput.flags.has("--with-distro");
++const selectedGuestProfile = stageSelectedGuestBuildProfile(source);
++const moduleCache = execFileSync(go, ["env", "GOMODCACHE"], {
++  cwd: source,
++  env: childEnv,
++  encoding: "utf8",
++}).trim();
++const lima = prepareLimaWsl2BuildInput({
++  root,
++  source,
++  output,
++  moduleCache,
++  environment: childEnv,
++});
++const guestInputs = withDistro
++  ? stageBackendGuestInputs(root, source, output, guestPackagesLockSource)
++  : undefined;
++const forwarder = buildRddForwarder(root, source, output);
++const run = (args, env) =>
++  execFileSync(go, args, {
++    cwd: source,
++    env: { ...lima.childEnvironment, ...env },
++    stdio: "inherit",
++  });
++// Only the root-rdd module consumes this modfile. Nested -C src modules below
++// retain their own module graph and receive no rootModuleFlags.
++const runRoot = ([command, ...args], env) =>
++  run([command, ...lima.rootModuleFlags, ...args], env);
++runRoot(
++  [
++    "build",
++    "-p",
++    "4",
++    "-trimpath",
++    "-ldflags=-s -w",
++    "-o",
++    "pkg/guestagent/lima-guestagent.amd64",
++    "github.com/lima-vm/lima/v2/cmd/lima-guestagent",
++  ],
++  { GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
++);
++const guest = resolve(source, "pkg/guestagent/lima-guestagent.amd64");
++writeFileSync(guest + ".gz", gzipSync(readFileSync(guest)));
++const guestOutput = resolve(source, "overlay/build/guest");
++mkdirSync(guestOutput, { recursive: true });
++// Keep the upstream Makefile's module/build boundaries. All guest components
++// are built from the same patched source, even in the management-only bundle.
++for (const [module, target, name] of [
++  ["wsl-guestagent", ".", "rancher-desktop-guest-agent"],
++  ["networking", "./cmd/network", "network-setup"],
++  ["networking", "./cmd/vm", "vm-switch"],
++  ["networking", "./cmd/proxy", "wsl-proxy"],
++  ["rd-init", ".", "rd-init"],
++  ["rdd-guest", ".", "rdd-guest"],
++]) {
++  run(
++    [
++      "-C",
++      resolve(source, "src", module),
++      "build",
++      ...selectedNestedGuestTags(module),
++      "-p",
++      "4",
++      "-trimpath",
++      "-ldflags=-s -w",
++      "-o",
++      resolve(guestOutput, name),
++      target,
++    ],
++    { GOOS: "linux", GOARCH: "amd64", CGO_ENABLED: "0" },
++  );
++}
++// Existing WSL disks are not reimported during an upgrade. Carry the matching
++// guest bridge separately so owned provisioning can update executable code
++// without replacing the user's root/data disk.
++writeFileSync(
++  resolve(source, "pkg/embedded/rdd-guest.amd64"),
++  readFileSync(resolve(guestOutput, "rdd-guest")),
++);
++const packageName =
++  "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/version";
++if (withDistro) {
++  const xz = process.env.ORBWIN_XZ ?? "C:/msys64/usr/bin/xz.exe";
++  // Exact offline inputs were verified/staged before compiler effects. These
++  // generated copies belong only to the explicitly isolated source checkout.
++  for (const name of ["distro.tar.xz", "mkcert", "nerdctl-full.tar.gz"])
++    copyFileSync(
++      resolve(guestInputs.upstream, name),
++      resolve(source, "overlay/build", name),
++      constants.COPYFILE_EXCL,
++    );
++  const packages = guestInputs.packages;
++  const licenses = resolve(output, "licenses/guest-packages");
++  mkdirSync(licenses, { recursive: true });
++  for (const entry of Object.values(guestPackagesLock)) {
++    const asset = entry.assets[0];
++    const payload = readFileSync(resolve(packages, asset.filename));
++    if (
++      `sha256:${createHash("sha256").update(payload).digest("hex")}` !==
++      asset.checksum
++    )
++      throw new Error(`Guest package checksum differs: ${asset.filename}`);
++    const destination = asset.filename.endsWith("-source.rpm")
++      ? resolve(licenses, asset.filename)
++      : resolve(source, "pkg/embedded", asset.filename);
++    writeFileSync(destination, payload);
++  }
++  for (const [rpm, member, filename] of [
++    ["socat.rpm", "./usr/share/licenses/socat/COPYING", "socat-COPYING"],
++    [
++      "socat.rpm",
++      "./usr/share/licenses/socat/COPYING.OpenSSL",
++      "socat-COPYING.OpenSSL",
++    ],
++    [
++      "libwrap.rpm",
++      "./usr/share/doc/packages/libwrap0/DISCLAIMER",
++      "libwrap-DISCLAIMER",
++    ],
++  ])
++    writeFileSync(
++      resolve(licenses, filename),
++      execFileSync("tar.exe", ["-xOf", resolve(packages, rpm), member]),
++    );
++  writeFileSync(
++    resolve(licenses, "guest-packages.lock.json"),
++    guestPackagesLockSource,
++  );
++  const nerdctl = resolve(source, "overlay/build/nerdctl");
++  mkdirSync(nerdctl, { recursive: true });
++  execFileSync(
++    "tar.exe",
++    [
++      "-xzf",
++      resolve(source, "overlay/build/nerdctl-full.tar.gz"),
++      "-C",
++      nerdctl,
++      "bin/buildctl",
++      "bin/buildkitd",
++      "bin/nerdctl",
++    ],
++    { stdio: "inherit" },
++  );
++  function xzToFile(args, destination) {
++    const temporary = destination + ".partial";
++    const fd = openSync(temporary, "w");
++    try {
++      execFileSync(xz, args, { stdio: ["ignore", fd, "inherit"] });
++    } finally {
++      closeSync(fd);
++    }
++    renameSync(temporary, destination);
++  }
++  const pristine = resolve(source, "overlay/build/distro.tar.xz");
++  const working = resolve(source, "overlay/build/distro.tar");
++  xzToFile(["--decompress", "--stdout", pristine], working);
++  const mtime = execFileSync(
++    "git",
++    ["show", "-s", "--format=%ct", lock.commit],
++    { cwd: source, encoding: "utf8" },
++  ).trim();
++  runRoot(
++    [
++      "run",
++      "./cmd/distro-overlay",
++      "--manifest",
++      selectedGuestProfile.manifest,
++      "--source",
++      "overlay",
++      "--profile",
++      "wsl",
++      "--mtime",
++      mtime,
++      "--in-place",
++      working,
++    ],
++    { GOOS: "windows", GOARCH: "amd64", CGO_ENABLED: "0" },
++  );
++  xzToFile(
++    ["-1", "--threads=2", "--stdout", working],
++    resolve(source, "pkg/embedded/distro.tar.xz"),
++  );
++}
++const kubernetesComponents = ["k8s.io/component-base", "k8s.io/client-go"].map(
++  (module) =>
++    kubernetesBuildVersion(
++      JSON.parse(
++        execFileSync(
++          go,
++          ["list", ...lima.rootModuleFlags, "-m", "-json", module],
++          {
++            cwd: source,
++            env: lima.childEnvironment,
++            encoding: "utf8",
++          },
++        ),
++      ),
++    ),
++);
++const kubernetesFlags = kubernetesComponents
++  .map((component) => {
++    const namespace =
++      component.module +
++      (component.module.endsWith("client-go") ? "/pkg/version" : "/version");
++    return `-X ${namespace}.gitVersion=${component.version} -X ${namespace}.gitMajor=${component.major} -X ${namespace}.gitMinor=${component.minor} -X ${namespace}.gitCommit= -X ${namespace}.gitTreeState=archive`;
++  })
++  .join(" ");
++const ldflags = `-s -w -X ${packageName}.Version=v0.1.0-orbwin-dev -X ${packageName}.GitCommit=${lock.commit} -X github.com/rancher-sandbox/rancher-desktop-daemon/pkg/binlinks.expectedForwarderSHA256=${forwarder.binarySha256} ${kubernetesFlags} ${upgradeSDK?.linkerFlags ?? ""}`;
++const nativeRootEnvironment = {
++    GOOS: "windows",
++    GOARCH: "amd64",
++    CGO_ENABLED: "1",
++    CC: resolve(ccDir, "gcc.exe"),
++    PATH: `${ccDir};${process.env.PATH ?? process.env.Path}`,
++    CGO_CFLAGS: "-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_USE_ALLOCA=1",
++  };
++const nativeRootTags = selectedRootBuildTags(withDistro).join(",");
++const nativeRootFlags = { cgo: "1", tags: nativeRootTags.split(",") };
++function captureRootWinio() {
++  const env = { ...lima.childEnvironment, ...nativeRootEnvironment };
++  const options = { cwd: source, env, windowsHide: true, maxBuffer: 32 << 20 };
++  const moduleBytes = execFileSync(go, ["list", ...lima.rootModuleFlags, "-m", "-json", "github.com/Microsoft/go-winio"], options);
++  const packageBytes = execFileSync(go, ["list", ...lima.rootModuleFlags, "-p=4", `-tags=${nativeRootTags}`, "-compiled", "-deps", "-json=ImportPath,Dir,Module,GoFiles,CgoFiles,CompiledGoFiles,EmbedFiles,Error,DepsErrors", "./cmd/rdd"], options);
++  const digest = (body) => createHash("sha256").update(body).digest("hex");
++  const context = {
++    artifact: "rdd.exe", main: "github.com/rancher-sandbox/rancher-desktop-daemon",
++    goos: env.GOOS, goarch: env.GOARCH, goamd64: env.GOAMD64, ...nativeRootFlags,
++    package: "./cmd/rdd", modMode: "readonly", modfile: lima.winio.manifest.modfile,
++    modSHA256: digest(readFileSync(lima.winio.manifest.modfile)),
++    sumSHA256: digest(readFileSync(lima.winio.manifest.modfile.replace(/\.mod$/, ".sum"))),
++    sourceRoot: source, winioRoot: lima.winio.manifest.winioRoot,
++  };
++  const projected = projectWinioGoListData(moduleBytes, packageBytes, context);
++  lima.winio.recordEffectiveClosure(projected.record, nativeRootFlags);
++  return projected;
++}
++const winioBefore = captureRootWinio();
++runRoot([
++    "build",
++    "-p",
++    "4",
++    "-trimpath",
++    "-buildvcs=false",
++    `-tags=${nativeRootTags}`,
++    `-ldflags=${ldflags}`,
++    "-o",
++    resolve(output, "rdd.exe"),
++    "./cmd/rdd",
++  ], nativeRootEnvironment);
++const winioAfter = captureRootWinio();
++const winioEffective = lima.winio.verifyEffectiveClosure(winioBefore.record, winioAfter.record, nativeRootFlags);
++
++const hash = (path) =>
++  createHash("sha256").update(readFileSync(path)).digest("hex");
++if (!readFileSync(resolve(root, "upstream.lock.json")).equals(lockSource))
++  throw new Error(
++    "Upstream lock changed during build. No new manifest was published; rebuild from a stable source tree.",
++  );
++if (
++  !readFileSync(resolve(root, "guest-packages.lock.json")).equals(
++    guestPackagesLockSource,
++  )
++)
++  throw new Error(
++    "Guest package lock changed during build. Rebuild before publishing a manifest.",
++  );
++execFileSync(process.execPath, [resolve(root, "scripts/upstream.mjs")], {
++  env: childEnv,
++  stdio: "inherit",
++});
++if (!readFileSync(resolve(root,"winio-runtime-offer.json")).equals(winioRuntimeOfferSource)) throw new Error("Runtime source offer changed during build");
++upgradeSDK?.assertUnchanged();
++guestInputs?.assertUnchanged();
++selectedGuestProfile.assertUnchanged();
++lima.assertUnchanged();
++verifyBackendSourceFiles(source, canonicalSource, sourceNames());
++for (const name of buildScriptNames)
++  if (recipeHash(name) !== buildScripts[name])
++    throw new Error("Backend build recipe changed during build");
++writeFileSync(
++  resolve(output, "build-manifest.json"),
++  JSON.stringify(
++    {
++      sourceCommit: lock.commit,
++      sourceCheckout: upstream,
++      canonicalSource,
++      buildScripts,
++      ...origin,
++      go: lock.go.version,
++      kubernetesComponents,
++      guestPackagesLockSha256: createHash("sha256")
++        .update(guestPackagesLockSource)
++        .digest("hex"),
++      distroEmbedded: withDistro,
++      selectedGuest: selectedGuestProfile.record,
++      purpose: withDistro
++        ? "Guest-capable development artifact; runtime coexistence remains unqualified."
++        : "Management-only development build. Guest startup unsupported.",
++      patches: lock.patches.map((path) => ({
++        path,
++        sha256: hash(resolve(root, path)),
++      })),
++      binarySha256: hash(resolve(output, "rdd.exe")),
++      forwarder,
++      limaWsl2: lima.manifest,
++      portableLima: lima.portable,
++      portableWinio: lima.portableWinio,
++      winioRuntimeOfferSHA256: createHash("sha256").update(winioRuntimeOfferSource).digest("hex"),
++      winioInput: lima.winio.manifest,
++      winioEffective: { before: winioBefore, after: winioAfter, checked: winioEffective },
++      ...(guestInputs
++        ? {
++            guestInputs: {
++              ...guestInputs.manifest,
++              licenses: Object.fromEntries(
++                guestLicenseNames.map((name) => [
++                  name,
++                  hash(resolve(output, "licenses/guest-packages", name)),
++                ]),
++              ),
++            },
++          }
++        : {}),
++      ...(upgradeSDK ? { upgradeSDK: upgradeSDK.manifest } : {}),
++      guestBinaries: [
++        "rancher-desktop-guest-agent",
++        "network-setup",
++        "vm-switch",
++        "wsl-proxy",
++        "rd-init",
++        "rdd-guest",
++      ].map((name) => ({ name, sha256: hash(resolve(guestOutput, name)) })),
++    },
++    null,
++    2,
++  ),
++);
++console.log(
++  withDistro
++    ? "Built guest-capable rdd. Guest startup remains gated on isolation qualification."
++    : "Built native rdd management binary. A guest-capable bundle remains required.",
++);
+--- /dev/null
++++ b/scripts/selected-guest-build-input.mjs
+@@ -0,0 +1,167 @@
++// Fixed selected guest source/archive profile. DATA only, no runtime permission.
++import assert from "node:assert/strict";
++import { createHash } from "node:crypto";
++import {
++  existsSync,
++  lstatSync,
++  mkdirSync,
++  readFileSync,
++  writeFileSync,
++} from "node:fs";
++import { dirname, join, resolve } from "node:path";
++
++export const selectedGuestTag = "orbwin_selected_guest";
++export const selectedGuestMasks = Object.freeze([
++  "network-setup.service",
++  "rancher-desktop-guest-agent.service",
++  "wsl-proxy.service",
++  "rdd-guest.service",
++  "orbwin-wsl-client.service",
++]);
++const hash = (b) => createHash("sha256").update(b).digest("hex");
++const baselineManifest =
++  "7565bfc06cf11e103a09c6d98ce431a5045d14c9bb2a610958ae23d08e4a9679";
++const baselineTemplate =
++  "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5";
++function text(bytes, pin) {
++  assert.ok(
++    Buffer.isBuffer(bytes) && bytes.length > 0 && bytes.length <= 2 << 20,
++  );
++  const s = bytes.toString("utf8");
++  assert.ok(Buffer.from(s).equals(bytes), "guest source UTF8");
++  const normalized = s.replaceAll("\r\n", "\n");
++  assert.ok(!normalized.includes("\r"));
++  assert.equal(
++    hash(Buffer.from(normalized)),
++    pin,
++    "reviewed guest source changed",
++  );
++  return normalized;
++}
++export function selectedRootBuildTags(withDistro) {
++  assert.equal(typeof withDistro, "boolean");
++  return [
++    "sqlite_omit_load_extension",
++    selectedGuestTag,
++    ...(withDistro ? ["with_distro"] : []),
++  ].sort();
++}
++export function selectedNestedGuestTags(module) {
++  assert.ok(
++    ["wsl-guestagent", "networking", "rd-init", "rdd-guest"].includes(module),
++  );
++  return module === "rdd-guest" ? ["-tags=" + selectedGuestTag] : [];
++}
++export function deriveSelectedGuestManifestData(bytes) {
++  const original = text(bytes, baselineManifest);
++  const extra = selectedGuestMasks
++    .map(
++      (n) =>
++        `- path: /etc/systemd/system/${n}\n  type: symlink\n  target: /dev/null\n  profiles: [wsl]\n`,
++    )
++    .join("");
++  return Buffer.from(
++    original +
++      "\n# OrbWin selected: no legacy auto-bind before genuine private bootstrap.\n" +
++      extra,
++  );
++}
++export function deriveSelectedLimaTemplateData(bytes) {
++  let original = text(bytes, baselineTemplate);
++  const start = original.indexOf("# Carry WSL clients through");
++  const end = original.indexOf("# Write runtime parameters", start);
++  assert.ok(start > 0 && end > start, "known legacy provision block");
++  original =
++    original.slice(0, start) +
++    "# Selected native/private bootstrap owns role code and credentials.\n" +
++    original.slice(end);
++  for (const [socket, host] of [
++    ["/var/run/docker.sock", "HOST_DOCKER_SOCKET"],
++    ["/run/k3s/containerd/containerd.sock", "HOST_CONTAINERD_SOCKET"],
++  ]) {
++    const block = `- guestPortRange:\n  - 0\n  - 0\n  guestSocket: ${socket}\n  hostPortRange:\n  - 0\n  - 0\n  hostSocket: "{{.Param.${host}}}"\n`;
++    assert.equal(
++      original.split(block).length,
++      2,
++      "known automatic socket route",
++    );
++    original = original.replace(block, "");
++  }
++  for (const forbidden of [
++    "rdd-guest wsl-client",
++    "orbwin-wsl-client.service",
++    "ORBWIN_WSL_TLS_DIR",
++    "PARAM_ORBWIN_GUEST_BRIDGE",
++    "guestSocket: /var/run/docker.sock",
++    "guestSocket: /run/k3s/containerd/containerd.sock",
++  ])
++    assert.ok(!original.includes(forbidden), "legacy selected route refused");
++  return Buffer.from(original);
++}
++function safe(path) {
++  path = resolve(path);
++  for (let p = path; ; p = dirname(p)) {
++    if (existsSync(p))
++      assert.ok(!lstatSync(p).isSymbolicLink(), "guest input redirect");
++    if (dirname(p) === p) break;
++  }
++  return path;
++}
++function read(path) {
++  path = safe(path);
++  const s = lstatSync(path);
++  assert.ok(s.isFile() && s.size <= 2 << 20);
++  const b = readFileSync(path);
++  assert.equal(b.length, s.size);
++  return b;
++}
++export function stageSelectedGuestBuildProfile(source) {
++  source = safe(source);
++  const manifestPath = join(source, "overlay/manifest.yaml");
++  const templatePath = join(
++    source,
++    "pkg/controllers/app/app/lima-template.yaml",
++  );
++  const selectedPath = join(
++    source,
++    "pkg/controllers/app/app/lima-template-selected.yaml",
++  );
++  const manifestBefore = read(manifestPath),
++    templateBefore = read(templatePath),
++    selectedBefore = read(selectedPath);
++  const derived = deriveSelectedGuestManifestData(manifestBefore);
++  assert.ok(
++    selectedBefore.equals(deriveSelectedLimaTemplateData(templateBefore)),
++    "selected template differs from fixed derivation",
++  );
++  const destination = safe(
++    join(source, "overlay/build/orbwin-selected-manifest.yaml"),
++  );
++  assert.ok(!existsSync(destination), "fresh selected guest manifest required");
++  mkdirSync(dirname(destination), { recursive: true });
++  writeFileSync(destination, derived, { flag: "wx" });
++  return Object.freeze({
++    manifest: destination,
++    record: Object.freeze({
++      schema: 1,
++      profile: "orbwin-selected-guest-v2",
++      tag: selectedGuestTag,
++      manifestSHA256: hash(derived),
++      baseManifestSHA256: hash(manifestBefore),
++      baseTemplateSHA256: hash(templateBefore),
++      selectedTemplateSHA256: hash(selectedBefore),
++      legacyAutoBindMasked: [...selectedGuestMasks],
++      privateDelivery: "required-not-issued",
++      runtimeQualified: false,
++    }),
++    assertUnchanged() {
++      assert.ok(
++        read(manifestPath).equals(manifestBefore) &&
++          read(templatePath).equals(templateBefore) &&
++          read(selectedPath).equals(selectedBefore) &&
++          read(destination).equals(derived),
++        "selected guest source changed",
++      );
++    },
++  });
++}
+--- /dev/null
++++ b/scripts/selected-guest-build-input.test.mjs
+@@ -0,0 +1,151 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import {
++  readFileSync,
++  writeFileSync,
++  mkdirSync,
++  mkdtempSync,
++  realpathSync,
++  rmSync,
++  existsSync,
++} from "node:fs";
++import { dirname, join, basename } from "node:path";
++import { fileURLToPath } from "node:url";
++import { tmpdir } from "node:os";
++import {
++  selectedGuestTag,
++  selectedGuestMasks,
++  selectedRootBuildTags,
++  selectedNestedGuestTags,
++  deriveSelectedGuestManifestData,
++  deriveSelectedLimaTemplateData,
++  stageSelectedGuestBuildProfile,
++} from "./selected-guest-build-input.mjs";
++const here = dirname(fileURLToPath(import.meta.url));
++const manifest = readFileSync(
++  join(here, "test-data/selected-guest/base-manifest.yaml"),
++);
++const template = readFileSync(
++  join(here, "test-data/selected-guest/base-lima-template.yaml"),
++);
++function fixture(t) {
++  const root = realpathSync(
++    mkdtempSync(join(tmpdir(), "orbwin-selected-guest-build-")),
++  );
++  t.after(() => {
++    assert.equal(realpathSync(root), root);
++    assert.equal(realpathSync(dirname(root)), realpathSync(tmpdir()));
++    assert.match(basename(root), /^orbwin-selected-guest-build-/);
++    rmSync(root, { recursive: true });
++  });
++  for (const [n, b] of [
++    ["overlay/manifest.yaml", manifest],
++    ["pkg/controllers/app/app/lima-template.yaml", template],
++    [
++      "pkg/controllers/app/app/lima-template-selected.yaml",
++      deriveSelectedLimaTemplateData(template),
++    ],
++  ]) {
++    const p = join(root, n);
++    mkdirSync(dirname(p), { recursive: true });
++    writeFileSync(p, b, { flag: "wx" });
++  }
++  return root;
++}
++test("fixed product tags select guest and Root without an unauthenticated build alternative", () => {
++  assert.deepEqual(selectedRootBuildTags(false), [
++    selectedGuestTag,
++    "sqlite_omit_load_extension",
++  ]);
++  assert.deepEqual(selectedRootBuildTags(true), [
++    selectedGuestTag,
++    "sqlite_omit_load_extension",
++    "with_distro",
++  ]);
++  assert.deepEqual(selectedNestedGuestTags("rdd-guest"), [
++    "-tags=" + selectedGuestTag,
++  ]);
++  assert.deepEqual(selectedNestedGuestTags("networking"), []);
++  assert.throws(() => selectedNestedGuestTags("arbitrary"));
++  assert.throws(() => selectedRootBuildTags("false"));
++});
++test("actual selected manifest keeps base and appends exactly the five fixed WSL masks", () => {
++  const b = deriveSelectedGuestManifestData(manifest).toString();
++  assert.ok(b.startsWith(manifest.toString()));
++  const tail = b.slice(manifest.length);
++  assert.equal((tail.match(/type: symlink/g) || []).length, 5);
++  for (const name of selectedGuestMasks) {
++    assert.ok(
++      tail.includes(
++        `- path: /etc/systemd/system/${name}\n  type: symlink\n  target: /dev/null\n  profiles: [wsl]`,
++      ),
++    );
++  }
++  assert.equal(tail.split("target: /dev/null").length - 1, 5);
++});
++test("actual selected Lima template removes independent legacy reinstaller and socket routes", () => {
++  const selected = deriveSelectedLimaTemplateData(template).toString();
++  for (const x of [
++    "orbwin-wsl-client.service",
++    "rdd-guest wsl-client",
++    "ORBWIN_WSL_TLS_DIR",
++    "guestSocket: /var/run/docker.sock",
++    "guestSocket: /run/k3s/containerd/containerd.sock",
++  ]) {
++    assert.ok(!selected.includes(x));
++    assert.ok(template.includes(Buffer.from(x)));
++  }
++  assert.ok(selected.includes("KUBERNETES_ENABLED"));
++  assert.ok(selected.includes("CONTAINER_ENGINE"));
++  assert.throws(() =>
++    deriveSelectedLimaTemplateData(
++      Buffer.concat([template, Buffer.from("# drift")]),
++    ),
++  );
++  assert.throws(() =>
++    deriveSelectedGuestManifestData(
++      Buffer.concat([manifest, Buffer.from("# drift")]),
++    ),
++  );
++});
++test("actual profile staging uses CREATE_NEW and catches source or derived-file changes", (t) => {
++  const root = fixture(t),
++    p = stageSelectedGuestBuildProfile(root);
++  assert.equal(p.record.runtimeQualified, false);
++  assert.equal(p.record.privateDelivery, "required-not-issued");
++  assert.deepEqual(
++    readFileSync(p.manifest),
++    deriveSelectedGuestManifestData(manifest),
++  );
++  p.assertUnchanged();
++  assert.throws(() => stageSelectedGuestBuildProfile(root), /fresh/);
++  writeFileSync(p.manifest, "changed");
++  assert.throws(() => p.assertUnchanged(), /changed/);
++});
++test("wrong selected template refuses before producing any manifest", (t) => {
++  const root = fixture(t);
++  writeFileSync(
++    join(root, "pkg/controllers/app/app/lima-template-selected.yaml"),
++    "legacy fallback",
++  );
++  assert.throws(() => stageSelectedGuestBuildProfile(root), /differs/);
++  assert.equal(
++    existsSync(join(root, "overlay/build/orbwin-selected-manifest.yaml")),
++    false,
++  );
++});
++test("actual product recipe binds fixed tags, derived archive manifest and identical binary copy", () => {
++  const source = readFileSync(join(here, "build-backend.mjs"), "utf8");
++  for (const text of [
++    "...selectedNestedGuestTags(module)",
++    "selectedRootBuildTags(withDistro).join",
++    "selectedGuestProfile.manifest",
++    "selectedGuestProfile.assertUnchanged()",
++    "selectedGuest: selectedGuestProfile.record",
++  ]) {
++    assert.ok(source.includes(text));
++  }
++  assert.ok(source.includes('resolve(source, "pkg/embedded/rdd-guest.amd64")'));
++  assert.ok(source.includes('readFileSync(resolve(guestOutput, "rdd-guest"))'));
++  assert.ok(!source.includes('"--manifest",\n      "overlay/manifest.yaml"'));
++});
+--- /dev/null
++++ b/scripts/test-data/selected-guest/README.md
+@@ -0,0 +1 @@
++Original selected rdd source fixtures from Source4 aeccd2cf / full1225 a0e44769. These two original Apache-2.0 upstream/OrbWin YAML inputs are DATA, not frozen semantic JS. Current selected-guest-build-input.mjs derives the tested selected output. Original source history/provenance remains in the qualification receipt; no runtime archive/key/native evidence is supplied.
+--- /dev/null
++++ b/scripts/test-data/selected-guest/base-lima-template.yaml
+@@ -0,0 +1,277 @@
++mounts:
++- location: "~"
++  writable: true
++ssh:
++  loadDotSSHPubKeys: false
++firmware:
++  legacyBIOS: false
++containerd:
++  system: false
++  user: false
++portForwards:
++- guestPort: 6443
++  hostIP: 127.0.0.1
++  hostPort: 6443
++- guestIPMustBeZero: true
++  guestPortRange:
++  - 1
++  - 65535
++  hostIP: 0.0.0.0
++  hostPortRange:
++  - 0
++  - 0
++- guestPortRange:
++  - 0
++  - 0
++  guestSocket: /var/run/docker.sock
++  hostPortRange:
++  - 0
++  - 0
++  hostSocket: "{{.Param.HOST_DOCKER_SOCKET}}"
++- guestPortRange:
++  - 0
++  - 0
++  guestSocket: /run/k3s/containerd/containerd.sock
++  hostPortRange:
++  - 0
++  - 0
++  hostSocket: "{{.Param.HOST_CONTAINERD_SOCKET}}"
++provision:
++# Carry WSL clients through the same Windows Docker adaptation as named-pipe
++# clients. No second daemon: extend the existing upstream rdd guest bridge.
++- mode: system
++  script: |
++    #!/bin/bash
++    set -o errexit -o nounset -o pipefail
++    # ORBWIN_PROVISION_CONTEXT
++    case "$PARAM_HOST_DOCKER_SOCKET" in
++      *docker-rancher-desktop-orbwin-proof) SHARE=/mnt/wsl/orbwin-proof; PROFILE=.rdorbwin-proof ;;
++      *docker-rancher-desktop-orbwin) SHARE=/mnt/wsl/orbwin; PROFILE=.rdorbwin ;;
++      *) exit 0 ;;
++    esac
++    AUTH="$PARAM_HOST_HOME_GUEST/$PROFILE/wsl-client-auth"
++    # Existing WSL root disks retain their original overlay. Update only the
++    # owned helper, with verified bytes and same-directory atomic replacement.
++    test -n "$PARAM_ORBWIN_GUEST_BRIDGE"
++    test -n "$PARAM_ORBWIN_GUEST_BRIDGE_SHA256"
++    STAGED=$(mktemp /usr/local/bin/.orbwin-rdd-guest.XXXXXXXX)
++    trap 'rm -f "$STAGED"' EXIT
++    cp -- "$PARAM_ORBWIN_GUEST_BRIDGE" "$STAGED"
++    test "$(sha256sum "$STAGED" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_GUEST_BRIDGE_SHA256"
++    chmod 0755 "$STAGED"
++    systemctl stop rdd-guest.service
++    mv -f -- "$STAGED" /usr/local/bin/rdd-guest
++    trap - EXIT
++    AUTH="${AUTH//%/%%}"
++    mkdir -p /etc/systemd/system/rdd-guest.service.d /etc/systemd/system/docker.service.d
++    rm -f /etc/systemd/system/docker.service.d/orbwin-wsl.conf
++    cat > /etc/systemd/system/docker.service.d/zz-orbwin-wsl.conf <<EOF
++    [Unit]
++    [Service]
++    ExecStartPre=/usr/bin/mkdir -p /run/orbwin
++    ExecStart=
++    ExecStart=/usr/local/bin/wsl-exec /usr/bin/dockerd --add-runtime oci=/usr/sbin/runc \$DOCKER_OPTS --host unix:///run/orbwin/moby-internal.sock
++    ExecStartPost=
++    ExecStartPost=/usr/bin/chmod 0600 /run/orbwin/moby-internal.sock
++    EOF
++    rm -f /etc/systemd/system/docker.socket.d/orbwin-wsl.conf
++    if [[ -f /etc/systemd/system/orbwin-wsl-socket.service ]]; then
++        systemctl stop orbwin-wsl-socket.service
++        rm -f /etc/systemd/system/orbwin-wsl-socket.service
++    fi
++    cat > /etc/systemd/system/rdd-guest.service.d/orbwin-wsl.conf <<EOF
++    [Unit]
++    Wants=orbwin-wsl-client.service
++    EOF
++    cat > /etc/systemd/system/orbwin-wsl-client.service <<EOF
++    [Unit]
++    Description=OrbWin authenticated WSL Docker client relay
++    Requires=network-setup.service rdd-guest.service
++    After=network-setup.service rdd-guest.service
++    BindsTo=rdd-guest.service
++    PartOf=rdd-guest.service
++    [Service]
++    Environment="ORBWIN_WSL_SOCKET=$SHARE/docker.sock"
++    Environment="ORBWIN_WSL_TLS_DIR=$AUTH"
++    ExecStart=/usr/local/bin/wsl-exec /usr/local/bin/rdd-guest wsl-client
++    Restart=on-failure
++    RestartSec=5s
++    EOF
++    systemctl daemon-reload
++# Write runtime parameters as a systemd EnvironmentFile. Using mode:data lets
++# Lima's Go template engine handle quoting via printf "%q", which produces
++# double-quoted strings compatible with systemd's EnvironmentFile parser.
++# Lima's boot script creates parent directories automatically.
++- mode: data
++  path: /etc/sysconfig/rancher-desktop
++  content: |
++    CONTAINER_ENGINE={{printf "%q" .Param.CONTAINER_ENGINE}}
++    HOST_DOCKER_SOCKET={{printf "%q" .Param.HOST_DOCKER_SOCKET}}
++    HOST_HOME_GUEST={{printf "%q" .Param.HOST_HOME_GUEST}}
++    KUBERNETES_ENABLED={{.Param.KUBERNETES_ENABLED}}
++    KUBERNETES_VERSION={{.Param.KUBERNETES_VERSION}}
++    KUBERNETES_PORT={{.Param.KUBERNETES_PORT}}
++    VM_SWITCH_LOG={{printf "%q" .Param.VM_SWITCH_LOG}}
++    NETWORK_SETUP_EXTRA_ARGS={{printf "%q" .Param.NETWORK_SETUP_EXTRA_ARGS}}
++# Stream guest journals and lima-init.log (which die with the VM) to the host
++# log dir so CI artifacts carry them. Empty GUEST_LOG_DIR (no RDD_KEEP_LOGS)
++# makes this a no-op. The capture units are transient, restarted each boot.
++- mode: system
++  script: |
++    #!/bin/bash
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
++
++    if [[ -z $PARAM_GUEST_LOG_DIR ]]; then
++        exit 0
++    fi
++
++    if ! systemctl is-active --quiet rdd-journal-capture.service; then
++        systemd-run --collect --unit=rdd-journal-capture /bin/sh -c \
++            "journalctl --follow --no-tail --output=short-iso --unit=lima-init.service --unit=network-setup.service --unit=rancher-desktop-guest-agent.service --unit=rdd-guest.service --unit=wsl-proxy.service >> \"$PARAM_GUEST_LOG_DIR/guest-journal.log\""
++    fi
++    if ! systemctl is-active --quiet rdd-lima-init-capture.service; then
++        systemd-run --collect --unit=rdd-lima-init-capture /bin/sh -c \
++            "tail -c +0 -F /var/log/lima-init.log >> \"$PARAM_GUEST_LOG_DIR/lima-init.log\""
++    fi
++- mode: system
++  script: |
++    #!/bin/bash
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
++
++    # Restart rancher-desktop.target on exit, even if a step below fails. The
++    # container engine belongs to this target but does not depend on
++    # Kubernetes, so a failed k3s install must not leave it stopped. --no-block
++    # returns immediately; the kubeconfig probe below absorbs k3s startup time.
++    trap 'systemctl start --no-block rancher-desktop.target' EXIT
++
++    systemctl stop rancher-desktop.target
++
++    # Enable the requested container engine and disable the other.
++    # containerd.service has a Conflicts=docker, so we must not start both.
++    CONTAINERD_ACTION=$([[ $PARAM_CONTAINER_ENGINE = containerd ]] && echo enable || echo disable)
++    DOCKER_ACTION=$([[ $PARAM_CONTAINER_ENGINE = moby ]] && echo enable || echo disable)
++    systemctl "$CONTAINERD_ACTION" containerd.service buildkitd.service
++    systemctl "$DOCKER_ACTION" docker.service
++    case "$PARAM_HOST_DOCKER_SOCKET" in
++      *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++        # Unit dependency lists cannot be cleared in a drop-in. Mask the
++        # inherited weak socket dependency so Docker cannot reclaim the relay.
++        systemctl mask --now docker.socket ;;
++      *) systemctl "$DOCKER_ACTION" docker.socket ;;
++    esac
++
++    if [[ $PARAM_KUBERNETES_ENABLED == "true" ]]; then
++        case "$PARAM_HOST_DOCKER_SOCKET" in
++          *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++            # cri-dockerd invokes socat for Kubernetes port forwarding. Verify
++            # the bundled distribution packages; never depend on guest DNS.
++            test -n "$PARAM_ORBWIN_SOCAT_RPM"
++            test -n "$PARAM_ORBWIN_LIBWRAP_RPM"
++            test "$(sha256sum "$PARAM_ORBWIN_SOCAT_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_SOCAT_RPM_SHA256"
++            test "$(sha256sum "$PARAM_ORBWIN_LIBWRAP_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_LIBWRAP_RPM_SHA256"
++            rpm --checksig "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_LIBWRAP_RPM")" = libwrap0
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_SOCAT_RPM")" = socat
++            orbwin_expected_packages=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM")
++            orbwin_installed_packages=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' libwrap0 socat 2>/dev/null || true)
++            if [[ "$orbwin_installed_packages" != "$orbwin_expected_packages" ]]; then
++                rpm -Uvh "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            fi
++            rpm -V libwrap0 socat
++            socat -V >/dev/null
++            ;;
++        esac
++        export INSTALL_K3S_VERSION="$PARAM_KUBERNETES_RELEASE"
++        INSTALLED_VERSION=""
++        # awk must read to EOF; `{print; exit}` closes the pipe while k3s
++        # is still writing, and the SIGPIPE propagates via pipefail + errexit.
++        [[ -x /usr/local/bin/k3s ]] && INSTALLED_VERSION=$(/usr/local/bin/k3s --version | awk 'NR==1{print $3}')
++        if [[ $INSTALL_K3S_VERSION != "${INSTALLED_VERSION}" ]]; then
++            # Don't enable k3s at install time; add it as a want of rancher-desktop.target instead.
++            export INSTALL_K3S_SKIP_ENABLE=true
++            # Before reinstalling, remove any existing k3s want; otherwise a
++            # failed upgrade leaves rancher-desktop.target still wanting the
++            # previous k3s version. daemon-reload rebuilds systemd's in-memory
++            # dependency tree from disk so the EXIT trap's restart honors the
++            # removal even on the failure path, where add-wants below (the only
++            # other reload) never runs. The want is re-added on success below.
++            rm -f /etc/systemd/system/rancher-desktop.target.wants/k3s.service
++            systemctl daemon-reload
++            (
++                export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/sbin:/bin
++                # The interface can have an address before the host-switch
++                # network is routable, so the install can fail right after a
++                # restart. Retry the whole download-and-install until it
++                # succeeds; the curl timeouts bound the installer-script fetch
++                # so a black-holed network fails fast instead of hanging that
++                # step. --show-error surfaces the error without --silent's
++                # progress meter spamming the log.
++                attempt=0
++                until curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 https://get.k3s.io | sh -; do
++                    attempt=$((attempt + 1))
++                    if (( attempt >= 30 )); then
++                        echo "k3s install failed after ${attempt} attempts" >&2
++                        # Fail provisioning so Lima records the error; the EXIT
++                        # trap still restarts the engine, which does not need k3s.
++                        exit 1
++                    fi
++                    sleep 2
++                done
++            )
++            systemctl add-wants rancher-desktop.target k3s.service
++        fi
++
++        if [[ $PARAM_CONTAINER_ENGINE == "containerd" ]]; then
++            echo "K3S_CONTAINER_ENGINE_OPTIONS=--container-runtime-endpoint /run/k3s/containerd/containerd.sock" \
++                >/etc/systemd/system/k3s.service.env
++        else
++            echo "K3S_CONTAINER_ENGINE_OPTIONS=--docker" >/etc/systemd/system/k3s.service.env
++        fi
++
++        # Remove stale kubeconfig so k3s regenerates it on start.
++        rm -f /etc/rancher/k3s/k3s.yaml
++    fi
++
++    # rancher-desktop.target is restarted by the EXIT trap above.
++
++probes:
++- description: Write k3s kubeconfig to instance config path
++  script: |
++    #!/bin/bash
++
++    # This script runs in USER mode.
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++
++    if [[ $PARAM_KUBERNETES_ENABLED != "true" ]]; then
++        exit 0
++    fi
++
++    K3S_YAML=/etc/rancher/k3s/k3s.yaml
++    for _ in $(seq 300); do
++        if [[ -e $K3S_YAML ]]; then
++            sleep 1
++            # Copy the raw k3s kubeconfig to the host instance config path.
++            # The kubernetes controller on the host reads this file to probe
++            # the API server and manage the user's ~/.kube/config context.
++            mkdir -p "$(dirname "$PARAM_HOST_INSTANCE_CONFIG")"
++            sudo cp "$K3S_YAML" "$PARAM_HOST_INSTANCE_CONFIG"
++            exit 0
++        fi
++        sleep 1
++    done
++    exit 1
++hostResolver:
++  hosts:
++    host.docker.internal: host.lima.internal
++    host.rancher-desktop.internal: host.lima.internal
++    lima-rancher-desktop: lima-0
++vmOpts:
++  vz:
++    rosetta:
++      enabled: false
++      binfmt: false
+--- /dev/null
++++ b/scripts/test-data/selected-guest/base-manifest.yaml
+@@ -0,0 +1,215 @@
++# The Rancher Desktop assets distro-overlay merges into the pristine openSUSE
++# distro. `make build-rdd` applies this manifest with --source overlay, so a
++# source path is relative to this directory.
++#
++# download-guest-deps stages mkcert and the nerdctl-full tarball under build/,
++# and the Makefile unpacks the three binaries we use out of that tarball.
++#
++# Everything goes under /usr/local, because the raw image backend cannot add
++# an entry to an htree-indexed directory such as /usr/bin.
++entries:
++- path: /usr/local/bin/nerdctl
++  source: nerdctl
++  mode: "0755"
++- path: /usr/local/libexec/nerdctl/nerdctl
++  source: build/nerdctl/bin/nerdctl
++  mode: "0755"
++- path: /usr/local/bin/buildctl
++  source: build/nerdctl/bin/buildctl
++  mode: "0755"
++- path: /usr/local/bin/buildkitd
++  source: build/nerdctl/bin/buildkitd
++  mode: "0755"
++- path: /usr/local/bin/mkcert
++  source: build/mkcert
++  mode: "0755"
++
++# Guest binaries built from the sources under src/ (rancher-desktop-2#806),
++# which used to live in rancher-desktop-opensuse and were baked into the image
++# by its Dockerfile. The Makefile cross-compiles them for the distro's
++# architecture into build/guest/.
++- path: /usr/local/bin/rancher-desktop-guest-agent
++  source: build/guest/rancher-desktop-guest-agent
++  mode: "0755"
++- path: /usr/local/bin/network-setup
++  source: build/guest/network-setup
++  mode: "0755"
++- path: /usr/local/bin/vm-switch
++  source: build/guest/vm-switch
++  mode: "0755"
++- path: /usr/local/bin/wsl-proxy
++  source: build/guest/wsl-proxy
++  mode: "0755"
++- path: /usr/local/bin/rd-init
++  source: build/guest/rd-init
++  mode: "0755"
++- path: /usr/local/bin/rdd-guest
++  source: build/guest/rdd-guest
++  mode: "0755"
++
++# ---------------------------------------------------------------------------
++# openSUSE guest assets, moved out of the distro's `root/` tree and `config.sh`
++# (rancher-desktop-2#805). The overlay is now the only source of these files, so
++# the coverage check in manifest_coverage_test.go asserts every path here.
++#
++# Modes and per-profile scoping transcribe what config.sh used to do at build:
++# its chmod block set the modes below; its raw branch deleted every
++# `*/network-namespace.conf` (so those are wsl-only) and its wsl branch deleted
++# lima-init.service.d/requires-{cidata,rd-init}.conf (so those are raw-only).
++# ---------------------------------------------------------------------------
++
++# /etc/sudoers.d must be 0750 (config.sh chmod'd it); its files default to 0644.
++- path: /etc/sudoers.d
++  type: dir
++  mode: "0750"
++
++# Systemd units
++- path: /usr/local/lib/systemd/system/buildkitd.service
++  source: root/usr/local/lib/systemd/system/buildkitd.service
++- path: /usr/local/lib/systemd/system/buildkitd.socket
++  source: root/usr/local/lib/systemd/system/buildkitd.socket
++- path: /usr/local/lib/systemd/system/journal-to-console.service
++  source: root/usr/local/lib/systemd/system/journal-to-console.service
++- path: /usr/local/lib/systemd/system/lima-init.service
++  source: root/usr/local/lib/systemd/system/lima-init.service
++- path: '/usr/local/lib/systemd/system/mnt-lima\x2dcidata.mount'
++  source: root/usr/local/lib/systemd/system/mnt-lima-cidata.mount
++- path: /usr/local/lib/systemd/system/network-namespace.service
++  source: root/usr/local/lib/systemd/system/network-namespace.service
++- path: /usr/local/lib/systemd/system/network-setup.service
++  source: root/usr/local/lib/systemd/system/network-setup.service
++- path: /usr/local/lib/systemd/system/rancher-desktop-guest-agent.service
++  source: root/usr/local/lib/systemd/system/rancher-desktop-guest-agent.service
++- path: /usr/local/lib/systemd/system/rancher-desktop.target
++  source: root/usr/local/lib/systemd/system/rancher-desktop.target
++- path: /usr/local/lib/systemd/system/rd-init.service
++  source: root/usr/local/lib/systemd/system/rd-init.service
++- path: /usr/local/lib/systemd/system/rdd-guest.service
++  source: root/usr/local/lib/systemd/system/rdd-guest.service
++- path: /usr/local/lib/systemd/system/wsl-proxy.service
++  source: root/usr/local/lib/systemd/system/wsl-proxy.service
++
++# Systemd drop-ins
++- path: /usr/local/lib/systemd/system/buildkitd.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/buildkitd.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/console-getty.service.d/exclude-containers.conf
++  source: root/usr/local/lib/systemd/system/console-getty.service.d/exclude-containers.conf
++- path: /usr/local/lib/systemd/system/containerd.service.d/allowed-images.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/allowed-images.conf
++- path: /usr/local/lib/systemd/system/containerd.service.d/conditional.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/conditional.conf
++- path: /usr/local/lib/systemd/system/containerd.service.d/environment.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/environment.conf
++- path: /usr/local/lib/systemd/system/containerd.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/containerd.service.d/permissions.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/permissions.conf
++- path: /usr/local/lib/systemd/system/containerd.service.d/target.conf
++  source: root/usr/local/lib/systemd/system/containerd.service.d/target.conf
++- path: /usr/local/lib/systemd/system/docker.service.d/allowed-images.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/allowed-images.conf
++- path: /usr/local/lib/systemd/system/docker.service.d/conditional.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/conditional.conf
++- path: /usr/local/lib/systemd/system/docker.service.d/environment.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/environment.conf
++- path: /usr/local/lib/systemd/system/docker.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/docker.service.d/permissions.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/permissions.conf
++- path: /usr/local/lib/systemd/system/docker.service.d/target.conf
++  source: root/usr/local/lib/systemd/system/docker.service.d/target.conf
++- path: /usr/local/lib/systemd/system/docker.socket.d/target.conf
++  source: root/usr/local/lib/systemd/system/docker.socket.d/target.conf
++- path: /usr/local/lib/systemd/system/getty@.service.d/disable-on-wsl.conf
++  source: root/usr/local/lib/systemd/system/getty@.service.d/disable-on-wsl.conf
++- path: /usr/local/lib/systemd/system/k3s.service.d/command-override.conf
++  source: root/usr/local/lib/systemd/system/k3s.service.d/command-override.conf
++- path: /usr/local/lib/systemd/system/k3s.service.d/conditional.conf
++  source: root/usr/local/lib/systemd/system/k3s.service.d/conditional.conf
++- path: /usr/local/lib/systemd/system/k3s.service.d/environment.conf
++  source: root/usr/local/lib/systemd/system/k3s.service.d/environment.conf
++- path: /usr/local/lib/systemd/system/k3s.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/k3s.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/k3s.service.d/target.conf
++  source: root/usr/local/lib/systemd/system/k3s.service.d/target.conf
++- path: /usr/local/lib/systemd/system/lima-init.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/lima-init.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/lima-init.service.d/requires-cidata.conf
++  source: root/usr/local/lib/systemd/system/lima-init.service.d/requires-cidata.conf
++  profiles: [raw]
++- path: /usr/local/lib/systemd/system/lima-init.service.d/requires-rd-init.conf
++  source: root/usr/local/lib/systemd/system/lima-init.service.d/requires-rd-init.conf
++  profiles: [raw]
++- path: /usr/local/lib/systemd/system/openresty.service.d/ca-certs.conf
++  source: root/usr/local/lib/systemd/system/openresty.service.d/ca-certs.conf
++- path: /usr/local/lib/systemd/system/openresty.service.d/network-namespace.conf
++  source: root/usr/local/lib/systemd/system/openresty.service.d/network-namespace.conf
++  profiles: [wsl]
++- path: /usr/local/lib/systemd/system/openresty.service.d/target.conf
++  source: root/usr/local/lib/systemd/system/openresty.service.d/target.conf
++
++# Config files and scripts
++- path: /etc/cni/net.d/10-flannel.conflist
++  source: root/etc/cni/net.d/10-flannel.conflist
++- path: /etc/containerd/config.toml
++  source: root/etc/containerd/config.toml
++- path: /etc/sudoers.d/10-path-local
++  source: root/etc/sudoers.d/10-path-local
++- path: /etc/sudoers.d/20-wsl-everyone
++  source: root/etc/sudoers.d/20-wsl-everyone
++- path: /etc/wsl.conf
++  source: root/etc/wsl.conf
++- path: /usr/local/bin/wsl-exec
++  source: root/usr/local/bin/wsl-exec
++  mode: "0755"
++- path: /usr/local/libexec/rancher-desktop/setup-namespace.sh
++  source: root/usr/local/libexec/rancher-desktop/setup-namespace.sh
++  mode: "0755"
++- path: /usr/local/libexec/udhcpc/rancher-desktop.script
++  source: root/usr/local/libexec/udhcpc/rancher-desktop.script
++  mode: "0755"
++
++# WSL manages /tmp itself, so it needs an empty tmpfiles.d stub to
++# suppress the distro default; a zero-byte file at build time.
++- path: /usr/local/lib/tmpfiles.d/fs-tmp.conf
++  source: root/usr/local/lib/tmpfiles.d/fs-tmp.conf
++  profiles: [wsl]
++
++# systemctl-enable .wants symlinks, moved out of config.sh's `systemctl enable`
++# lines. config.sh enabled ten RD units; the Lima template re-enables
++# buildkitd/containerd/docker per container engine at provision, so only the
++# other seven need a static symlink here. Each points at its unit and lands in
++# the same <target>.wants directory `systemctl enable` would use, so it stays
++# runtime-disableable.
++- path: /etc/systemd/system/multi-user.target.wants/lima-init.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/lima-init.service
++- path: /etc/systemd/system/multi-user.target.wants/rd-init.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/rd-init.service
++  profiles: [raw]
++- path: /etc/systemd/system/sysinit.target.wants/journal-to-console.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/journal-to-console.service
++  profiles: [raw]
++- path: /etc/systemd/system/rancher-desktop.target.wants/network-setup.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/network-setup.service
++  profiles: [wsl]
++- path: /etc/systemd/system/rancher-desktop.target.wants/rancher-desktop-guest-agent.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/rancher-desktop-guest-agent.service
++  profiles: [wsl]
++- path: /etc/systemd/system/rancher-desktop.target.wants/wsl-proxy.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/wsl-proxy.service
++  profiles: [wsl]
++- path: /etc/systemd/system/rancher-desktop.target.wants/rdd-guest.service
++  type: symlink
++  target: /usr/local/lib/systemd/system/rdd-guest.service
++  profiles: [wsl]
+--- a/scripts/winio-build-input.mjs
++++ b/scripts/winio-build-input.mjs
+@@ -1,766 +1,766 @@
+-// Peer-reviewed source profile; isolated build inputs only, no product activation.
+-// Pure DATA validation never grants a product/native/cache execution permit.
+-import { createHash } from "node:crypto";
+-import { win32 } from "node:path";
+-
+-export const winioIdentity = Object.freeze({
+-  module: "github.com/Microsoft/go-winio",
+-  version: "v0.6.4",
+-  mainModule: "github.com/rancher-sandbox/rancher-desktop-daemon",
+-});
+-const RECIPES = Object.freeze([
+-  "scripts/winio-build-input.mjs",
+-  "scripts/winio-build-input-fs.mjs",
+-  "scripts/lima-wsl2-build-input.mjs",
+-  "scripts/build-backend.mjs",
+-  "scripts/build-identity.mjs",
+-  "scripts/collect-notices.mjs",
+-]);
+-const REQUIRED = Object.freeze([
+-  "file.go",
+-  "file_original_close_state.go",
+-  "file_original_iocp_windows.go",
+-  "pipe.go",
+-  "pipe_dial_state.go",
+-  "pipe_original_dial_windows.go",
+-]);
+-const LIMAMODULE = "github.com/lima-vm/lima/v2";
+-const LIMAVERSION = "v2.3.0-beta.1.0.20261005214905-0ae2df64800a";
+-export const winioDigestData = (value) => createHash("sha256").update(value).digest("hex");
+-const bytes = (value) => {
+-  need(Buffer.isBuffer(value) && value.length <= 16 << 20, "bounded byte input");
+-  return Buffer.from(value);
+-};
+-function need(value, message) {
+-  if (!value) throw new Error(`Winio input refused: ${message}`);
+-}
+-function closed(value, keys) {
+-  need(value !== null && typeof value === "object" && !Array.isArray(value), "record");
+-  need([Object.prototype, null].includes(Object.getPrototypeOf(value)), "plain record");
+-  need(Object.getOwnPropertySymbols(value).length === 0, "symbol field");
+-  const descriptors = Object.getOwnPropertyDescriptors(value);
+-  need(
+-    Object.values(descriptors).every((d) => Object.hasOwn(d, "value")),
+-    "accessor field",
+-  );
+-  need(
+-    Object.keys(descriptors).sort().join("\n") === [...keys].sort().join("\n"),
+-    "closed record fields",
+-  );
+-}
+-function hash(value) {
+-  need(typeof value === "string" && /^[0-9a-f]{64}$/.test(value), "SHA256");
+-  return value;
+-}
+-function sourceName(value) {
+-  need(
+-    typeof value === "string" && value.length <= 512 && /^[\x21-\x7e]+$/.test(value),
+-    "source name",
+-  );
+-  need(!/[\\:*?"<>|]/.test(value) && !value.startsWith("/"), "source path syntax");
+-  for (const part of value.split("/")) {
+-    need(part && part !== "." && part !== ".." && !/[. ]$/.test(part), "source component");
+-    need(!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part), "reserved source component");
+-  }
+-  return value;
+-}
+-function absolute(value) {
+-  need(
+-    typeof value === "string" && /^[a-z]:[\\/]/i.test(value) && !/[\0\r\n]/.test(value),
+-    "fixed Windows build path",
+-  );
+-  need(!value.split(/[\\/]/).includes(".."), "path traversal");
+-  return win32.normalize(value).replaceAll("\\", "/");
+-}
+-function under(base, value) {
+-  const b = absolute(base),
+-    v = absolute(value);
+-  need(
+-    v.toLowerCase().startsWith(b.toLowerCase().replace(/\/$/, "") + "/"),
+-    "selected file outside source",
+-  );
+-  return sourceName(v.slice(b.replace(/\/$/, "").length + 1));
+-}
+-function rows(value) {
+-  need(Array.isArray(value) && value.length > 0 && value.length <= 4096, "source projection bound");
+-  const folded = new Set();
+-  let total = 0;
+-  const result = value
+-    .map((row) => {
+-      closed(row, ["path", "bytes", "sha256"]);
+-      const path = sourceName(row.path),
+-        sha256 = hash(row.sha256);
+-      need(
+-        Number.isSafeInteger(row.bytes) && row.bytes >= 0 && row.bytes <= 16 << 20,
+-        "file bound",
+-      );
+-      total += row.bytes;
+-      need(total <= 256 << 20, "source total bound");
+-      need(!folded.has(path.toLowerCase()), "source collision");
+-      folded.add(path.toLowerCase());
+-      return { path, sha256, bytes: row.bytes };
+-    })
+-    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+-  return result;
+-}
+-const json = (value) => Buffer.from(JSON.stringify(value, null, 2) + "\n");
+-export function winioProjectionDigestData(value) {
+-  return winioDigestData(json(rows(value)));
+-}
+-export function winioRowsFromBytesData(input) {
+-  need(input instanceof Map && input.size > 0 && input.size <= 4096, "source Map");
+-  return rows(
+-    [...input].map(([path, value]) => {
+-      const body = bytes(value);
+-      return { path, bytes: body.length, sha256: winioDigestData(body) };
+-    }),
+-  );
+-}
+-export function validateWinioProfileData(input) {
+-  closed(input, [
+-    "schema",
+-    "module",
+-    "version",
+-    "mainModule",
+-    "originalModSHA256",
+-    "originalSumSHA256",
+-    "upstreamZipSHA256",
+-    "upstreamModuleSum",
+-    "upstreamGoModSum",
+-    "patchSHA256",
+-    "licenseSHA256",
+-    "baseline",
+-    "patched",
+-    "baselineProjectionSHA256",
+-    "patchedProjectionSHA256",
+-    "replacements",
+-    "recipeHashes",
+-  ]);
+-  need(
+-    input.schema === 1 &&
+-      input.module === winioIdentity.module &&
+-      input.version === winioIdentity.version &&
+-      input.mainModule === winioIdentity.mainModule,
+-    "root-rdd version profile",
+-  );
+-  for (const key of [
+-    "originalModSHA256",
+-    "originalSumSHA256",
+-    "upstreamZipSHA256",
+-    "patchSHA256",
+-    "licenseSHA256",
+-    "baselineProjectionSHA256",
+-    "patchedProjectionSHA256",
+-  ])
+-    hash(input[key]);
+-  need(
+-    input.upstreamModuleSum === "h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=" &&
+-      input.upstreamGoModSum === "h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=",
+-    "upstream sum identity",
+-  );
+-  const baseline = rows(input.baseline),
+-    patched = rows(input.patched);
+-  need(
+-    winioProjectionDigestData(baseline) === input.baselineProjectionSHA256 &&
+-      winioProjectionDigestData(patched) === input.patchedProjectionSHA256,
+-    "full projection digest",
+-  );
+-  const old = new Map(baseline.map((r) => [r.path, r])),
+-    final = new Map(patched.map((r) => [r.path, r]));
+-  need(
+-    [...old.keys()].every((n) => final.has(n)),
+-    "source deletion",
+-  );
+-  need(
+-    old.get("LICENSE")?.sha256 === input.licenseSHA256 &&
+-      final.get("LICENSE")?.sha256 === input.licenseSHA256,
+-    "MIT preservation",
+-  );
+-  for (const r of baseline)
+-    if (r.path.endsWith("_test.go") || r.path === "go.mod" || r.path === "go.sum")
+-      need(
+-        JSON.stringify(r) === JSON.stringify(final.get(r.path)),
+-        "upstream test/module preservation",
+-      );
+-  const changed = [...final]
+-    .filter(([n, r]) => old.get(n)?.sha256 !== r.sha256 || old.get(n)?.bytes !== r.bytes)
+-    .map(([n]) => n)
+-    .sort();
+-  need(
+-    Array.isArray(input.replacements) &&
+-      input.replacements.length === changed.length &&
+-      changed.length <= 32,
+-    "replacement bound",
+-  );
+-  const repl = input.replacements
+-    .map((r) => {
+-      closed(r, ["path", "before", "sha256", "bytes"]);
+-      const path = sourceName(r.path);
+-      need(r.before === (old.get(path)?.sha256 ?? null), "original replacement byte pin");
+-      need(
+-        r.sha256 === final.get(path)?.sha256 && r.bytes === final.get(path)?.bytes,
+-        "final replacement byte pin",
+-      );
+-      return { path, before: r.before, sha256: r.sha256, bytes: r.bytes };
+-    })
+-    .sort((a, b) => (a.path < b.path ? -1 : 1));
+-  need(repl.map((r) => r.path).join("\n") === changed.join("\n"), "exact replacement coverage");
+-  closed(input.recipeHashes, RECIPES);
+-  for (const d of Object.values(input.recipeHashes)) hash(d);
+-  return {
+-    ...input,
+-    baseline,
+-    patched,
+-    replacements: repl,
+-    recipeHashes: { ...input.recipeHashes },
+-  };
+-}
+-// DATA reconstruction only. The production filesystem gateway below is sealed.
+-export function reconstructWinioBytesData(profileInput, originalInput, replacementInput) {
+-  const profile = validateWinioProfileData(profileInput);
+-  const original = new Map([...originalInput].map(([n, b]) => [n, bytes(b)]));
+-  const replacement = new Map([...replacementInput].map(([n, b]) => [n, bytes(b)]));
+-  need(
+-    winioProjectionDigestData(winioRowsFromBytesData(original)) ===
+-      profile.baselineProjectionSHA256,
+-    "original full byte set",
+-  );
+-  need(
+-    [...replacement.keys()].sort().join("\n") ===
+-      profile.replacements.map((r) => r.path).join("\n"),
+-    "replacement byte set",
+-  );
+-  const result = new Map(original);
+-  for (const r of profile.replacements) {
+-    const b = replacement.get(r.path);
+-    need(b.length === r.bytes && winioDigestData(b) === r.sha256, "replacement body");
+-    result.set(r.path, b);
+-  }
+-  need(
+-    winioProjectionDigestData(winioRowsFromBytesData(result)) === profile.patchedProjectionSHA256,
+-    "reconstructed full projection",
+-  );
+-  return new Map([...result].map(([n, b]) => [n, Buffer.from(b)]));
+-}
+-// Derive ONE root modfile from exact raw original + existing fixed Lima suffix.
+-// Do not append to any previously emitted/sealed file or alter source mod/sum.
+-export function composeWinioLimaModfileData({
+-  profile: input,
+-  originalMod: m,
+-  originalSum: s,
+-  limaAlternate: a,
+-  limaDirectory,
+-  winioDirectory,
+-}) {
+-  const profile = validateWinioProfileData(input),
+-    mod = bytes(m),
+-    sum = bytes(s),
+-    alternate = bytes(a);
+-  need(
+-    winioDigestData(mod) === profile.originalModSHA256 &&
+-      winioDigestData(sum) === profile.originalSumSHA256,
+-    "actual main module bytes",
+-  );
+-  need(
+-    mod.toString().split(/\r?\n/).includes(`module ${winioIdentity.mainModule}`),
+-    "actual root module name",
+-  );
+-  // Root source is byte-pinned; an existing versioned or unversioned Winio
+-  // replacement is refused rather than overridden by a second directive.
+-  need(
+-    !mod
+-      .toString()
+-      .split(/\r?\n/)
+-      .some(
+-        (line) =>
+-          line.split("//")[0].includes(winioIdentity.module) && line.split("//")[0].includes("=>"),
+-      ),
+-    "existing Winio replacement",
+-  );
+-  const lima = absolute(limaDirectory),
+-    winio = absolute(winioDirectory);
+-  const suffix = Buffer.from(
+-    `\n// OrbWin: reviewed per-version WSL2 import and Windows host-home adaptation.\nreplace ${LIMAMODULE} ${LIMAVERSION} => ${JSON.stringify(lima)}\n`,
+-  );
+-  need(alternate.equals(Buffer.concat([mod, suffix])), "exact existing Lima alternate");
+-  const output = Buffer.concat([
+-    alternate,
+-    Buffer.from(
+-      `\n// OrbWin: reviewed original win32File Close and bounded Fresh Dial custody.\nreplace ${winioIdentity.module} ${winioIdentity.version} => ${JSON.stringify(winio)}\n`,
+-    ),
+-  ]);
+-  return {
+-    mod: output,
+-    sum: Buffer.from(sum),
+-    sourceModSHA256: winioDigestData(mod),
+-    alternateModSHA256: winioDigestData(output),
+-    alternateSumSHA256: winioDigestData(sum),
+-  };
+-}
+-
+-// Exact effective build DATA, never from a root declaration or a PID/DTO permit.
+-export function validateEffectiveWinioClosureData(input, profileInput, expected) {
+-  const profile = validateWinioProfileData(profileInput);
+-  closed(input, [
+-    "artifact",
+-    "main",
+-    "goos",
+-    "goarch",
+-    "goamd64",
+-    "cgo",
+-    "tags",
+-    "package",
+-    "modMode",
+-    "modfile",
+-    "modSHA256",
+-    "sumSHA256",
+-    "sourceRoot",
+-    "winioRoot",
+-    "selectedModule",
+-    "packages",
+-  ]);
+-  need(
+-    input.artifact === "rdd.exe" &&
+-      input.main === winioIdentity.mainModule &&
+-      input.package === "./cmd/rdd",
+-    "actual artifact main/target",
+-  );
+-  need(
+-    input.goos === "windows" &&
+-      input.goarch === "amd64" &&
+-      input.goamd64 === "v1" &&
+-      ["0", "1"].includes(input.cgo),
+-    "actual platform",
+-  );
+-  need(
+-    Array.isArray(input.tags) &&
+-      input.tags.length <= 8 &&
+-      input.tags.every((t) => typeof t === "string" && /^[a-z0-9_]+$/.test(t)),
+-    "build tags",
+-  );
+-  need(
+-    new Set(input.tags).size === input.tags.length &&
+-      input.tags.includes("sqlite_omit_load_extension"),
+-    "closed required build tags",
+-  );
+-  need(
+-    input.tags.every((t) => ["sqlite_omit_load_extension", "with_distro"].includes(t)),
+-    "unsupported build tag",
+-  );
+-  need(input.modMode === "readonly", "root must use reviewed composite modfile, not vendor");
+-  const sourceRoot = absolute(input.sourceRoot),
+-    winioRoot = absolute(input.winioRoot),
+-    modfile = absolute(input.modfile);
+-  hash(input.modSHA256);
+-  hash(input.sumSHA256);
+-  // expected comes from the same original composite-modfile derivation and
+-  // fixed producer arguments, not fields copied out of the queried DTO.
+-  closed(expected, ["modfile", "mod", "sum", "sourceRoot", "winioRoot", "cgo", "tags"]);
+-  need(
+-    modfile === absolute(expected.modfile) &&
+-      sourceRoot === absolute(expected.sourceRoot) &&
+-      winioRoot === absolute(expected.winioRoot),
+-    "effective original build paths",
+-  );
+-  need(
+-    input.modSHA256 === winioDigestData(bytes(expected.mod)) &&
+-      input.sumSHA256 === winioDigestData(bytes(expected.sum)),
+-    "effective actual composite bytes",
+-  );
+-  need(
+-    input.cgo === expected.cgo &&
+-      JSON.stringify([...input.tags].sort()) === JSON.stringify([...expected.tags].sort()),
+-    "effective fixed producer flags",
+-  );
+-  closed(input.selectedModule, ["Path", "Version", "Dir", "Replace"]);
+-  function selected(m) {
+-    closed(m, ["Path", "Version", "Dir", "Replace"]);
+-    closed(m.Replace, ["Path", "Dir"]);
+-    need(
+-      m.Path === winioIdentity.module && m.Version === winioIdentity.version,
+-      "actual selected MVS version",
+-    );
+-    need(
+-      absolute(m.Dir).toLowerCase() === winioRoot.toLowerCase() &&
+-        absolute(m.Replace.Path).toLowerCase() === winioRoot.toLowerCase() &&
+-        absolute(m.Replace.Dir).toLowerCase() === winioRoot.toLowerCase(),
+-      "actual selected replacement directory",
+-    );
+-  }
+-  selected(input.selectedModule);
+-  need(
+-    Array.isArray(input.packages) && input.packages.length > 0 && input.packages.length <= 128,
+-    "affected package inventory",
+-  );
+-  const final = new Map(profile.patched.map((r) => [r.path, r]));
+-  const imported = new Set();
+-  const files = new Map();
+-  const packages = input.packages
+-    .map((p) => {
+-      closed(p, [
+-        "ImportPath",
+-        "Dir",
+-        "Module",
+-        "GoFiles",
+-        "CgoFiles",
+-        "CompiledGoFiles",
+-        "EmbedFiles",
+-      ]);
+-      selected(p.Module);
+-      need(
+-        typeof p.ImportPath === "string" &&
+-          (p.ImportPath === winioIdentity.module ||
+-            p.ImportPath.startsWith(winioIdentity.module + "/")),
+-        "affected package import",
+-      );
+-      need(!imported.has(p.ImportPath), "duplicate affected package");
+-      imported.add(p.ImportPath);
+-      const dir = absolute(p.Dir);
+-      need(
+-        dir.toLowerCase() === winioRoot.toLowerCase() ||
+-          dir.toLowerCase().startsWith(winioRoot.toLowerCase() + "/"),
+-        "package source directory",
+-      );
+-      const lists = {};
+-      for (const key of ["GoFiles", "CgoFiles", "CompiledGoFiles", "EmbedFiles"]) {
+-        need(Array.isArray(p[key]) && p[key].length <= 512, "selected file list");
+-        const seen = new Set();
+-        lists[key] = p[key]
+-          .map((n) => {
+-            need(typeof n === "string", "selected file name");
+-            const path = /^[a-z]:/i.test(n)
+-              ? under(winioRoot, n)
+-              : under(winioRoot, win32.join(dir, sourceName(n)));
+-            need(!seen.has(path.toLowerCase()), "duplicate selected file");
+-            seen.add(path.toLowerCase());
+-            const row = final.get(path);
+-            need(row && !path.endsWith("_test.go"), "selected file not reviewed production bytes");
+-            files.set(path, row);
+-            return path;
+-          })
+-          .sort();
+-      }
+-      need(
+-        lists.GoFiles.length + lists.CgoFiles.length > 0 && lists.CompiledGoFiles.length > 0,
+-        "actual compiled file closure required",
+-      );
+-      need(
+-        [...lists.GoFiles, ...lists.CgoFiles].every((n) => lists.CompiledGoFiles.includes(n)),
+-        "omitted compiled source",
+-      );
+-      return { ImportPath: p.ImportPath, Dir: dir, ...lists };
+-    })
+-    .sort((a, b) => (a.ImportPath < b.ImportPath ? -1 : 1));
+-  need(
+-    imported.has(winioIdentity.module) && REQUIRED.every((n) => files.has(n)),
+-    "actual native custody files absent from target",
+-  );
+-  return {
+-    artifact: input.artifact,
+-    main: input.main,
+-    goos: input.goos,
+-    goarch: input.goarch,
+-    goamd64: input.goamd64,
+-    cgo: input.cgo,
+-    tags: [...input.tags].sort(),
+-    package: input.package,
+-    modMode: input.modMode,
+-    modfile,
+-    modSHA256: input.modSHA256,
+-    sumSHA256: input.sumSHA256,
+-    sourceRoot,
+-    winioRoot,
+-    selectedVersion: winioIdentity.version,
+-    packages,
+-    files: rows([...files.values()]),
+-    patchedProjectionSHA256: profile.patchedProjectionSHA256,
+-  };
+-}
+-export function requireUnchangedEffectiveWinioClosureData(before, after, profile, expected) {
+-  const a = validateEffectiveWinioClosureData(before, profile, expected),
+-    b = validateEffectiveWinioClosureData(after, profile, expected);
+-  need(json(a).equals(json(b)), "effective module/target/file closure changed across build");
+-  return a;
+-}
+-
+-// Decode actual Go -json object streams as DATA. Origin hashes remain evidence,
+-// not a substitute for the fixed producer's real pinned Go invocation.
+-export function projectWinioGoListData(moduleBytes, packageBytes, context) {
+-  function stream(raw) {
+-    need(Buffer.isBuffer(raw) && raw.length > 0 && raw.length <= 32 << 20, "Go metadata bound");
+-    const text = raw.toString("utf8");
+-    need(Buffer.from(text).equals(raw), "UTF8 Go metadata");
+-    const out = [];
+-    let start = -1,
+-      depth = 0,
+-      quoted = false,
+-      escape = false;
+-    for (let i = 0; i < text.length; i++) {
+-      const c = text[i];
+-      if (start < 0) {
+-        if (/\s/.test(c)) continue;
+-        need(c === "{", "Go metadata object stream");
+-        start = i;
+-        depth = 1;
+-        continue;
+-      }
+-      if (quoted) {
+-        if (escape) escape = false;
+-        else if (c === "\\") escape = true;
+-        else if (c === '"') quoted = false;
+-        continue;
+-      }
+-      if (c === '"') {
+-        quoted = true;
+-        continue;
+-      }
+-      if (c === "{" || c === "[") depth++;
+-      else if (c === "}" || c === "]") depth--;
+-      need(depth >= 0, "Go metadata depth");
+-      if (depth === 0) {
+-        const v = JSON.parse(text.slice(start, i + 1));
+-        need(v && typeof v === "object" && !Array.isArray(v), "Go metadata record");
+-        out.push(v);
+-        need(out.length <= 20000, "Go metadata record bound");
+-        start = -1;
+-      }
+-    }
+-    need(start === -1 && !quoted && out.length > 0, "truncated/empty Go metadata");
+-    return out;
+-  }
+-  const modules = stream(moduleBytes);
+-  need(modules.length === 1, "one actual module query");
+-  function selected(m) {
+-    need(m && m.Replace, "selected actual module");
+-    return {
+-      Path: m.Path,
+-      Version: m.Version,
+-      Dir: m.Dir,
+-      Replace: { Path: m.Replace.Path, Dir: m.Replace.Dir },
+-    };
+-  }
+-  const packages = stream(packageBytes)
+-    .filter(
+-      (p) =>
+-        typeof p.ImportPath === "string" &&
+-        (p.ImportPath === winioIdentity.module ||
+-          p.ImportPath.startsWith(winioIdentity.module + "/")),
+-    )
+-    .map((p) => ({
+-      ImportPath: p.ImportPath,
+-      Dir: p.Dir,
+-      Module: selected(p.Module),
+-      GoFiles: p.GoFiles ?? [],
+-      CgoFiles: p.CgoFiles ?? [],
+-      CompiledGoFiles: p.CompiledGoFiles ?? [],
+-      EmbedFiles: p.EmbedFiles ?? [],
+-    }));
+-  return {
+-    record: { ...context, selectedModule: selected(modules[0]), packages },
+-    rawModuleSHA256: winioDigestData(moduleBytes),
+-    rawPackagesSHA256: winioDigestData(packageBytes),
+-  };
+-}
+-
+-// Reconstruct the fixed text patch as DATA; never invokes Git or a tool.
+-export function reconstructWinioPatchData(originalInput, patchInput) {
+-  const patch = bytes(patchInput);
+-  need(Buffer.from(patch.toString("utf8"), "utf8").equals(patch), "UTF8 source patch");
+-  const lines = patch.toString("utf8").match(/[^\n]*\n|[^\n]+$/g) || [];
+-  const result = new Map([...originalInput].map(([n, b]) => [sourceName(n), bytes(b)])),
+-    seen = new Set();
+-  let i = 0;
+-  while (i < lines.length) {
+-    need(
+-      lines[i].startsWith("--- ") && i + 1 < lines.length && lines[i + 1].startsWith("+++ "),
+-      "patch file header",
+-    );
+-    const from = lines[i++].slice(4).trimEnd(),
+-      to = lines[i++].slice(4).trimEnd();
+-    need(to.startsWith("b/"), "patch cannot delete or rename source");
+-    const path = sourceName(to.slice(2));
+-    need(!seen.has(path.toLowerCase()), "duplicate patch file");
+-    seen.add(path.toLowerCase());
+-    need(from === "/dev/null" || from === "a/" + path, "patch original name");
+-    need((from === "/dev/null") === !result.has(path), "patch original membership");
+-    const body = result.get(path) || Buffer.alloc(0);
+-    need(Buffer.from(body.toString("utf8"), "utf8").equals(body), "UTF8 source body");
+-    const old = body.toString("utf8").match(/[^\n]*\n|[^\n]+$/g) || [],
+-      out = [];
+-    let cursor = 0,
+-      hunks = 0;
+-    while (i < lines.length && lines[i].startsWith("@@ ")) {
+-      const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\n]*\n$/.exec(lines[i++]);
+-      need(m, "patch hunk");
+-      const os = Number(m[1]),
+-        oc = m[2] === undefined ? 1 : Number(m[2]),
+-        ns = Number(m[3]),
+-        nc = m[4] === undefined ? 1 : Number(m[4]);
+-      need(
+-        [os, oc, ns, nc].every((n) => Number.isSafeInteger(n) && n >= 0 && n <= 1000000),
+-        "hunk bounds",
+-      );
+-      const start = oc === 0 ? os : os - 1;
+-      need(start >= cursor && start <= old.length, "hunk position");
+-      out.push(...old.slice(cursor, start));
+-      cursor = start;
+-      need(out.length === (nc === 0 ? ns : ns - 1), "new hunk position");
+-      let consumed = 0,
+-        produced = 0;
+-      while (i < lines.length && !lines[i].startsWith("@@ ") && !lines[i].startsWith("--- ")) {
+-        const line = lines[i++],
+-          op = line[0],
+-          text = line.slice(1);
+-        need([" ", "+", "-"].includes(op), "hunk operator");
+-        if (op !== "+") {
+-          need(old[cursor] === text, "original hunk bytes");
+-          cursor++;
+-          consumed++;
+-        }
+-        if (op !== "-") {
+-          out.push(text);
+-          produced++;
+-        }
+-      }
+-      need(consumed === oc && produced === nc, "hunk counts");
+-      hunks++;
+-    }
+-    need(hunks > 0, "empty source patch");
+-    out.push(...old.slice(cursor));
+-    result.set(path, Buffer.from(out.join("")));
+-  }
+-  need(seen.size > 0, "empty patch");
+-  winioRowsFromBytesData(result);
+-  return result;
+-}
+-
+-export function winioPortableOfferData(profileInput, input) {
+-  const profile = validateWinioProfileData(profileInput);
+-  closed(input, ["upstreamZip", "patch", "license", "lockBytes"]);
+-  const lockBytes = bytes(input.lockBytes);
+-  need(
+-    JSON.stringify(validateWinioProfileData(JSON.parse(lockBytes))) === JSON.stringify(profile),
+-    "exact source lock profile",
+-  );
+-  const lockSHA256 = winioDigestData(lockBytes);
+-  const upstreamZip = bytes(input.upstreamZip),
+-    patch = bytes(input.patch),
+-    license = bytes(input.license);
+-  need(
+-    winioDigestData(upstreamZip) === profile.upstreamZipSHA256 &&
+-      winioDigestData(patch) === profile.patchSHA256 &&
+-      winioDigestData(license) === profile.licenseSHA256,
+-    "portable source offer bytes",
+-  );
+-  const readme = Buffer.from(
+-    `OrbWin go-winio source adaptation\nModule: ${winioIdentity.module} ${winioIdentity.version}\nOriginal upstream h1: ${profile.upstreamModuleSum}\nPatched projection: ${profile.patchedProjectionSHA256}\nupstream.zip is the original module. Apply winio-custody.patch to reconstruct the reviewed source. LICENSE and upstream tests are retained. h1 refers only to original source. Native qualification and actual caller custody remain separate.\n`,
+-  );
+-  const payloads = new Map([
+-    ["upstream.zip", upstreamZip],
+-    ["winio-custody.patch", patch],
+-    ["LICENSE", license],
+-    ["README.md", readme],
+-  ]);
+-  const manifest = {
+-    schema: 1,
+-    lockSHA256,
+-    module: winioIdentity.module,
+-    version: winioIdentity.version,
+-    upstreamModuleSum: profile.upstreamModuleSum,
+-    upstreamGoModSum: profile.upstreamGoModSum,
+-    upstreamZipSHA256: profile.upstreamZipSHA256,
+-    baseline: profile.baseline,
+-    patched: profile.patched,
+-    patchedProjectionSHA256: profile.patchedProjectionSHA256,
+-    patchSHA256: profile.patchSHA256,
+-    recipeHashes: profile.recipeHashes,
+-    files: Object.fromEntries([...payloads].map(([n, b]) => [n, winioDigestData(b)])),
+-  };
+-  payloads.set("manifest.json", json(manifest));
+-  const portable = {
+-    schema: 1,
+-    lockSHA256,
+-    module: winioIdentity.module,
+-    version: winioIdentity.version,
+-    upstreamZipSHA256: profile.upstreamZipSHA256,
+-    patchedProjectionSHA256: profile.patchedProjectionSHA256,
+-    patchSHA256: profile.patchSHA256,
+-    recipeHashes: { ...profile.recipeHashes },
+-    offerFiles: Object.fromEntries([...payloads].map(([n, b]) => [n, winioDigestData(b)])),
+-  };
+-  return {
+-    portable: JSON.parse(JSON.stringify(portable)),
+-    payloads: new Map([...payloads].map(([n, b]) => [n, Buffer.from(b)])),
+-  };
+-}
+-
+-// The one static runtime fixture is generated from Node's actual source offer,
+-// never reserialized by Rust or placed inside its own lock/recipe digest list.
+-export function createWinioRuntimeOfferData(lockBytes, input) {
+-  const raw = bytes(lockBytes),
+-    lock = JSON.parse(raw);
+-  closed(lock, ["schema", "role", "reviewPeerSHA256", "sourceReceiptSHA256", "profile"]);
+-  need(
+-    lock.schema === 1 &&
+-      lock.role === "root-rdd-windows-amd64" &&
+-      lock.reviewPeerSHA256 ===
+-        "d33588322814f90603b4553cb7d322b38ed1aa09275b022674c032f8598445d8" &&
+-      lock.sourceReceiptSHA256 ===
+-        "a1c70600da2b7d2ea834935e2eb139b070a504de7aa3cc1ccc9819295ff48d19",
+-    "runtime offer source/peer",
+-  );
+-  closed(input, ["upstreamZip", "patch", "license"]);
+-  const offer = winioPortableOfferData(lock.profile, { ...input, lockBytes: json(lock.profile) }),
+-    lockSHA256 = winioDigestData(raw);
+-  const manifest = JSON.parse(offer.payloads.get("manifest.json"));
+-  manifest.lockSHA256 = lockSHA256;
+-  manifest.reviewPeerSHA256 = lock.reviewPeerSHA256;
+-  manifest.sourceReceiptSHA256 = lock.sourceReceiptSHA256;
+-  offer.payloads.set("manifest.json", json(manifest));
+-  offer.portable.lockSHA256 = lockSHA256;
+-  offer.portable.reviewPeerSHA256 = lock.reviewPeerSHA256;
+-  offer.portable.sourceReceiptSHA256 = lock.sourceReceiptSHA256;
+-  offer.portable.offerFiles = Object.fromEntries(
+-    [...offer.payloads].map(([n, b]) => [n, winioDigestData(b)]),
+-  );
+-  return {
+-    portable: JSON.parse(JSON.stringify(offer.portable)),
+-    payloads: new Map([...offer.payloads].map(([n, b]) => [n, Buffer.from(b)])),
+-  };
+-}
+-export function winioNoticeVariantSuffixData(variant) {
+-  need(
+-    variant === undefined || ["orbwin-wsl2", "orbwin-winio-custody"].includes(variant),
+-    "unknown local source variant",
+-  );
+-  return variant ? "#" + variant : "";
+-}
+-export function classifyWinioNoticeData(dependency, isRootConsumer, expectedSourceDir) {
+-  if (dependency.Path !== winioIdentity.module) return null;
+-  if (isRootConsumer) {
+-    need(dependency.Version === winioIdentity.version, "root Winio notice version");
+-    const r = dependency.Replace;
+-    need(
+-      r &&
+-        absolute(r.Path) === absolute(expectedSourceDir) &&
+-        (!r.Dir || absolute(r.Dir) === absolute(expectedSourceDir)) &&
+-        (!r.Version || r.Version === "(devel)"),
+-      "root Winio notice source",
+-    );
+-    return "orbwin-winio-custody";
+-  }
+-  need(
+-    !dependency.Replace || (dependency.Replace.Version && dependency.Replace.Version !== "(devel)"),
+-    "independent Winio local source needs its own review",
+-  );
+-  return null;
+-}
+-
+-export {
+-  preflightWinioBuildInput,
+-  prepareWinioBuildInput,
+-  verifyWinioBuildInput,
+-  verifyPortableWinioBuild,
+-  stageWinioSourceOffer,
+-  winioBuildEnvironment,
+-} from "./winio-build-input-fs.mjs";
++// Peer-reviewed source profile; isolated build inputs only, no product activation.
++// Pure DATA validation never grants a product/native/cache execution permit.
++import { createHash } from "node:crypto";
++import { win32 } from "node:path";
++
++export const winioIdentity = Object.freeze({
++  module: "github.com/Microsoft/go-winio",
++  version: "v0.6.4",
++  mainModule: "github.com/rancher-sandbox/rancher-desktop-daemon",
++});
++const RECIPES = Object.freeze([
++  "scripts/winio-build-input.mjs",
++  "scripts/winio-build-input-fs.mjs",
++  "scripts/lima-wsl2-build-input.mjs",
++  "scripts/build-backend.mjs",
++  "scripts/build-identity.mjs",
++  "scripts/collect-notices.mjs",
++]);
++const REQUIRED = Object.freeze([
++  "file.go",
++  "file_original_close_state.go",
++  "file_original_iocp_windows.go",
++  "pipe.go",
++  "pipe_dial_state.go",
++  "pipe_original_dial_windows.go",
++]);
++const LIMAMODULE = "github.com/lima-vm/lima/v2";
++const LIMAVERSION = "v2.3.0-beta.1.0.20261005214905-0ae2df64800a";
++export const winioDigestData = (value) => createHash("sha256").update(value).digest("hex");
++const bytes = (value) => {
++  need(Buffer.isBuffer(value) && value.length <= 16 << 20, "bounded byte input");
++  return Buffer.from(value);
++};
++function need(value, message) {
++  if (!value) throw new Error(`Winio input refused: ${message}`);
++}
++function closed(value, keys) {
++  need(value !== null && typeof value === "object" && !Array.isArray(value), "record");
++  need([Object.prototype, null].includes(Object.getPrototypeOf(value)), "plain record");
++  need(Object.getOwnPropertySymbols(value).length === 0, "symbol field");
++  const descriptors = Object.getOwnPropertyDescriptors(value);
++  need(
++    Object.values(descriptors).every((d) => Object.hasOwn(d, "value")),
++    "accessor field",
++  );
++  need(
++    Object.keys(descriptors).sort().join("\n") === [...keys].sort().join("\n"),
++    "closed record fields",
++  );
++}
++function hash(value) {
++  need(typeof value === "string" && /^[0-9a-f]{64}$/.test(value), "SHA256");
++  return value;
++}
++function sourceName(value) {
++  need(
++    typeof value === "string" && value.length <= 512 && /^[\x21-\x7e]+$/.test(value),
++    "source name",
++  );
++  need(!/[\\:*?"<>|]/.test(value) && !value.startsWith("/"), "source path syntax");
++  for (const part of value.split("/")) {
++    need(part && part !== "." && part !== ".." && !/[. ]$/.test(part), "source component");
++    need(!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part), "reserved source component");
++  }
++  return value;
++}
++function absolute(value) {
++  need(
++    typeof value === "string" && /^[a-z]:[\\/]/i.test(value) && !/[\0\r\n]/.test(value),
++    "fixed Windows build path",
++  );
++  need(!value.split(/[\\/]/).includes(".."), "path traversal");
++  return win32.normalize(value).replaceAll("\\", "/");
++}
++function under(base, value) {
++  const b = absolute(base),
++    v = absolute(value);
++  need(
++    v.toLowerCase().startsWith(b.toLowerCase().replace(/\/$/, "") + "/"),
++    "selected file outside source",
++  );
++  return sourceName(v.slice(b.replace(/\/$/, "").length + 1));
++}
++function rows(value) {
++  need(Array.isArray(value) && value.length > 0 && value.length <= 4096, "source projection bound");
++  const folded = new Set();
++  let total = 0;
++  const result = value
++    .map((row) => {
++      closed(row, ["path", "bytes", "sha256"]);
++      const path = sourceName(row.path),
++        sha256 = hash(row.sha256);
++      need(
++        Number.isSafeInteger(row.bytes) && row.bytes >= 0 && row.bytes <= 16 << 20,
++        "file bound",
++      );
++      total += row.bytes;
++      need(total <= 256 << 20, "source total bound");
++      need(!folded.has(path.toLowerCase()), "source collision");
++      folded.add(path.toLowerCase());
++      return { path, sha256, bytes: row.bytes };
++    })
++    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
++  return result;
++}
++const json = (value) => Buffer.from(JSON.stringify(value, null, 2) + "\n");
++export function winioProjectionDigestData(value) {
++  return winioDigestData(json(rows(value)));
++}
++export function winioRowsFromBytesData(input) {
++  need(input instanceof Map && input.size > 0 && input.size <= 4096, "source Map");
++  return rows(
++    [...input].map(([path, value]) => {
++      const body = bytes(value);
++      return { path, bytes: body.length, sha256: winioDigestData(body) };
++    }),
++  );
++}
++export function validateWinioProfileData(input) {
++  closed(input, [
++    "schema",
++    "module",
++    "version",
++    "mainModule",
++    "originalModSHA256",
++    "originalSumSHA256",
++    "upstreamZipSHA256",
++    "upstreamModuleSum",
++    "upstreamGoModSum",
++    "patchSHA256",
++    "licenseSHA256",
++    "baseline",
++    "patched",
++    "baselineProjectionSHA256",
++    "patchedProjectionSHA256",
++    "replacements",
++    "recipeHashes",
++  ]);
++  need(
++    input.schema === 1 &&
++      input.module === winioIdentity.module &&
++      input.version === winioIdentity.version &&
++      input.mainModule === winioIdentity.mainModule,
++    "root-rdd version profile",
++  );
++  for (const key of [
++    "originalModSHA256",
++    "originalSumSHA256",
++    "upstreamZipSHA256",
++    "patchSHA256",
++    "licenseSHA256",
++    "baselineProjectionSHA256",
++    "patchedProjectionSHA256",
++  ])
++    hash(input[key]);
++  need(
++    input.upstreamModuleSum === "h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=" &&
++      input.upstreamGoModSum === "h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=",
++    "upstream sum identity",
++  );
++  const baseline = rows(input.baseline),
++    patched = rows(input.patched);
++  need(
++    winioProjectionDigestData(baseline) === input.baselineProjectionSHA256 &&
++      winioProjectionDigestData(patched) === input.patchedProjectionSHA256,
++    "full projection digest",
++  );
++  const old = new Map(baseline.map((r) => [r.path, r])),
++    final = new Map(patched.map((r) => [r.path, r]));
++  need(
++    [...old.keys()].every((n) => final.has(n)),
++    "source deletion",
++  );
++  need(
++    old.get("LICENSE")?.sha256 === input.licenseSHA256 &&
++      final.get("LICENSE")?.sha256 === input.licenseSHA256,
++    "MIT preservation",
++  );
++  for (const r of baseline)
++    if (r.path.endsWith("_test.go") || r.path === "go.mod" || r.path === "go.sum")
++      need(
++        JSON.stringify(r) === JSON.stringify(final.get(r.path)),
++        "upstream test/module preservation",
++      );
++  const changed = [...final]
++    .filter(([n, r]) => old.get(n)?.sha256 !== r.sha256 || old.get(n)?.bytes !== r.bytes)
++    .map(([n]) => n)
++    .sort();
++  need(
++    Array.isArray(input.replacements) &&
++      input.replacements.length === changed.length &&
++      changed.length <= 32,
++    "replacement bound",
++  );
++  const repl = input.replacements
++    .map((r) => {
++      closed(r, ["path", "before", "sha256", "bytes"]);
++      const path = sourceName(r.path);
++      need(r.before === (old.get(path)?.sha256 ?? null), "original replacement byte pin");
++      need(
++        r.sha256 === final.get(path)?.sha256 && r.bytes === final.get(path)?.bytes,
++        "final replacement byte pin",
++      );
++      return { path, before: r.before, sha256: r.sha256, bytes: r.bytes };
++    })
++    .sort((a, b) => (a.path < b.path ? -1 : 1));
++  need(repl.map((r) => r.path).join("\n") === changed.join("\n"), "exact replacement coverage");
++  closed(input.recipeHashes, RECIPES);
++  for (const d of Object.values(input.recipeHashes)) hash(d);
++  return {
++    ...input,
++    baseline,
++    patched,
++    replacements: repl,
++    recipeHashes: { ...input.recipeHashes },
++  };
++}
++// DATA reconstruction only. The production filesystem gateway below is sealed.
++export function reconstructWinioBytesData(profileInput, originalInput, replacementInput) {
++  const profile = validateWinioProfileData(profileInput);
++  const original = new Map([...originalInput].map(([n, b]) => [n, bytes(b)]));
++  const replacement = new Map([...replacementInput].map(([n, b]) => [n, bytes(b)]));
++  need(
++    winioProjectionDigestData(winioRowsFromBytesData(original)) ===
++      profile.baselineProjectionSHA256,
++    "original full byte set",
++  );
++  need(
++    [...replacement.keys()].sort().join("\n") ===
++      profile.replacements.map((r) => r.path).join("\n"),
++    "replacement byte set",
++  );
++  const result = new Map(original);
++  for (const r of profile.replacements) {
++    const b = replacement.get(r.path);
++    need(b.length === r.bytes && winioDigestData(b) === r.sha256, "replacement body");
++    result.set(r.path, b);
++  }
++  need(
++    winioProjectionDigestData(winioRowsFromBytesData(result)) === profile.patchedProjectionSHA256,
++    "reconstructed full projection",
++  );
++  return new Map([...result].map(([n, b]) => [n, Buffer.from(b)]));
++}
++// Derive ONE root modfile from exact raw original + existing fixed Lima suffix.
++// Do not append to any previously emitted/sealed file or alter source mod/sum.
++export function composeWinioLimaModfileData({
++  profile: input,
++  originalMod: m,
++  originalSum: s,
++  limaAlternate: a,
++  limaDirectory,
++  winioDirectory,
++}) {
++  const profile = validateWinioProfileData(input),
++    mod = bytes(m),
++    sum = bytes(s),
++    alternate = bytes(a);
++  need(
++    winioDigestData(mod) === profile.originalModSHA256 &&
++      winioDigestData(sum) === profile.originalSumSHA256,
++    "actual main module bytes",
++  );
++  need(
++    mod.toString().split(/\r?\n/).includes(`module ${winioIdentity.mainModule}`),
++    "actual root module name",
++  );
++  // Root source is byte-pinned; an existing versioned or unversioned Winio
++  // replacement is refused rather than overridden by a second directive.
++  need(
++    !mod
++      .toString()
++      .split(/\r?\n/)
++      .some(
++        (line) =>
++          line.split("//")[0].includes(winioIdentity.module) && line.split("//")[0].includes("=>"),
++      ),
++    "existing Winio replacement",
++  );
++  const lima = absolute(limaDirectory),
++    winio = absolute(winioDirectory);
++  const suffix = Buffer.from(
++    `\n// OrbWin: reviewed per-version WSL2 import and Windows host-home adaptation.\nreplace ${LIMAMODULE} ${LIMAVERSION} => ${JSON.stringify(lima)}\n`,
++  );
++  need(alternate.equals(Buffer.concat([mod, suffix])), "exact existing Lima alternate");
++  const output = Buffer.concat([
++    alternate,
++    Buffer.from(
++      `\n// OrbWin: reviewed original win32File Close and bounded Fresh Dial custody.\nreplace ${winioIdentity.module} ${winioIdentity.version} => ${JSON.stringify(winio)}\n`,
++    ),
++  ]);
++  return {
++    mod: output,
++    sum: Buffer.from(sum),
++    sourceModSHA256: winioDigestData(mod),
++    alternateModSHA256: winioDigestData(output),
++    alternateSumSHA256: winioDigestData(sum),
++  };
++}
++
++// Exact effective build DATA, never from a root declaration or a PID/DTO permit.
++export function validateEffectiveWinioClosureData(input, profileInput, expected) {
++  const profile = validateWinioProfileData(profileInput);
++  closed(input, [
++    "artifact",
++    "main",
++    "goos",
++    "goarch",
++    "goamd64",
++    "cgo",
++    "tags",
++    "package",
++    "modMode",
++    "modfile",
++    "modSHA256",
++    "sumSHA256",
++    "sourceRoot",
++    "winioRoot",
++    "selectedModule",
++    "packages",
++  ]);
++  need(
++    input.artifact === "rdd.exe" &&
++      input.main === winioIdentity.mainModule &&
++      input.package === "./cmd/rdd",
++    "actual artifact main/target",
++  );
++  need(
++    input.goos === "windows" &&
++      input.goarch === "amd64" &&
++      input.goamd64 === "v1" &&
++      ["0", "1"].includes(input.cgo),
++    "actual platform",
++  );
++  need(
++    Array.isArray(input.tags) &&
++      input.tags.length <= 8 &&
++      input.tags.every((t) => typeof t === "string" && /^[a-z0-9_]+$/.test(t)),
++    "build tags",
++  );
++  need(
++    new Set(input.tags).size === input.tags.length &&
++      input.tags.includes("sqlite_omit_load_extension"),
++    "closed required build tags",
++  );
++  need(
++    input.tags.every((t) => ["sqlite_omit_load_extension", "with_distro", "orbwin_selected_guest"].includes(t)),
++    "unsupported build tag",
++  );
++  need(input.modMode === "readonly", "root must use reviewed composite modfile, not vendor");
++  const sourceRoot = absolute(input.sourceRoot),
++    winioRoot = absolute(input.winioRoot),
++    modfile = absolute(input.modfile);
++  hash(input.modSHA256);
++  hash(input.sumSHA256);
++  // expected comes from the same original composite-modfile derivation and
++  // fixed producer arguments, not fields copied out of the queried DTO.
++  closed(expected, ["modfile", "mod", "sum", "sourceRoot", "winioRoot", "cgo", "tags"]);
++  need(
++    modfile === absolute(expected.modfile) &&
++      sourceRoot === absolute(expected.sourceRoot) &&
++      winioRoot === absolute(expected.winioRoot),
++    "effective original build paths",
++  );
++  need(
++    input.modSHA256 === winioDigestData(bytes(expected.mod)) &&
++      input.sumSHA256 === winioDigestData(bytes(expected.sum)),
++    "effective actual composite bytes",
++  );
++  need(
++    input.cgo === expected.cgo &&
++      JSON.stringify([...input.tags].sort()) === JSON.stringify([...expected.tags].sort()),
++    "effective fixed producer flags",
++  );
++  closed(input.selectedModule, ["Path", "Version", "Dir", "Replace"]);
++  function selected(m) {
++    closed(m, ["Path", "Version", "Dir", "Replace"]);
++    closed(m.Replace, ["Path", "Dir"]);
++    need(
++      m.Path === winioIdentity.module && m.Version === winioIdentity.version,
++      "actual selected MVS version",
++    );
++    need(
++      absolute(m.Dir).toLowerCase() === winioRoot.toLowerCase() &&
++        absolute(m.Replace.Path).toLowerCase() === winioRoot.toLowerCase() &&
++        absolute(m.Replace.Dir).toLowerCase() === winioRoot.toLowerCase(),
++      "actual selected replacement directory",
++    );
++  }
++  selected(input.selectedModule);
++  need(
++    Array.isArray(input.packages) && input.packages.length > 0 && input.packages.length <= 128,
++    "affected package inventory",
++  );
++  const final = new Map(profile.patched.map((r) => [r.path, r]));
++  const imported = new Set();
++  const files = new Map();
++  const packages = input.packages
++    .map((p) => {
++      closed(p, [
++        "ImportPath",
++        "Dir",
++        "Module",
++        "GoFiles",
++        "CgoFiles",
++        "CompiledGoFiles",
++        "EmbedFiles",
++      ]);
++      selected(p.Module);
++      need(
++        typeof p.ImportPath === "string" &&
++          (p.ImportPath === winioIdentity.module ||
++            p.ImportPath.startsWith(winioIdentity.module + "/")),
++        "affected package import",
++      );
++      need(!imported.has(p.ImportPath), "duplicate affected package");
++      imported.add(p.ImportPath);
++      const dir = absolute(p.Dir);
++      need(
++        dir.toLowerCase() === winioRoot.toLowerCase() ||
++          dir.toLowerCase().startsWith(winioRoot.toLowerCase() + "/"),
++        "package source directory",
++      );
++      const lists = {};
++      for (const key of ["GoFiles", "CgoFiles", "CompiledGoFiles", "EmbedFiles"]) {
++        need(Array.isArray(p[key]) && p[key].length <= 512, "selected file list");
++        const seen = new Set();
++        lists[key] = p[key]
++          .map((n) => {
++            need(typeof n === "string", "selected file name");
++            const path = /^[a-z]:/i.test(n)
++              ? under(winioRoot, n)
++              : under(winioRoot, win32.join(dir, sourceName(n)));
++            need(!seen.has(path.toLowerCase()), "duplicate selected file");
++            seen.add(path.toLowerCase());
++            const row = final.get(path);
++            need(row && !path.endsWith("_test.go"), "selected file not reviewed production bytes");
++            files.set(path, row);
++            return path;
++          })
++          .sort();
++      }
++      need(
++        lists.GoFiles.length + lists.CgoFiles.length > 0 && lists.CompiledGoFiles.length > 0,
++        "actual compiled file closure required",
++      );
++      need(
++        [...lists.GoFiles, ...lists.CgoFiles].every((n) => lists.CompiledGoFiles.includes(n)),
++        "omitted compiled source",
++      );
++      return { ImportPath: p.ImportPath, Dir: dir, ...lists };
++    })
++    .sort((a, b) => (a.ImportPath < b.ImportPath ? -1 : 1));
++  need(
++    imported.has(winioIdentity.module) && REQUIRED.every((n) => files.has(n)),
++    "actual native custody files absent from target",
++  );
++  return {
++    artifact: input.artifact,
++    main: input.main,
++    goos: input.goos,
++    goarch: input.goarch,
++    goamd64: input.goamd64,
++    cgo: input.cgo,
++    tags: [...input.tags].sort(),
++    package: input.package,
++    modMode: input.modMode,
++    modfile,
++    modSHA256: input.modSHA256,
++    sumSHA256: input.sumSHA256,
++    sourceRoot,
++    winioRoot,
++    selectedVersion: winioIdentity.version,
++    packages,
++    files: rows([...files.values()]),
++    patchedProjectionSHA256: profile.patchedProjectionSHA256,
++  };
++}
++export function requireUnchangedEffectiveWinioClosureData(before, after, profile, expected) {
++  const a = validateEffectiveWinioClosureData(before, profile, expected),
++    b = validateEffectiveWinioClosureData(after, profile, expected);
++  need(json(a).equals(json(b)), "effective module/target/file closure changed across build");
++  return a;
++}
++
++// Decode actual Go -json object streams as DATA. Origin hashes remain evidence,
++// not a substitute for the fixed producer's real pinned Go invocation.
++export function projectWinioGoListData(moduleBytes, packageBytes, context) {
++  function stream(raw) {
++    need(Buffer.isBuffer(raw) && raw.length > 0 && raw.length <= 32 << 20, "Go metadata bound");
++    const text = raw.toString("utf8");
++    need(Buffer.from(text).equals(raw), "UTF8 Go metadata");
++    const out = [];
++    let start = -1,
++      depth = 0,
++      quoted = false,
++      escape = false;
++    for (let i = 0; i < text.length; i++) {
++      const c = text[i];
++      if (start < 0) {
++        if (/\s/.test(c)) continue;
++        need(c === "{", "Go metadata object stream");
++        start = i;
++        depth = 1;
++        continue;
++      }
++      if (quoted) {
++        if (escape) escape = false;
++        else if (c === "\\") escape = true;
++        else if (c === '"') quoted = false;
++        continue;
++      }
++      if (c === '"') {
++        quoted = true;
++        continue;
++      }
++      if (c === "{" || c === "[") depth++;
++      else if (c === "}" || c === "]") depth--;
++      need(depth >= 0, "Go metadata depth");
++      if (depth === 0) {
++        const v = JSON.parse(text.slice(start, i + 1));
++        need(v && typeof v === "object" && !Array.isArray(v), "Go metadata record");
++        out.push(v);
++        need(out.length <= 20000, "Go metadata record bound");
++        start = -1;
++      }
++    }
++    need(start === -1 && !quoted && out.length > 0, "truncated/empty Go metadata");
++    return out;
++  }
++  const modules = stream(moduleBytes);
++  need(modules.length === 1, "one actual module query");
++  function selected(m) {
++    need(m && m.Replace, "selected actual module");
++    return {
++      Path: m.Path,
++      Version: m.Version,
++      Dir: m.Dir,
++      Replace: { Path: m.Replace.Path, Dir: m.Replace.Dir },
++    };
++  }
++  const packages = stream(packageBytes)
++    .filter(
++      (p) =>
++        typeof p.ImportPath === "string" &&
++        (p.ImportPath === winioIdentity.module ||
++          p.ImportPath.startsWith(winioIdentity.module + "/")),
++    )
++    .map((p) => ({
++      ImportPath: p.ImportPath,
++      Dir: p.Dir,
++      Module: selected(p.Module),
++      GoFiles: p.GoFiles ?? [],
++      CgoFiles: p.CgoFiles ?? [],
++      CompiledGoFiles: p.CompiledGoFiles ?? [],
++      EmbedFiles: p.EmbedFiles ?? [],
++    }));
++  return {
++    record: { ...context, selectedModule: selected(modules[0]), packages },
++    rawModuleSHA256: winioDigestData(moduleBytes),
++    rawPackagesSHA256: winioDigestData(packageBytes),
++  };
++}
++
++// Reconstruct the fixed text patch as DATA; never invokes Git or a tool.
++export function reconstructWinioPatchData(originalInput, patchInput) {
++  const patch = bytes(patchInput);
++  need(Buffer.from(patch.toString("utf8"), "utf8").equals(patch), "UTF8 source patch");
++  const lines = patch.toString("utf8").match(/[^\n]*\n|[^\n]+$/g) || [];
++  const result = new Map([...originalInput].map(([n, b]) => [sourceName(n), bytes(b)])),
++    seen = new Set();
++  let i = 0;
++  while (i < lines.length) {
++    need(
++      lines[i].startsWith("--- ") && i + 1 < lines.length && lines[i + 1].startsWith("+++ "),
++      "patch file header",
++    );
++    const from = lines[i++].slice(4).trimEnd(),
++      to = lines[i++].slice(4).trimEnd();
++    need(to.startsWith("b/"), "patch cannot delete or rename source");
++    const path = sourceName(to.slice(2));
++    need(!seen.has(path.toLowerCase()), "duplicate patch file");
++    seen.add(path.toLowerCase());
++    need(from === "/dev/null" || from === "a/" + path, "patch original name");
++    need((from === "/dev/null") === !result.has(path), "patch original membership");
++    const body = result.get(path) || Buffer.alloc(0);
++    need(Buffer.from(body.toString("utf8"), "utf8").equals(body), "UTF8 source body");
++    const old = body.toString("utf8").match(/[^\n]*\n|[^\n]+$/g) || [],
++      out = [];
++    let cursor = 0,
++      hunks = 0;
++    while (i < lines.length && lines[i].startsWith("@@ ")) {
++      const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@[^\n]*\n$/.exec(lines[i++]);
++      need(m, "patch hunk");
++      const os = Number(m[1]),
++        oc = m[2] === undefined ? 1 : Number(m[2]),
++        ns = Number(m[3]),
++        nc = m[4] === undefined ? 1 : Number(m[4]);
++      need(
++        [os, oc, ns, nc].every((n) => Number.isSafeInteger(n) && n >= 0 && n <= 1000000),
++        "hunk bounds",
++      );
++      const start = oc === 0 ? os : os - 1;
++      need(start >= cursor && start <= old.length, "hunk position");
++      out.push(...old.slice(cursor, start));
++      cursor = start;
++      need(out.length === (nc === 0 ? ns : ns - 1), "new hunk position");
++      let consumed = 0,
++        produced = 0;
++      while (i < lines.length && !lines[i].startsWith("@@ ") && !lines[i].startsWith("--- ")) {
++        const line = lines[i++],
++          op = line[0],
++          text = line.slice(1);
++        need([" ", "+", "-"].includes(op), "hunk operator");
++        if (op !== "+") {
++          need(old[cursor] === text, "original hunk bytes");
++          cursor++;
++          consumed++;
++        }
++        if (op !== "-") {
++          out.push(text);
++          produced++;
++        }
++      }
++      need(consumed === oc && produced === nc, "hunk counts");
++      hunks++;
++    }
++    need(hunks > 0, "empty source patch");
++    out.push(...old.slice(cursor));
++    result.set(path, Buffer.from(out.join("")));
++  }
++  need(seen.size > 0, "empty patch");
++  winioRowsFromBytesData(result);
++  return result;
++}
++
++export function winioPortableOfferData(profileInput, input) {
++  const profile = validateWinioProfileData(profileInput);
++  closed(input, ["upstreamZip", "patch", "license", "lockBytes"]);
++  const lockBytes = bytes(input.lockBytes);
++  need(
++    JSON.stringify(validateWinioProfileData(JSON.parse(lockBytes))) === JSON.stringify(profile),
++    "exact source lock profile",
++  );
++  const lockSHA256 = winioDigestData(lockBytes);
++  const upstreamZip = bytes(input.upstreamZip),
++    patch = bytes(input.patch),
++    license = bytes(input.license);
++  need(
++    winioDigestData(upstreamZip) === profile.upstreamZipSHA256 &&
++      winioDigestData(patch) === profile.patchSHA256 &&
++      winioDigestData(license) === profile.licenseSHA256,
++    "portable source offer bytes",
++  );
++  const readme = Buffer.from(
++    `OrbWin go-winio source adaptation\nModule: ${winioIdentity.module} ${winioIdentity.version}\nOriginal upstream h1: ${profile.upstreamModuleSum}\nPatched projection: ${profile.patchedProjectionSHA256}\nupstream.zip is the original module. Apply winio-custody.patch to reconstruct the reviewed source. LICENSE and upstream tests are retained. h1 refers only to original source. Native qualification and actual caller custody remain separate.\n`,
++  );
++  const payloads = new Map([
++    ["upstream.zip", upstreamZip],
++    ["winio-custody.patch", patch],
++    ["LICENSE", license],
++    ["README.md", readme],
++  ]);
++  const manifest = {
++    schema: 1,
++    lockSHA256,
++    module: winioIdentity.module,
++    version: winioIdentity.version,
++    upstreamModuleSum: profile.upstreamModuleSum,
++    upstreamGoModSum: profile.upstreamGoModSum,
++    upstreamZipSHA256: profile.upstreamZipSHA256,
++    baseline: profile.baseline,
++    patched: profile.patched,
++    patchedProjectionSHA256: profile.patchedProjectionSHA256,
++    patchSHA256: profile.patchSHA256,
++    recipeHashes: profile.recipeHashes,
++    files: Object.fromEntries([...payloads].map(([n, b]) => [n, winioDigestData(b)])),
++  };
++  payloads.set("manifest.json", json(manifest));
++  const portable = {
++    schema: 1,
++    lockSHA256,
++    module: winioIdentity.module,
++    version: winioIdentity.version,
++    upstreamZipSHA256: profile.upstreamZipSHA256,
++    patchedProjectionSHA256: profile.patchedProjectionSHA256,
++    patchSHA256: profile.patchSHA256,
++    recipeHashes: { ...profile.recipeHashes },
++    offerFiles: Object.fromEntries([...payloads].map(([n, b]) => [n, winioDigestData(b)])),
++  };
++  return {
++    portable: JSON.parse(JSON.stringify(portable)),
++    payloads: new Map([...payloads].map(([n, b]) => [n, Buffer.from(b)])),
++  };
++}
++
++// The one static runtime fixture is generated from Node's actual source offer,
++// never reserialized by Rust or placed inside its own lock/recipe digest list.
++export function createWinioRuntimeOfferData(lockBytes, input) {
++  const raw = bytes(lockBytes),
++    lock = JSON.parse(raw);
++  closed(lock, ["schema", "role", "reviewPeerSHA256", "sourceReceiptSHA256", "profile"]);
++  need(
++    lock.schema === 1 &&
++      lock.role === "root-rdd-windows-amd64" &&
++      lock.reviewPeerSHA256 ===
++        "d33588322814f90603b4553cb7d322b38ed1aa09275b022674c032f8598445d8" &&
++      lock.sourceReceiptSHA256 ===
++        "a1c70600da2b7d2ea834935e2eb139b070a504de7aa3cc1ccc9819295ff48d19",
++    "runtime offer source/peer",
++  );
++  closed(input, ["upstreamZip", "patch", "license"]);
++  const offer = winioPortableOfferData(lock.profile, { ...input, lockBytes: json(lock.profile) }),
++    lockSHA256 = winioDigestData(raw);
++  const manifest = JSON.parse(offer.payloads.get("manifest.json"));
++  manifest.lockSHA256 = lockSHA256;
++  manifest.reviewPeerSHA256 = lock.reviewPeerSHA256;
++  manifest.sourceReceiptSHA256 = lock.sourceReceiptSHA256;
++  offer.payloads.set("manifest.json", json(manifest));
++  offer.portable.lockSHA256 = lockSHA256;
++  offer.portable.reviewPeerSHA256 = lock.reviewPeerSHA256;
++  offer.portable.sourceReceiptSHA256 = lock.sourceReceiptSHA256;
++  offer.portable.offerFiles = Object.fromEntries(
++    [...offer.payloads].map(([n, b]) => [n, winioDigestData(b)]),
++  );
++  return {
++    portable: JSON.parse(JSON.stringify(offer.portable)),
++    payloads: new Map([...offer.payloads].map(([n, b]) => [n, Buffer.from(b)])),
++  };
++}
++export function winioNoticeVariantSuffixData(variant) {
++  need(
++    variant === undefined || ["orbwin-wsl2", "orbwin-winio-custody"].includes(variant),
++    "unknown local source variant",
++  );
++  return variant ? "#" + variant : "";
++}
++export function classifyWinioNoticeData(dependency, isRootConsumer, expectedSourceDir) {
++  if (dependency.Path !== winioIdentity.module) return null;
++  if (isRootConsumer) {
++    need(dependency.Version === winioIdentity.version, "root Winio notice version");
++    const r = dependency.Replace;
++    need(
++      r &&
++        absolute(r.Path) === absolute(expectedSourceDir) &&
++        (!r.Dir || absolute(r.Dir) === absolute(expectedSourceDir)) &&
++        (!r.Version || r.Version === "(devel)"),
++      "root Winio notice source",
++    );
++    return "orbwin-winio-custody";
++  }
++  need(
++    !dependency.Replace || (dependency.Replace.Version && dependency.Replace.Version !== "(devel)"),
++    "independent Winio local source needs its own review",
++  );
++  return null;
++}
++
++export {
++  preflightWinioBuildInput,
++  prepareWinioBuildInput,
++  verifyWinioBuildInput,
++  verifyPortableWinioBuild,
++  stageWinioSourceOffer,
++  winioBuildEnvironment,
++} from "./winio-build-input-fs.mjs";
+--- a/scripts/winio-build-input.test.mjs
++++ b/scripts/winio-build-input.test.mjs
+@@ -1,464 +1,473 @@
+-import assert from "node:assert/strict";
+-import test from "node:test";
+-import {
+-  winioIdentity,
+-  winioDigestData,
+-  winioRowsFromBytesData,
+-  winioProjectionDigestData,
+-  validateWinioProfileData,
+-  reconstructWinioBytesData,
+-  composeWinioLimaModfileData,
+-  validateEffectiveWinioClosureData,
+-  requireUnchangedEffectiveWinioClosureData,
+-  winioPortableOfferData,
+-  prepareWinioBuildInput,
+-  projectWinioGoListData,
+-  reconstructWinioPatchData,
+-} from "./winio-build-input.mjs";
+-
+-// All byte buffers and Go-list records below are invented DATA in memory.
+-// No actual module/source cache, ZIP parser, compiler, process or filesystem.
+-const recipeNames = [
+-  "scripts/winio-build-input.mjs",
+-  "scripts/winio-build-input-fs.mjs",
+-  "scripts/lima-wsl2-build-input.mjs",
+-  "scripts/build-backend.mjs",
+-  "scripts/build-identity.mjs",
+-  "scripts/collect-notices.mjs",
+-];
+-const h = winioDigestData,
+-  clone = (v) => JSON.parse(JSON.stringify(v));
+-function fixture() {
+-  const original = new Map(
+-    Object.entries({
+-      LICENSE: "synthetic MIT notice\n",
+-      "go.mod": `module ${winioIdentity.module}\n`,
+-      "go.sum": "synthetic pinned sums\n",
+-      "file.go": "original file DATA\n",
+-      "pipe.go": "unchanged pipe DATA\n",
+-      "original_test.go": "unchanged upstream test DATA\n",
+-    }).map(([n, b]) => [n, Buffer.from(b)]),
+-  );
+-  const replacement = new Map(
+-    [
+-      "file.go",
+-      "file_original_close_state.go",
+-      "file_original_iocp_windows.go",
+-      "pipe_dial_state.go",
+-      "pipe_original_dial_windows.go",
+-    ].map((n) => [n, Buffer.from(`reviewed synthetic DATA ${n}\n`)]),
+-  );
+-  const final = new Map([...original, ...replacement]);
+-  const mod = Buffer.from(
+-      `module ${winioIdentity.mainModule}\n\ngo 1.27.0\n\nrequire ${winioIdentity.module} ${winioIdentity.version}\nreplace example.invalid/kept => ./pkg/kept\n`,
+-    ),
+-    sum = Buffer.from("synthetic main sums\n"),
+-    zip = Buffer.from("synthetic ZIP fixture; not valid real h1 evidence\n"),
+-    patch = Buffer.from("synthetic reviewed patch\n");
+-  const baseline = winioRowsFromBytesData(original),
+-    patched = winioRowsFromBytesData(final);
+-  const profile = {
+-    schema: 1,
+-    ...winioIdentity,
+-    originalModSHA256: h(mod),
+-    originalSumSHA256: h(sum),
+-    upstreamZipSHA256: h(zip),
+-    upstreamModuleSum: "h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=",
+-    upstreamGoModSum: "h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=",
+-    patchSHA256: h(patch),
+-    licenseSHA256: h(original.get("LICENSE")),
+-    baseline,
+-    patched,
+-    baselineProjectionSHA256: winioProjectionDigestData(baseline),
+-    patchedProjectionSHA256: winioProjectionDigestData(patched),
+-    replacements: [...replacement].map(([path, b]) => ({
+-      path,
+-      before: original.has(path) ? h(original.get(path)) : null,
+-      sha256: h(b),
+-      bytes: b.length,
+-    })),
+-    recipeHashes: Object.fromEntries(recipeNames.map((n) => [n, h(Buffer.from(n))])),
+-  };
+-  const limaDirectory = "C:/fixture/build/lima",
+-    winioDirectory = "C:/fixture/build/winio";
+-  const alternate = Buffer.concat([
+-    mod,
+-    Buffer.from(
+-      `\n// OrbWin: reviewed per-version WSL2 import and Windows host-home adaptation.\nreplace github.com/lima-vm/lima/v2 v2.3.0-beta.1.0.20261005214905-0ae2df64800a => ${JSON.stringify(limaDirectory)}\n`,
+-    ),
+-  ]);
+-  const goFiles = [...final.keys()].filter((n) => n.endsWith(".go") && !n.endsWith("_test.go"));
+-  const selected = {
+-    Path: winioIdentity.module,
+-    Version: winioIdentity.version,
+-    Dir: winioDirectory,
+-    Replace: { Path: winioDirectory, Dir: winioDirectory },
+-  };
+-  const composite = composeWinioLimaModfileData({
+-    profile,
+-    originalMod: mod,
+-    originalSum: sum,
+-    limaAlternate: alternate,
+-    limaDirectory,
+-    winioDirectory,
+-  });
+-  const effective = {
+-    artifact: "rdd.exe",
+-    main: winioIdentity.mainModule,
+-    goos: "windows",
+-    goarch: "amd64",
+-    goamd64: "v1",
+-    cgo: "1",
+-    tags: ["sqlite_omit_load_extension", "with_distro"],
+-    package: "./cmd/rdd",
+-    modMode: "readonly",
+-    modfile: "C:/fixture/build/lima-build-input/rdd-lima.mod",
+-    modSHA256: h(composite.mod),
+-    sumSHA256: h(sum),
+-    sourceRoot: "C:/fixture/source/rdd",
+-    winioRoot: winioDirectory,
+-    selectedModule: clone(selected),
+-    packages: [
+-      {
+-        ImportPath: winioIdentity.module,
+-        Dir: winioDirectory,
+-        Module: clone(selected),
+-        GoFiles: goFiles,
+-        CgoFiles: [],
+-        CompiledGoFiles: goFiles.map((n) => winioDirectory + "/" + n),
+-        EmbedFiles: [],
+-      },
+-    ],
+-  };
+-  const expected = {
+-    modfile: effective.modfile,
+-    mod: composite.mod,
+-    sum,
+-    sourceRoot: effective.sourceRoot,
+-    winioRoot: effective.winioRoot,
+-    cgo: effective.cgo,
+-    tags: [...effective.tags],
+-  };
+-  return {
+-    original,
+-    replacement,
+-    final,
+-    mod,
+-    sum,
+-    zip,
+-    patch,
+-    profile,
+-    alternate,
+-    limaDirectory,
+-    winioDirectory,
+-    effective,
+-    expected,
+-  };
+-}
+-function compose(f, overrides = {}) {
+-  return composeWinioLimaModfileData({
+-    profile: f.profile,
+-    originalMod: f.mod,
+-    originalSum: f.sum,
+-    limaAlternate: f.alternate,
+-    limaDirectory: f.limaDirectory,
+-    winioDirectory: f.winioDirectory,
+-    ...overrides,
+-  });
+-}
+-
+-test("production gateway rejects unsupported arguments before filesystem work", () => {
+-  let reads = 0;
+-  const options = new Proxy(
+-    {},
+-    {
+-      get() {
+-        reads++;
+-        throw Error("read");
+-      },
+-    },
+-  );
+-  assert.throws(() => prepareWinioBuildInput(options), /closed record/);
+-  assert.equal(reads, 0);
+-});
+-test("complete source reconstruction preserves original MIT/tests/module and input backing", () => {
+-  const f = fixture(),
+-    before = h(f.original.get("file.go")),
+-    r = reconstructWinioBytesData(f.profile, f.original, f.replacement);
+-  assert.equal(
+-    winioProjectionDigestData(winioRowsFromBytesData(r)),
+-    f.profile.patchedProjectionSHA256,
+-  );
+-  for (const n of ["LICENSE", "original_test.go", "go.mod", "go.sum"])
+-    assert.deepEqual(r.get(n), f.original.get(n));
+-  r.get("file.go").fill(0);
+-  assert.equal(h(f.original.get("file.go")), before);
+-  assert.notEqual(h(f.replacement.get("file.go")), h(r.get("file.go")));
+-});
+-test("unknown source bytes, extras, omissions and mismatched before pins refuse", () => {
+-  for (const mutation of [
+-    (f) => f.original.set("stray.go", Buffer.from("stray")),
+-    (f) => f.original.delete("pipe.go"),
+-    (f) => f.original.get("pipe.go").fill(0),
+-    (f) => f.replacement.set("stray.go", Buffer.from("stray")),
+-    (f) => f.replacement.delete("file.go"),
+-    (f) => (f.profile.replacements[0].before = "0".repeat(64)),
+-  ]) {
+-    const f = fixture();
+-    mutation(f);
+-    assert.throws(() => reconstructWinioBytesData(f.profile, f.original, f.replacement));
+-  }
+-});
+-test("projection case aliases, traversal, reserved names and undeclared fields refuse", () => {
+-  for (const path of ["../x", "a/../../x", "C:/x", "a\\x", "a:ads", "CON.go", "a/", "a/./x"]) {
+-    assert.throws(() => winioRowsFromBytesData(new Map([[path, Buffer.from("x")]])));
+-  }
+-  assert.throws(
+-    () =>
+-      winioRowsFromBytesData(
+-        new Map([
+-          ["File.go", Buffer.from("x")],
+-          ["file.go", Buffer.from("y")],
+-        ]),
+-      ),
+-    /collision/,
+-  );
+-  const f = fixture();
+-  f.profile.extra = true;
+-  assert.throws(() => validateWinioProfileData(f.profile), /closed/);
+-});
+-test("changed upstream test or license cannot be laundered through final projection", () => {
+-  for (const name of ["LICENSE", "original_test.go", "go.mod"]) {
+-    const f = fixture(),
+-      body = Buffer.from("changed");
+-    f.profile.patched = f.profile.patched.map((r) =>
+-      r.path === name ? { path: name, sha256: h(body), bytes: body.length } : r,
+-    );
+-    f.profile.patchedProjectionSHA256 = winioProjectionDigestData(f.profile.patched);
+-    assert.throws(() => validateWinioProfileData(f.profile), /preservation/);
+-  }
+-});
+-test("single composed modfile retains exact Lima and original relative replacement", () => {
+-  const f = fixture(),
+-    r = compose(f);
+-  assert.equal(r.mod.subarray(0, f.alternate.length).toString(), f.alternate.toString());
+-  assert.match(r.mod.toString(), /example\.invalid\/kept => \.\/pkg\/kept/);
+-  assert.equal(
+-    (r.mod.toString().match(/replace github.com\/Microsoft\/go-winio/g) || []).length,
+-    1,
+-  );
+-  assert.deepEqual(r.sum, f.sum);
+-  const original = Buffer.from(f.mod);
+-  r.mod.fill(0);
+-  assert.deepEqual(f.mod, original);
+-});
+-test("wrong module, prior Winio replacement, foreign Lima suffix and traversal refuse", () => {
+-  const f = fixture();
+-  assert.throws(
+-    () =>
+-      compose(f, {
+-        limaAlternate: Buffer.concat([f.alternate, Buffer.from("\nreplace foreign => C:/bad\n")]),
+-      }),
+-    /Lima/,
+-  );
+-  assert.throws(() => compose(f, { winioDirectory: "C:/fixture/../other" }), /traversal/);
+-  const wrong = fixture();
+-  wrong.mod = Buffer.from("module orbwin.local/session\n");
+-  wrong.profile.originalModSHA256 = h(wrong.mod);
+-  assert.throws(() => compose(wrong), /root module/);
+-  const conflict = fixture();
+-  conflict.mod = Buffer.concat([
+-    conflict.mod,
+-    Buffer.from(`replace ${winioIdentity.module} => C:/unreviewed\n`),
+-  ]);
+-  conflict.profile.originalModSHA256 = h(conflict.mod);
+-  assert.throws(() => compose(conflict), /existing Winio/);
+-});
+-test("effective target binds actual MVS replacement and all selected native file bytes", () => {
+-  const f = fixture(),
+-    r = validateEffectiveWinioClosureData(f.effective, f.profile, f.expected);
+-  assert.equal(r.selectedVersion, "v0.6.4");
+-  assert.equal(r.files.length, f.effective.packages[0].GoFiles.length);
+-  assert.equal(r.patchedProjectionSHA256, f.profile.patchedProjectionSHA256);
+-  assert.deepEqual(
+-    requireUnchangedEffectiveWinioClosureData(
+-      f.effective,
+-      clone(f.effective),
+-      f.profile,
+-      f.expected,
+-    ),
+-    r,
+-  );
+-});
+-test("declared version or root module-only evidence never substitutes for actual closure", () => {
+-  for (const change of [
+-    (r) => (r.selectedModule.Version = "v0.6.2"),
+-    (r) => (r.packages[0].Module.Version = "v0.6.2"),
+-    (r) => (r.selectedModule.Replace.Dir = "C:/unmodified/cache"),
+-    (r) => (r.packages = []),
+-    (r) => delete r.packages[0].Module,
+-    (r) => (r.packages[0].CompiledGoFiles = []),
+-  ]) {
+-    const f = fixture();
+-    change(f.effective);
+-    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
+-  }
+-});
+-test("different main/vendor/Linux/tag targets do not inherit root Windows qualification", () => {
+-  for (const change of [
+-    (r) => (r.main = "orbwin.local/session"),
+-    (r) => (r.modMode = "vendor"),
+-    (r) => (r.goos = "linux"),
+-    (r) => (r.goarch = "arm64"),
+-    (r) => (r.package = "./src/networking/cmd/network"),
+-    (r) => r.tags.push("unreviewed"),
+-  ]) {
+-    const f = fixture();
+-    change(f.effective);
+-    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
+-  }
+-});
+-test("omitted, escaping, test-only and duplicate compiled files refuse", () => {
+-  for (const change of [
+-    (p) => p.CompiledGoFiles.pop(),
+-    (p) => p.CompiledGoFiles.push("C:/foreign/file.go"),
+-    (p) => p.GoFiles.push("original_test.go"),
+-    (p) => p.CompiledGoFiles.push(p.CompiledGoFiles[0]),
+-    (p) => {
+-      p.GoFiles = p.GoFiles.filter((n) => n !== "pipe_original_dial_windows.go");
+-      p.CompiledGoFiles = p.CompiledGoFiles.filter(
+-        (n) => !n.endsWith("/pipe_original_dial_windows.go"),
+-      );
+-    },
+-  ]) {
+-    const f = fixture();
+-    change(f.effective.packages[0]);
+-    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
+-  }
+-});
+-test("late effective modfile/package context changes invalidate before-after record", () => {
+-  const f = fixture(),
+-    after = clone(f.effective);
+-  after.modSHA256 = "0".repeat(64);
+-  assert.throws(
+-    () => requireUnchangedEffectiveWinioClosureData(f.effective, after, f.profile, f.expected),
+-    /effective/,
+-  );
+-  const b = clone(f.effective);
+-  b.cgo = "0";
+-  assert.throws(
+-    () => requireUnchangedEffectiveWinioClosureData(f.effective, b, f.profile, f.expected),
+-    /effective/,
+-  );
+-});
+-test("portable offer binds source variant/license/patch and carries no private build path", () => {
+-  const f = fixture(),
+-    o = winioPortableOfferData(f.profile, {
+-      upstreamZip: f.zip,
+-      patch: f.patch,
+-      license: f.original.get("LICENSE"),
+-      lockBytes: Buffer.from(JSON.stringify(f.profile)),
+-    });
+-  assert.equal(o.payloads.size, 5);
+-  assert.equal(o.portable.patchedProjectionSHA256, f.profile.patchedProjectionSHA256);
+-  assert.ok(!JSON.stringify(o.portable).includes("C:/"));
+-  assert.match(o.payloads.get("README.md").toString(), /h1 refers only to original source/);
+-  o.payloads.get("upstream.zip").fill(0);
+-  assert.equal(h(f.zip), f.profile.upstreamZipSHA256);
+-  assert.throws(
+-    () =>
+-      winioPortableOfferData(f.profile, {
+-        upstreamZip: Buffer.from("wrong"),
+-        patch: f.patch,
+-        license: f.original.get("LICENSE"),
+-        lockBytes: Buffer.from(JSON.stringify(f.profile)),
+-      }),
+-    /offer bytes/,
+-  );
+-});
+-test("DATA profile cannot silently change actual version or recipe inventory", () => {
+-  for (const change of [
+-    (p) => (p.version = "v0.6.2"),
+-    (p) => delete p.recipeHashes[recipeNames[0]],
+-    (p) => (p.recipeHashes.foreign = "0".repeat(64)),
+-    (p) => (p.upstreamModuleSum = "h1:wrong"),
+-  ]) {
+-    const f = fixture();
+-    change(f.profile);
+-    assert.throws(() => validateWinioProfileData(f.profile));
+-  }
+-});
+-
+-test("self-consistent DTO from a different modfile is rejected by original composite bytes", () => {
+-  const f = fixture(),
+-    fake = clone(f.effective);
+-  fake.modSHA256 = h(f.alternate);
+-  assert.throws(
+-    () => requireUnchangedEffectiveWinioClosureData(fake, clone(fake), f.profile, f.expected),
+-    /actual composite bytes/,
+-  );
+-  const changed = clone(f.profile);
+-  changed.patchSHA256 = "0".repeat(64);
+-  assert.throws(
+-    () =>
+-      winioPortableOfferData(f.profile, {
+-        upstreamZip: f.zip,
+-        patch: f.patch,
+-        license: f.original.get("LICENSE"),
+-        lockBytes: Buffer.from(JSON.stringify(changed)),
+-      }),
+-    /lock profile/,
+-  );
+-});
+-
+-test("patch DATA rejects deletion, rename, changed context and trailing unframed bytes", () => {
+-  const original = new Map([["file.go", Buffer.from("old\n")]]);
+-  const good = "--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n";
+-  assert.equal(
+-    reconstructWinioPatchData(original, Buffer.from(good)).get("file.go").toString(),
+-    "new\n",
+-  );
+-  for (const value of [
+-    good.replace("b/file.go", "/dev/null"),
+-    good.replace("b/file.go", "b/renamed.go"),
+-    good.replace("-old", "-other"),
+-    good + "unframed\n",
+-  ])
+-    assert.throws(() => reconstructWinioPatchData(original, Buffer.from(value)));
+-});
+-
+-test("actual Go JSON object-stream projection retains source hashes and selects only Winio packages", () => {
+-  const f = fixture(),
+-    { selectedModule, packages, ...context } = f.effective;
+-  const mod = Buffer.from(JSON.stringify({ ...selectedModule, GoMod: "evidence-only" })),
+-    raw = Buffer.from(
+-      JSON.stringify({ ImportPath: "fmt", Doc: 'escaped "{ }"' }) +
+-        "\n" +
+-        JSON.stringify({ ...packages[0], IgnoredGoFiles: ["other.go"] }) +
+-        "\n",
+-    );
+-  const projected = projectWinioGoListData(mod, raw, context);
+-  assert.equal(projected.rawPackagesSHA256, h(raw));
+-  assert.equal(projected.record.packages.length, 1);
+-  assert.deepEqual(
+-    validateEffectiveWinioClosureData(projected.record, f.profile, f.expected),
+-    validateEffectiveWinioClosureData(f.effective, f.profile, f.expected),
+-  );
+-});
+-test("truncated, mixed and non-object Go output cannot become selected metadata", () => {
+-  const f = fixture(),
+-    { selectedModule, packages, ...context } = f.effective,
+-    mod = Buffer.from(JSON.stringify(selectedModule));
+-  for (const raw of ["{", "{} trailing", "[]", '{"x":"unterminated', "{}\n{"]) {
+-    assert.throws(() => projectWinioGoListData(mod, Buffer.from(raw), context));
+-  }
+-  assert.throws(
+-    () =>
+-      projectWinioGoListData(
+-        Buffer.concat([mod, mod]),
+-        Buffer.from(JSON.stringify(packages[0])),
+-        context,
+-      ),
+-    /one actual module/,
+-  );
+-});
++import { selectedRootBuildTags } from "./selected-guest-build-input.mjs";
++import assert from "node:assert/strict";
++import test from "node:test";
++import {
++  winioIdentity,
++  winioDigestData,
++  winioRowsFromBytesData,
++  winioProjectionDigestData,
++  validateWinioProfileData,
++  reconstructWinioBytesData,
++  composeWinioLimaModfileData,
++  validateEffectiveWinioClosureData,
++  requireUnchangedEffectiveWinioClosureData,
++  winioPortableOfferData,
++  prepareWinioBuildInput,
++  projectWinioGoListData,
++  reconstructWinioPatchData,
++} from "./winio-build-input.mjs";
++
++// All byte buffers and Go-list records below are invented DATA in memory.
++// No actual module/source cache, ZIP parser, compiler, process or filesystem.
++const recipeNames = [
++  "scripts/winio-build-input.mjs",
++  "scripts/winio-build-input-fs.mjs",
++  "scripts/lima-wsl2-build-input.mjs",
++  "scripts/build-backend.mjs",
++  "scripts/build-identity.mjs",
++  "scripts/collect-notices.mjs",
++];
++const h = winioDigestData,
++  clone = (v) => JSON.parse(JSON.stringify(v));
++function fixture() {
++  const original = new Map(
++    Object.entries({
++      LICENSE: "synthetic MIT notice\n",
++      "go.mod": `module ${winioIdentity.module}\n`,
++      "go.sum": "synthetic pinned sums\n",
++      "file.go": "original file DATA\n",
++      "pipe.go": "unchanged pipe DATA\n",
++      "original_test.go": "unchanged upstream test DATA\n",
++    }).map(([n, b]) => [n, Buffer.from(b)]),
++  );
++  const replacement = new Map(
++    [
++      "file.go",
++      "file_original_close_state.go",
++      "file_original_iocp_windows.go",
++      "pipe_dial_state.go",
++      "pipe_original_dial_windows.go",
++    ].map((n) => [n, Buffer.from(`reviewed synthetic DATA ${n}\n`)]),
++  );
++  const final = new Map([...original, ...replacement]);
++  const mod = Buffer.from(
++      `module ${winioIdentity.mainModule}\n\ngo 1.27.0\n\nrequire ${winioIdentity.module} ${winioIdentity.version}\nreplace example.invalid/kept => ./pkg/kept\n`,
++    ),
++    sum = Buffer.from("synthetic main sums\n"),
++    zip = Buffer.from("synthetic ZIP fixture; not valid real h1 evidence\n"),
++    patch = Buffer.from("synthetic reviewed patch\n");
++  const baseline = winioRowsFromBytesData(original),
++    patched = winioRowsFromBytesData(final);
++  const profile = {
++    schema: 1,
++    ...winioIdentity,
++    originalModSHA256: h(mod),
++    originalSumSHA256: h(sum),
++    upstreamZipSHA256: h(zip),
++    upstreamModuleSum: "h1:kJF2pamtYCWXf0xAT8sAkwKC0pMl2HYBrRPHAqyUc+g=",
++    upstreamGoModSum: "h1:1xl5JXG4ze/m74GH6Dc4Mwxfc3VL5siRVQjIAlHH07U=",
++    patchSHA256: h(patch),
++    licenseSHA256: h(original.get("LICENSE")),
++    baseline,
++    patched,
++    baselineProjectionSHA256: winioProjectionDigestData(baseline),
++    patchedProjectionSHA256: winioProjectionDigestData(patched),
++    replacements: [...replacement].map(([path, b]) => ({
++      path,
++      before: original.has(path) ? h(original.get(path)) : null,
++      sha256: h(b),
++      bytes: b.length,
++    })),
++    recipeHashes: Object.fromEntries(recipeNames.map((n) => [n, h(Buffer.from(n))])),
++  };
++  const limaDirectory = "C:/fixture/build/lima",
++    winioDirectory = "C:/fixture/build/winio";
++  const alternate = Buffer.concat([
++    mod,
++    Buffer.from(
++      `\n// OrbWin: reviewed per-version WSL2 import and Windows host-home adaptation.\nreplace github.com/lima-vm/lima/v2 v2.3.0-beta.1.0.20261005214905-0ae2df64800a => ${JSON.stringify(limaDirectory)}\n`,
++    ),
++  ]);
++  const goFiles = [...final.keys()].filter((n) => n.endsWith(".go") && !n.endsWith("_test.go"));
++  const selected = {
++    Path: winioIdentity.module,
++    Version: winioIdentity.version,
++    Dir: winioDirectory,
++    Replace: { Path: winioDirectory, Dir: winioDirectory },
++  };
++  const composite = composeWinioLimaModfileData({
++    profile,
++    originalMod: mod,
++    originalSum: sum,
++    limaAlternate: alternate,
++    limaDirectory,
++    winioDirectory,
++  });
++  const effective = {
++    artifact: "rdd.exe",
++    main: winioIdentity.mainModule,
++    goos: "windows",
++    goarch: "amd64",
++    goamd64: "v1",
++    cgo: "1",
++    tags: ["sqlite_omit_load_extension", "with_distro"],
++    package: "./cmd/rdd",
++    modMode: "readonly",
++    modfile: "C:/fixture/build/lima-build-input/rdd-lima.mod",
++    modSHA256: h(composite.mod),
++    sumSHA256: h(sum),
++    sourceRoot: "C:/fixture/source/rdd",
++    winioRoot: winioDirectory,
++    selectedModule: clone(selected),
++    packages: [
++      {
++        ImportPath: winioIdentity.module,
++        Dir: winioDirectory,
++        Module: clone(selected),
++        GoFiles: goFiles,
++        CgoFiles: [],
++        CompiledGoFiles: goFiles.map((n) => winioDirectory + "/" + n),
++        EmbedFiles: [],
++      },
++    ],
++  };
++  const expected = {
++    modfile: effective.modfile,
++    mod: composite.mod,
++    sum,
++    sourceRoot: effective.sourceRoot,
++    winioRoot: effective.winioRoot,
++    cgo: effective.cgo,
++    tags: [...effective.tags],
++  };
++  return {
++    original,
++    replacement,
++    final,
++    mod,
++    sum,
++    zip,
++    patch,
++    profile,
++    alternate,
++    limaDirectory,
++    winioDirectory,
++    effective,
++    expected,
++  };
++}
++function compose(f, overrides = {}) {
++  return composeWinioLimaModfileData({
++    profile: f.profile,
++    originalMod: f.mod,
++    originalSum: f.sum,
++    limaAlternate: f.alternate,
++    limaDirectory: f.limaDirectory,
++    winioDirectory: f.winioDirectory,
++    ...overrides,
++  });
++}
++
++test("production gateway rejects unsupported arguments before filesystem work", () => {
++  let reads = 0;
++  const options = new Proxy(
++    {},
++    {
++      get() {
++        reads++;
++        throw Error("read");
++      },
++    },
++  );
++  assert.throws(() => prepareWinioBuildInput(options), /closed record/);
++  assert.equal(reads, 0);
++});
++test("complete source reconstruction preserves original MIT/tests/module and input backing", () => {
++  const f = fixture(),
++    before = h(f.original.get("file.go")),
++    r = reconstructWinioBytesData(f.profile, f.original, f.replacement);
++  assert.equal(
++    winioProjectionDigestData(winioRowsFromBytesData(r)),
++    f.profile.patchedProjectionSHA256,
++  );
++  for (const n of ["LICENSE", "original_test.go", "go.mod", "go.sum"])
++    assert.deepEqual(r.get(n), f.original.get(n));
++  r.get("file.go").fill(0);
++  assert.equal(h(f.original.get("file.go")), before);
++  assert.notEqual(h(f.replacement.get("file.go")), h(r.get("file.go")));
++});
++test("unknown source bytes, extras, omissions and mismatched before pins refuse", () => {
++  for (const mutation of [
++    (f) => f.original.set("stray.go", Buffer.from("stray")),
++    (f) => f.original.delete("pipe.go"),
++    (f) => f.original.get("pipe.go").fill(0),
++    (f) => f.replacement.set("stray.go", Buffer.from("stray")),
++    (f) => f.replacement.delete("file.go"),
++    (f) => (f.profile.replacements[0].before = "0".repeat(64)),
++  ]) {
++    const f = fixture();
++    mutation(f);
++    assert.throws(() => reconstructWinioBytesData(f.profile, f.original, f.replacement));
++  }
++});
++test("projection case aliases, traversal, reserved names and undeclared fields refuse", () => {
++  for (const path of ["../x", "a/../../x", "C:/x", "a\\x", "a:ads", "CON.go", "a/", "a/./x"]) {
++    assert.throws(() => winioRowsFromBytesData(new Map([[path, Buffer.from("x")]])));
++  }
++  assert.throws(
++    () =>
++      winioRowsFromBytesData(
++        new Map([
++          ["File.go", Buffer.from("x")],
++          ["file.go", Buffer.from("y")],
++        ]),
++      ),
++    /collision/,
++  );
++  const f = fixture();
++  f.profile.extra = true;
++  assert.throws(() => validateWinioProfileData(f.profile), /closed/);
++});
++test("changed upstream test or license cannot be laundered through final projection", () => {
++  for (const name of ["LICENSE", "original_test.go", "go.mod"]) {
++    const f = fixture(),
++      body = Buffer.from("changed");
++    f.profile.patched = f.profile.patched.map((r) =>
++      r.path === name ? { path: name, sha256: h(body), bytes: body.length } : r,
++    );
++    f.profile.patchedProjectionSHA256 = winioProjectionDigestData(f.profile.patched);
++    assert.throws(() => validateWinioProfileData(f.profile), /preservation/);
++  }
++});
++test("single composed modfile retains exact Lima and original relative replacement", () => {
++  const f = fixture(),
++    r = compose(f);
++  assert.equal(r.mod.subarray(0, f.alternate.length).toString(), f.alternate.toString());
++  assert.match(r.mod.toString(), /example\.invalid\/kept => \.\/pkg\/kept/);
++  assert.equal(
++    (r.mod.toString().match(/replace github.com\/Microsoft\/go-winio/g) || []).length,
++    1,
++  );
++  assert.deepEqual(r.sum, f.sum);
++  const original = Buffer.from(f.mod);
++  r.mod.fill(0);
++  assert.deepEqual(f.mod, original);
++});
++test("wrong module, prior Winio replacement, foreign Lima suffix and traversal refuse", () => {
++  const f = fixture();
++  assert.throws(
++    () =>
++      compose(f, {
++        limaAlternate: Buffer.concat([f.alternate, Buffer.from("\nreplace foreign => C:/bad\n")]),
++      }),
++    /Lima/,
++  );
++  assert.throws(() => compose(f, { winioDirectory: "C:/fixture/../other" }), /traversal/);
++  const wrong = fixture();
++  wrong.mod = Buffer.from("module orbwin.local/session\n");
++  wrong.profile.originalModSHA256 = h(wrong.mod);
++  assert.throws(() => compose(wrong), /root module/);
++  const conflict = fixture();
++  conflict.mod = Buffer.concat([
++    conflict.mod,
++    Buffer.from(`replace ${winioIdentity.module} => C:/unreviewed\n`),
++  ]);
++  conflict.profile.originalModSHA256 = h(conflict.mod);
++  assert.throws(() => compose(conflict), /existing Winio/);
++});
++test("effective target binds actual MVS replacement and all selected native file bytes", () => {
++  const f = fixture(),
++    r = validateEffectiveWinioClosureData(f.effective, f.profile, f.expected);
++  assert.equal(r.selectedVersion, "v0.6.4");
++  assert.equal(r.files.length, f.effective.packages[0].GoFiles.length);
++  assert.equal(r.patchedProjectionSHA256, f.profile.patchedProjectionSHA256);
++  assert.deepEqual(
++    requireUnchangedEffectiveWinioClosureData(
++      f.effective,
++      clone(f.effective),
++      f.profile,
++      f.expected,
++    ),
++    r,
++  );
++});
++test("declared version or root module-only evidence never substitutes for actual closure", () => {
++  for (const change of [
++    (r) => (r.selectedModule.Version = "v0.6.2"),
++    (r) => (r.packages[0].Module.Version = "v0.6.2"),
++    (r) => (r.selectedModule.Replace.Dir = "C:/unmodified/cache"),
++    (r) => (r.packages = []),
++    (r) => delete r.packages[0].Module,
++    (r) => (r.packages[0].CompiledGoFiles = []),
++  ]) {
++    const f = fixture();
++    change(f.effective);
++    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
++  }
++});
++test("different main/vendor/Linux/tag targets do not inherit root Windows qualification", () => {
++  for (const change of [
++    (r) => (r.main = "orbwin.local/session"),
++    (r) => (r.modMode = "vendor"),
++    (r) => (r.goos = "linux"),
++    (r) => (r.goarch = "arm64"),
++    (r) => (r.package = "./src/networking/cmd/network"),
++    (r) => r.tags.push("unreviewed"),
++  ]) {
++    const f = fixture();
++    change(f.effective);
++    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
++  }
++});
++test("omitted, escaping, test-only and duplicate compiled files refuse", () => {
++  for (const change of [
++    (p) => p.CompiledGoFiles.pop(),
++    (p) => p.CompiledGoFiles.push("C:/foreign/file.go"),
++    (p) => p.GoFiles.push("original_test.go"),
++    (p) => p.CompiledGoFiles.push(p.CompiledGoFiles[0]),
++    (p) => {
++      p.GoFiles = p.GoFiles.filter((n) => n !== "pipe_original_dial_windows.go");
++      p.CompiledGoFiles = p.CompiledGoFiles.filter(
++        (n) => !n.endsWith("/pipe_original_dial_windows.go"),
++      );
++    },
++  ]) {
++    const f = fixture();
++    change(f.effective.packages[0]);
++    assert.throws(() => validateEffectiveWinioClosureData(f.effective, f.profile, f.expected));
++  }
++});
++test("late effective modfile/package context changes invalidate before-after record", () => {
++  const f = fixture(),
++    after = clone(f.effective);
++  after.modSHA256 = "0".repeat(64);
++  assert.throws(
++    () => requireUnchangedEffectiveWinioClosureData(f.effective, after, f.profile, f.expected),
++    /effective/,
++  );
++  const b = clone(f.effective);
++  b.cgo = "0";
++  assert.throws(
++    () => requireUnchangedEffectiveWinioClosureData(f.effective, b, f.profile, f.expected),
++    /effective/,
++  );
++});
++test("portable offer binds source variant/license/patch and carries no private build path", () => {
++  const f = fixture(),
++    o = winioPortableOfferData(f.profile, {
++      upstreamZip: f.zip,
++      patch: f.patch,
++      license: f.original.get("LICENSE"),
++      lockBytes: Buffer.from(JSON.stringify(f.profile)),
++    });
++  assert.equal(o.payloads.size, 5);
++  assert.equal(o.portable.patchedProjectionSHA256, f.profile.patchedProjectionSHA256);
++  assert.ok(!JSON.stringify(o.portable).includes("C:/"));
++  assert.match(o.payloads.get("README.md").toString(), /h1 refers only to original source/);
++  o.payloads.get("upstream.zip").fill(0);
++  assert.equal(h(f.zip), f.profile.upstreamZipSHA256);
++  assert.throws(
++    () =>
++      winioPortableOfferData(f.profile, {
++        upstreamZip: Buffer.from("wrong"),
++        patch: f.patch,
++        license: f.original.get("LICENSE"),
++        lockBytes: Buffer.from(JSON.stringify(f.profile)),
++      }),
++    /offer bytes/,
++  );
++});
++test("DATA profile cannot silently change actual version or recipe inventory", () => {
++  for (const change of [
++    (p) => (p.version = "v0.6.2"),
++    (p) => delete p.recipeHashes[recipeNames[0]],
++    (p) => (p.recipeHashes.foreign = "0".repeat(64)),
++    (p) => (p.upstreamModuleSum = "h1:wrong"),
++  ]) {
++    const f = fixture();
++    change(f.profile);
++    assert.throws(() => validateWinioProfileData(f.profile));
++  }
++});
++
++test("self-consistent DTO from a different modfile is rejected by original composite bytes", () => {
++  const f = fixture(),
++    fake = clone(f.effective);
++  fake.modSHA256 = h(f.alternate);
++  assert.throws(
++    () => requireUnchangedEffectiveWinioClosureData(fake, clone(fake), f.profile, f.expected),
++    /actual composite bytes/,
++  );
++  const changed = clone(f.profile);
++  changed.patchSHA256 = "0".repeat(64);
++  assert.throws(
++    () =>
++      winioPortableOfferData(f.profile, {
++        upstreamZip: f.zip,
++        patch: f.patch,
++        license: f.original.get("LICENSE"),
++        lockBytes: Buffer.from(JSON.stringify(changed)),
++      }),
++    /lock profile/,
++  );
++});
++
++test("patch DATA rejects deletion, rename, changed context and trailing unframed bytes", () => {
++  const original = new Map([["file.go", Buffer.from("old\n")]]);
++  const good = "--- a/file.go\n+++ b/file.go\n@@ -1 +1 @@\n-old\n+new\n";
++  assert.equal(
++    reconstructWinioPatchData(original, Buffer.from(good)).get("file.go").toString(),
++    "new\n",
++  );
++  for (const value of [
++    good.replace("b/file.go", "/dev/null"),
++    good.replace("b/file.go", "b/renamed.go"),
++    good.replace("-old", "-other"),
++    good + "unframed\n",
++  ])
++    assert.throws(() => reconstructWinioPatchData(original, Buffer.from(value)));
++});
++
++test("actual Go JSON object-stream projection retains source hashes and selects only Winio packages", () => {
++  const f = fixture(),
++    { selectedModule, packages, ...context } = f.effective;
++  const mod = Buffer.from(JSON.stringify({ ...selectedModule, GoMod: "evidence-only" })),
++    raw = Buffer.from(
++      JSON.stringify({ ImportPath: "fmt", Doc: 'escaped "{ }"' }) +
++        "\n" +
++        JSON.stringify({ ...packages[0], IgnoredGoFiles: ["other.go"] }) +
++        "\n",
++    );
++  const projected = projectWinioGoListData(mod, raw, context);
++  assert.equal(projected.rawPackagesSHA256, h(raw));
++  assert.equal(projected.record.packages.length, 1);
++  assert.deepEqual(
++    validateEffectiveWinioClosureData(projected.record, f.profile, f.expected),
++    validateEffectiveWinioClosureData(f.effective, f.profile, f.expected),
++  );
++});
++test("truncated, mixed and non-object Go output cannot become selected metadata", () => {
++  const f = fixture(),
++    { selectedModule, packages, ...context } = f.effective,
++    mod = Buffer.from(JSON.stringify(selectedModule));
++  for (const raw of ["{", "{} trailing", "[]", '{"x":"unterminated', "{}\n{"]) {
++    assert.throws(() => projectWinioGoListData(mod, Buffer.from(raw), context));
++  }
++  assert.throws(
++    () =>
++      projectWinioGoListData(
++        Buffer.concat([mod, mod]),
++        Buffer.from(JSON.stringify(packages[0])),
++        context,
++      ),
++    /one actual module/,
++  );
++});
++
++test("fixed selected guest tag binds the same producer context and refuses mismatch",()=>{
++ const f=fixture();f.effective.tags=selectedRootBuildTags(true);f.expected.tags=[...f.effective.tags];
++ const checked=validateEffectiveWinioClosureData(f.effective,f.profile,f.expected);assert.deepEqual(checked.tags,f.effective.tags,"Rust exact producer/checked tags must match");
++ const bad=clone(f.effective);bad.tags=bad.tags.filter(t=>t!=="orbwin_selected_guest");
++ assert.throws(()=>validateEffectiveWinioClosureData(bad,f.profile,f.expected));
++ bad.tags.push("unreviewed_guest");assert.throws(()=>validateEffectiveWinioClosureData(bad,f.profile,f.expected));
++});
+--- a/src-tauri/src/runtime_winio_provenance.rs
++++ b/src-tauri/src/runtime_winio_provenance.rs
+@@ -266,12 +266,14 @@
+     ] {
+         require(original[key] == value && checked[key] == value)?;
+     }
+-    let tags = array(&original["tags"], 2)?;
++    let tags = array(&original["tags"], 3)?;
+     require(
+         tags.iter().any(|v| v == "sqlite_omit_load_extension")
+-            && tags
+-                .iter()
+-                .all(|v| v == "sqlite_omit_load_extension" || v == "with_distro"),
++            && tags.iter().all(|v| {
++                v == "sqlite_omit_load_extension"
++                    || v == "with_distro"
++                    || v == "orbwin_selected_guest"
++            }),
+     )?;
+     require(
+         tags.len()
+@@ -538,4 +540,31 @@
+             );
+         }
+     }
+-}
++    #[test]
++    fn selected_guest_tag_is_closed_and_bound_across_actual_projection() {
++        for with_distro in [false, true] {
++            let mut embedded = fixture();
++            let mut tags = vec![
++                json!("sqlite_omit_load_extension"),
++                json!("orbwin_selected_guest"),
++            ];
++            if with_distro {
++                tags.push(json!("with_distro"));
++            }
++            for stage in ["before", "after"] {
++                embedded["winioEffective"][stage]["record"]["tags"] = json!(tags);
++            }
++            embedded["winioEffective"]["checked"]["tags"] = json!(tags);
++            assert!(validate_portable_winio(&embedded).is_ok());
++            let mut mismatch = embedded.clone();
++            mismatch["winioEffective"]["checked"]["tags"] = json!(["sqlite_omit_load_extension"]);
++            assert!(validate_portable_winio(&mismatch).is_err());
++            tags.push(json!("unreviewed_guest"));
++            for stage in ["before", "after"] {
++                embedded["winioEffective"][stage]["record"]["tags"] = json!(tags);
++            }
++            embedded["winioEffective"]["checked"]["tags"] = json!(tags);
++            assert!(validate_portable_winio(&embedded).is_err());
++        }
++    }
++}

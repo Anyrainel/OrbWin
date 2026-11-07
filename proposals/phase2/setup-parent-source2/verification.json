@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "component": "setup-parent-source2-go",
+      "patch": "rdd.patch",
+      "changes": 9,
+      "before": 1240,
+      "after": 1244,
+      "patchSHA256": "f8a16549218eb8bf6ef6153863a1a0ccabae545615f440093caea7e946919725"
+    },
+    {
+      "component": "setup-parent-source2-desktop",
+      "patch": "repo.patch",
+      "changes": 2,
+      "before": 2,
+      "after": 2,
+      "patchSHA256": "73b963bf5cb7330a001cc5652a361cc2e404b687e922d6fc185019dccccc75c2"
+    }
+  ],
+  "strictUnifiedPatchReplay": true,
+  "freshOwnedFilesystemExactTarget": true,
+  "selected": false,
+  "orderedSeries": false,
+  "gitMutations": false,
+  "buildOrNativeOrPackagePERuns": false
+}

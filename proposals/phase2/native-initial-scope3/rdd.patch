@@ -1,0 +1,4796 @@
+--- /dev/null
++++ b/cmd/rdd/guest_guard_other.go
+@@ -0,0 +1,6 @@
++//go:build !windows
++
++package main
++
++// This native product guard is Windows-only; other upstream builds unchanged.
++func guestNegativeBeforeEnvironment([]string) error { return nil }
+--- /dev/null
++++ b/cmd/rdd/guest_guard_route.go
+@@ -0,0 +1,5 @@
++package main
++
++// Pure routing DATA: no argument, environment, proof suffix or parsed record is
++// an original guest producer. The separate early inspector never reaches Cobra.
++func guestGuardOrdinaryNeedsProducer(_ []string) bool { return true }
+--- /dev/null
++++ b/cmd/rdd/guest_guard_route_test.go
+@@ -0,0 +1,11 @@
++package main
++
++import "testing"
++
++func TestGuestGuardNoRawMutableEscape(t *testing.T) {
++	for _, args := range [][]string{nil, {"serve"}, {"private-runtime-operation", "setup"}, {"private-runtime-operation", "setup", "--force"}, {"private-runtime-operation", "preflight"}, {"private-auto-worker", "x"}, {"--instance=orbwin-proof", "serve"}, {"--instance", "orbwin-proof", "hostagent", "orbwin"}, {"hostagent", "orbwin", "--orbwin-native-lifetime", "forged"}, {"--ignore-pending"}, {"service", "reset"}} {
++		if !guestGuardOrdinaryNeedsProducer(args) {
++			t.Fatal("raw DATA bypass", args)
++		}
++	}
++}
+--- /dev/null
++++ b/cmd/rdd/guest_guard_windows.go
+@@ -0,0 +1,18 @@
++//go:build windows
++
++package main
++
++import (
++	"context"
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig"
++	"time"
++)
++
++func guestNegativeBeforeEnvironment(args []string) error {
++	if !guestGuardOrdinaryNeedsProducer(args) {
++		return managementconfig.ErrGuestNegative
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	return managementconfig.RequireGuestMutationBeforeOptions(ctx)
++}
+--- a/cmd/rdd/main.go
++++ b/cmd/rdd/main.go
+@@ -140,6 +140,10 @@
+ 	os.Args, lifetimeErr = hostagent.ConsumeManagedLifetimeArguments(os.Args)
+ 	if lifetimeErr != nil {
+ 		fmt.Fprintln(os.Stderr, "owned hostagent lifetime refused")
++		os.Exit(2)
++	}
++	if err := guestNegativeBeforeEnvironment(os.Args[1:]); err != nil {
++		fmt.Fprintln(os.Stderr, err)
+ 		os.Exit(2)
+ 	}
+ 	// Some dynamic help paths initialize the service. Establish product identity
+--- /dev/null
++++ b/pkg/authoritypath/product_exit_state.go
+@@ -0,0 +1,4 @@
++package authoritypath
++
++// Cached negative exit DATA only, never selection/routing/permission.
++func productSelectionExitSnapshot(failed bool, owners int) bool { return !failed && owners == 0 }
+--- /dev/null
++++ b/pkg/authoritypath/product_exit_state_test.go
+@@ -0,0 +1,15 @@
++package authoritypath
++
++import "testing"
++
++func TestProductSelectionExitNeedsNoFailureAndNoLiveOwners(t *testing.T) {
++	for _, v := range []struct {
++		failed bool
++		owners int
++		want   bool
++	}{{false, 0, true}, {true, 0, false}, {false, 1, false}, {true, 1, false}, {false, -1, false}} {
++		if productSelectionExitSnapshot(v.failed, v.owners) != v.want {
++			t.Fatal(v)
++		}
++	}
++}
+--- /dev/null
++++ b/pkg/authoritypath/product_exit_windows.go
+@@ -0,0 +1,11 @@
++//go:build windows
++
++package authoritypath
++
++// ProductSelectionExitKnown is ONLY a locked negative domain snapshot. It never
++// clears failure, queries native state, selects routes or issues permission.
++func ProductSelectionExitKnown() bool {
++	productSelectionDomain.Lock()
++	defer productSelectionDomain.Unlock()
++	return productSelectionExitSnapshot(productSelectionDomain.failed, len(productSelectionDomain.owners))
++}
+--- a/pkg/controllers/lima/limavm/controllers/limavm_controller.go
++++ b/pkg/controllers/lima/limavm/controllers/limavm_controller.go
+@@ -318,6 +318,9 @@
+ 	}
+ 
+ 	// Create the Lima instance
++	if err := r.requireManagedHostagent(ctx, &limaVM); err != nil {
++		return ctrl.Result{}, err
++	}
+ 	inst, err := limainstance.Create(ctx, limaVM.Name, []byte(templateData), false)
+ 	if err != nil {
+ 		// If the directory exists but store.Inspect returned nil above (no valid
+--- a/pkg/controllers/lima/limavm/controllers/managed_hostagent_windows.go
++++ b/pkg/controllers/lima/limavm/controllers/managed_hostagent_windows.go
+@@ -118,6 +118,9 @@
+ 	}
+ 	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+ 	defer cancel()
++	if r.ManagedRuntime.RequireGuestNegativeBeforeControllers(bounded) != nil {
++		return reconcile.TerminalError(errors.New("original guest pending producer unavailable"))
++	}
+ 	if r.ManagedRuntime.RequireHostagentLaunch(bounded) != nil {
+ 		return reconcile.TerminalError(errors.New("owned native hostagent lifetime unavailable"))
+ 	}
+--- /dev/null
++++ b/pkg/managementconfig/guestnegative/guard.go
+@@ -0,0 +1,385 @@
++// Package negativeguard validates DATA. It owns no native object or permission.
++package negativeguard
++
++import (
++	"bytes"
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"errors"
++	"unicode/utf8"
++)
++
++const Budget = 8192
++const Purpose = "orbwin-guest-negative-v1"
++
++var ErrRecord = errors.New("guest negative record refused")
++
++type Object struct {
++	Volume uint32 `json:"volume"`
++	High   uint32 `json:"high"`
++	Low    uint32 `json:"low"`
++}
++
++func (o Object) valid() bool { return o.High != 0 || o.Low != 0 }
++
++type Fact struct {
++	Object     Object
++	Descriptor [32]byte
++}
++
++func (f Fact) valid() bool { return f.Object.valid() && f.Descriptor != ([32]byte{}) }
++
++type Witness struct {
++	Object     Object   `json:"object"`
++	Size       uint64   `json:"size"`
++	Written    uint64   `json:"written"`
++	Descriptor [32]byte `json:"descriptor"`
++	Body       [32]byte `json:"body"`
++}
++
++func (w Witness) valid() bool {
++	return w.Object.valid() && w.Size > 0 && w.Written > 0 && w.Descriptor != ([32]byte{}) && w.Body != ([32]byte{})
++}
++
++type Seed struct {
++	Object     Object   `json:"object"`
++	Descriptor [32]byte `json:"descriptor"`
++	Written    uint64   `json:"written"`
++	Binding    string   `json:"binding"`
++}
++
++func (s Seed) valid() bool {
++	b, e := hex.DecodeString(s.Binding)
++	return s.Object.valid() && s.Descriptor != ([32]byte{}) && s.Written > 0 && e == nil && len(b) == 32 && s.Binding == hex.EncodeToString(b) && !bytes.Equal(b, make([]byte, 32))
++}
++
++type Source struct {
++	Kind                           string
++	Private, Public, Controller    Fact
++	Authority, AuthorityLock       Fact
++	Intent                         Witness
++	Seed                           Seed
++	Admission, Committed           Witness
++	ControlRetention, ControlBirth Witness
++	ServingImage                   Witness
++}
++
++func (s Source) valid() bool {
++	if !s.Private.valid() || !s.Public.valid() || !s.Controller.valid() || !s.Intent.valid() || !s.Seed.valid() || !s.ServingImage.valid() {
++		return false
++	}
++	if s.Controller.Object.Volume != s.Public.Object.Volume || s.Intent.Object.Volume != s.Private.Object.Volume || s.Seed.Object.Volume != s.Private.Object.Volume {
++		return false
++	}
++	ids := map[Object]bool{}
++	add := func(o Object) bool {
++		if ids[o] {
++			return false
++		}
++		ids[o] = true
++		return true
++	}
++	for _, o := range []Object{s.Private.Object, s.Public.Object, s.Controller.Object, s.Intent.Object, s.Seed.Object, s.ServingImage.Object} {
++		if !add(o) {
++			return false
++		}
++	}
++	switch s.Kind {
++	case "initial-fresh":
++		if s.Authority != (Fact{}) || s.AuthorityLock != (Fact{}) || s.Admission != (Witness{}) || s.Committed != (Witness{}) {
++			return false
++		}
++	case "existing-writer":
++		if !s.Authority.valid() || !s.AuthorityLock.valid() || !s.Admission.valid() || !s.Committed.valid() {
++			return false
++		}
++		for _, o := range []Object{s.Authority.Object, s.AuthorityLock.Object, s.Admission.Object, s.Committed.Object} {
++			if o.Volume != s.Private.Object.Volume || !add(o) {
++				return false
++			}
++		}
++	default:
++		return false
++	}
++	if (s.ControlRetention == (Witness{})) != (s.ControlBirth == (Witness{})) {
++		return false
++	}
++	if s.ControlRetention != (Witness{}) {
++		for _, w := range []Witness{s.ControlRetention, s.ControlBirth} {
++			if !w.valid() || w.Object.Volume != s.Private.Object.Volume || !add(w.Object) {
++				return false
++			}
++		}
++	}
++	return true
++}
++
++// commonSource matches persistent origin roles only; later serving/authority facts
++// still require their actual native producer, never comparison of this DATA alone.
++func commonSource(a, b Source) bool {
++	return a.Private == b.Private && a.Public == b.Public && a.Controller == b.Controller && a.Intent == b.Intent && a.Seed == b.Seed
++}
++func sourceObjects(s Source) []Object {
++	return []Object{s.Private.Object, s.Public.Object, s.Controller.Object, s.Authority.Object, s.AuthorityLock.Object, s.Intent.Object, s.Seed.Object, s.Admission.Object, s.Committed.Object, s.ControlRetention.Object, s.ControlBirth.Object, s.ServingImage.Object}
++}
++
++type Profile struct {
++	Schema         int
++	Purpose        string
++	ProfileVersion uint32
++	Source         Source
++}
++
++func (p Profile) valid() bool {
++	return p.Schema == 1 && p.Purpose == Purpose && p.ProfileVersion == 1 && p.Source.valid()
++}
++
++type Pending struct {
++	Schema                            int
++	Purpose                           string
++	Generation                        uint64
++	Phase                             string
++	Profile                           Witness
++	Directory                         Fact
++	Source                            Source
++	PreviousPending, PreviousComplete Witness
++	GuestProfileDigest, RecipeDigest  [32]byte
++	OperationNonce                    [16]byte
++}
++
++func (p Pending) valid() bool {
++	if p.Schema != 1 || p.Purpose != Purpose || p.Generation == 0 || p.Phase != "guest-lifetime-pending" || !p.Profile.valid() || !p.Directory.valid() || !p.Source.valid() || p.GuestProfileDigest == ([32]byte{}) || p.RecipeDigest == ([32]byte{}) || p.OperationNonce == ([16]byte{}) {
++		return false
++	}
++	if p.Profile.Object.Volume != p.Directory.Object.Volume || p.Directory.Object.Volume != p.Source.Private.Object.Volume || p.Profile.Object == p.Directory.Object {
++		return false
++	}
++	for _, o := range sourceObjects(p.Source) {
++		if o.valid() && (o == p.Directory.Object || o == p.Profile.Object) {
++			return false
++		}
++	}
++	if p.Generation == 1 {
++		return p.PreviousPending == (Witness{}) && p.PreviousComplete == (Witness{})
++	}
++	for _, previous := range []Witness{p.PreviousPending, p.PreviousComplete} {
++		if previous.Object == p.Profile.Object || previous.Object == p.Directory.Object {
++			return false
++		}
++	}
++	return p.PreviousPending.valid() && p.PreviousComplete.valid() && p.PreviousPending.Object != p.PreviousComplete.Object && p.PreviousPending.Object.Volume == p.Directory.Object.Volume && p.PreviousComplete.Object.Volume == p.Directory.Object.Volume
++}
++
++type Complete struct {
++	Schema                             int
++	Purpose                            string
++	Generation                         uint64
++	Phase, Outcome                     string
++	Profile                            Witness
++	Directory                          Fact
++	Pending                            Witness
++	OriginalSource                     Source
++	FinalAuthority, FinalAuthorityLock Fact
++	LedgerDigest, RetirementDigest     [32]byte
++	OfflineDisk                        Fact
++	OfflineDiskBytes                   uint64
++	OfflineEvidenceDigest              [32]byte
++}
++
++func (c Complete) valid() bool {
++	if c.Schema != 1 || c.Purpose != Purpose || c.Generation == 0 || c.Phase != "same-live-owner-completed" || !c.Profile.valid() || !c.Directory.valid() || !c.Pending.valid() || !c.OriginalSource.valid() || c.LedgerDigest == ([32]byte{}) || c.RetirementDigest == ([32]byte{}) {
++		return false
++	}
++	if c.Profile.Object.Volume != c.Directory.Object.Volume || c.Pending.Object.Volume != c.Directory.Object.Volume || c.Directory.Object.Volume != c.OriginalSource.Private.Object.Volume || c.Profile.Object == c.Pending.Object || c.Profile.Object == c.Directory.Object || c.Pending.Object == c.Directory.Object {
++		return false
++	}
++	final := c.FinalAuthority.valid() && c.FinalAuthorityLock.valid() && c.FinalAuthority.Object != c.FinalAuthorityLock.Object && c.FinalAuthority.Object.Volume == c.Directory.Object.Volume && c.FinalAuthorityLock.Object.Volume == c.Directory.Object.Volume
++	offline := c.OfflineDisk.valid() && c.OfflineDiskBytes > 0 && c.OfflineEvidenceDigest != ([32]byte{})
++	if final && (c.FinalAuthority.Object == c.Directory.Object || c.FinalAuthority.Object == c.Profile.Object || c.FinalAuthority.Object == c.Pending.Object || c.FinalAuthorityLock.Object == c.Directory.Object || c.FinalAuthorityLock.Object == c.Profile.Object || c.FinalAuthorityLock.Object == c.Pending.Object) {
++		return false
++	}
++	if final && c.OriginalSource.Kind == "existing-writer" && (c.FinalAuthority != c.OriginalSource.Authority || c.FinalAuthorityLock != c.OriginalSource.AuthorityLock) {
++		return false
++	}
++	if c.Outcome == "retired-guest" {
++		return final && offline
++	}
++	if c.Outcome != "no-guest-effect" {
++		return false
++	}
++	return (final || c.FinalAuthority == (Fact{}) && c.FinalAuthorityLock == (Fact{})) && c.OfflineDisk == (Fact{}) && c.OfflineDiskBytes == 0 && c.OfflineEvidenceDigest == ([32]byte{})
++}
++func encode(v any, valid bool) ([]byte, error) {
++	if !valid {
++		return nil, ErrRecord
++	}
++	b, e := json.Marshal(v)
++	if e != nil || len(b)+1 > Budget {
++		return nil, ErrRecord
++	}
++	return append(b, '\n'), nil
++}
++func EncodeProfile(v Profile) ([]byte, error)   { return encode(v, v.valid()) }
++func EncodePending(v Pending) ([]byte, error)   { return encode(v, v.valid()) }
++func EncodeComplete(v Complete) ([]byte, error) { return encode(v, v.valid()) }
++func decode(b []byte, v any, canonical func() ([]byte, error)) error {
++	if len(b) == 0 || len(b) > Budget || !utf8.Valid(b) {
++		return ErrRecord
++	}
++	d := json.NewDecoder(bytes.NewReader(b))
++	d.DisallowUnknownFields()
++	if d.Decode(v) != nil {
++		return ErrRecord
++	}
++	want, e := canonical()
++	if e != nil || !bytes.Equal(b, want) {
++		return ErrRecord
++	}
++	return nil
++}
++func ParseProfile(b []byte) (v Profile, e error) {
++	e = decode(b, &v, func() ([]byte, error) { return EncodeProfile(v) })
++	if e != nil {
++		v = Profile{}
++	}
++	return
++}
++func ParsePending(b []byte) (v Pending, e error) {
++	e = decode(b, &v, func() ([]byte, error) { return EncodePending(v) })
++	if e != nil {
++		v = Pending{}
++	}
++	return
++}
++func ParseComplete(b []byte) (v Complete, e error) {
++	e = decode(b, &v, func() ([]byte, error) { return EncodeComplete(v) })
++	if e != nil {
++		v = Complete{}
++	}
++	return
++}
++
++// Observation is caller DATA consistency only, never proof of native ID/SD/read.
++type Observation struct {
++	Body []byte
++	File Witness
++}
++
++func (o Observation) absent() bool { return len(o.Body) == 0 && o.File == (Witness{}) }
++func (o Observation) valid() bool {
++	return len(o.Body) > 0 && len(o.Body) <= Budget && o.File.valid() && o.File.Size == uint64(len(o.Body)) && o.File.Body == sha256.Sum256(o.Body)
++}
++
++type Slot struct{ Pending, Complete Observation }
++type State byte
++
++const (
++	Refuse State = iota
++	PendingShape
++	CompletedShape
++)
++
++// History classifies a bounded shape. No positive native admission is returned.
++func History(profile Observation, directory Fact, slots [2]Slot) State {
++	if !profile.valid() || !directory.valid() || profile.File.Object.Volume != directory.Object.Volume || profile.File.Object == directory.Object {
++		return Refuse
++	}
++	pr, e := ParseProfile(profile.Body)
++	if e != nil || pr.Source.Private.Object.Volume != directory.Object.Volume {
++		return Refuse
++	}
++	for _, o := range sourceObjects(pr.Source) {
++		if o.valid() && (o == directory.Object || o == profile.File.Object) {
++			return Refuse
++		}
++	}
++	seen := map[Object]bool{profile.File.Object: true, directory.Object: true}
++	type row struct {
++		p        Pending
++		c        Complete
++		pw, cw   Witness
++		complete bool
++	}
++	var rows []row
++	for i, s := range slots {
++		if s.Pending.absent() && s.Complete.absent() {
++			continue
++		}
++		if !s.Pending.valid() {
++			return Refuse
++		}
++		p, e := ParsePending(s.Pending.Body)
++		if e != nil || p.Generation%2 != uint64(i) || p.Profile != profile.File || p.Directory != directory || !commonSource(pr.Source, p.Source) {
++			return Refuse
++		}
++		if s.Pending.File.Object.Volume != directory.Object.Volume || seen[s.Pending.File.Object] {
++			return Refuse
++		}
++		seen[s.Pending.File.Object] = true
++		for _, o := range sourceObjects(p.Source) {
++			if o.valid() && (o == s.Pending.File.Object || !s.Complete.absent() && o == s.Complete.File.Object) {
++				return Refuse
++			}
++		}
++		r := row{p: p, pw: s.Pending.File}
++		if !s.Complete.absent() {
++			if !s.Complete.valid() || s.Complete.File.Object.Volume != directory.Object.Volume || seen[s.Complete.File.Object] {
++				return Refuse
++			}
++			seen[s.Complete.File.Object] = true
++			c, e := ParseComplete(s.Complete.Body)
++			if e != nil || c.Generation != p.Generation || c.Profile != profile.File || c.Directory != directory || c.Pending != s.Pending.File || c.OriginalSource != p.Source {
++				return Refuse
++			}
++			r.c = c
++			r.cw = s.Complete.File
++			r.complete = true
++		}
++		rows = append(rows, r)
++	}
++	if len(rows) == 0 {
++		return Refuse
++	}
++	// Records cannot be any historical/native source role, even when that role
++	// changed between generations. Source-to-source sharing remains legitimate.
++	allSources := sourceObjects(pr.Source)
++	for _, r := range rows {
++		allSources = append(allSources, sourceObjects(r.p.Source)...)
++		if r.complete {
++			allSources = append(allSources, r.c.FinalAuthority.Object, r.c.FinalAuthorityLock.Object, r.c.OfflineDisk.Object)
++		}
++	}
++	for _, o := range allSources {
++		if o.valid() && seen[o] {
++			return Refuse
++		}
++	}
++	if len(rows) == 1 {
++		r := rows[0]
++		if r.complete {
++			return CompletedShape
++		}
++		if r.p.Generation == 1 {
++			return PendingShape
++		}
++		return Refuse
++	}
++	if rows[0].p.Generation > rows[1].p.Generation {
++		rows[0], rows[1] = rows[1], rows[0]
++	}
++	a, b := rows[0], rows[1]
++	if !a.complete || b.p.Generation-a.p.Generation != 1 || b.p.PreviousPending != a.pw || b.p.PreviousComplete != a.cw {
++		return Refuse
++	}
++	if b.complete {
++		return CompletedShape
++	}
++	return PendingShape
++}
++func NextGeneration(g uint64) (uint64, error) {
++	if g == ^uint64(0) {
++		return 0, ErrRecord
++	}
++	return g + 1, nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/guestnegative/guard_test.go
+@@ -0,0 +1,356 @@
++package negativeguard
++
++import (
++	"bytes"
++	"crypto/sha256"
++	"encoding/json"
++	"strings"
++	"sync"
++	"testing"
++)
++
++func fact(id uint32) Fact { return Fact{Object: Object{Volume: 1, Low: id}, Descriptor: [32]byte{1}} }
++func witness(id uint32) Witness {
++	return Witness{Object: fact(id).Object, Size: 1, Written: 1, Descriptor: [32]byte{1}, Body: [32]byte{1}}
++}
++func source(initial bool) Source {
++	s := Source{Kind: "existing-writer", Private: fact(1), Public: fact(2), Controller: fact(3), Authority: fact(4), AuthorityLock: fact(5), Intent: witness(6), Seed: Seed{Object: fact(7).Object, Descriptor: [32]byte{1}, Written: 1, Binding: strings.Repeat("01", 32)}, Admission: witness(8), Committed: witness(9), ServingImage: witness(12)}
++	if initial {
++		s.Kind = "initial-fresh"
++		s.Authority = Fact{}
++		s.AuthorityLock = Fact{}
++		s.Admission = Witness{}
++		s.Committed = Witness{}
++	}
++	return s
++}
++func observe(id uint32, b []byte) Observation {
++	w := witness(id)
++	w.Size = uint64(len(b))
++	w.Body = sha256.Sum256(b)
++	return Observation{Body: b, File: w}
++}
++func profile(t *testing.T) Observation {
++	t.Helper()
++	b, e := EncodeProfile(Profile{1, Purpose, 1, source(true)})
++	if e != nil {
++		t.Fatal(e)
++	}
++	return observe(21, b)
++}
++func makeSlot(t *testing.T, pr Observation, g uint64, prev Slot, done bool) Slot {
++	t.Helper()
++	p := Pending{Schema: 1, Purpose: Purpose, Generation: g, Phase: "guest-lifetime-pending", Profile: pr.File, Directory: fact(20), Source: source(g == 1), GuestProfileDigest: [32]byte{1}, RecipeDigest: [32]byte{2}, OperationNonce: [16]byte{3}}
++	if g > 1 {
++		p.PreviousPending = prev.Pending.File
++		p.PreviousComplete = prev.Complete.File
++		if p.PreviousPending == (Witness{}) {
++			p.PreviousPending = witness(500)
++			p.PreviousComplete = witness(501)
++		}
++	}
++	b, e := EncodePending(p)
++	if e != nil {
++		t.Fatal(e)
++	}
++	s := Slot{Pending: observe(uint32(100+g*2), b)}
++	if done {
++		c := Complete{Schema: 1, Purpose: Purpose, Generation: g, Phase: "same-live-owner-completed", Outcome: "no-guest-effect", Profile: pr.File, Directory: fact(20), Pending: s.Pending.File, OriginalSource: p.Source, LedgerDigest: [32]byte{1}, RetirementDigest: [32]byte{2}}
++		b, e = EncodeComplete(c)
++		if e != nil {
++			t.Fatal(e)
++		}
++		s.Complete = observe(uint32(101+g*2), b)
++	}
++	return s
++}
++func arrangement(s ...Slot) [2]Slot {
++	var out [2]Slot
++	for _, r := range s {
++		p, _ := ParsePending(r.Pending.Body)
++		out[p.Generation%2] = r
++	}
++	return out
++}
++func TestCanonicalInitialReclaimedAndConsecutiveStates(t *testing.T) {
++	pr := profile(t)
++	one := makeSlot(t, pr, 1, Slot{}, false)
++	done1 := makeSlot(t, pr, 1, Slot{}, true)
++	two := makeSlot(t, pr, 2, done1, false)
++	done2 := makeSlot(t, pr, 2, done1, true)
++	done3 := makeSlot(t, pr, 3, done2, true)
++	for _, tt := range []struct {
++		name  string
++		slots [2]Slot
++		want  State
++	}{{"required missing", [2]Slot{}, Refuse}, {"initial pending empty peer", arrangement(one), PendingShape}, {"initial completed empty peer", arrangement(done1), CompletedShape}, {"reclaimed peer", arrangement(done2), CompletedShape}, {"later reclaimed peer", arrangement(done3), CompletedShape}, {"missing prior pair", arrangement(two), Refuse}, {"live next", arrangement(done1, two), PendingShape}, {"both completed", arrangement(done1, done2), CompletedShape}} {
++		t.Run(tt.name, func(t *testing.T) {
++			if got := History(pr, fact(20), tt.slots); got != tt.want {
++				t.Fatal(got, tt.want)
++			}
++		})
++	}
++}
++func TestPartialOldPairNeverCountsAsEmpty(t *testing.T) {
++	pr := profile(t)
++	a := makeSlot(t, pr, 1, Slot{}, true)
++	b := makeSlot(t, pr, 2, a, true)
++	for _, part := range []Slot{{Pending: a.Pending}, {Complete: a.Complete}, {Pending: Observation{File: a.Pending.File}}, {Pending: Observation{Body: []byte("partial")}}} {
++		if History(pr, fact(20), arrangementWith(1, part, 0, b)) != Refuse {
++			t.Fatal("partial predecessor admitted")
++		}
++	}
++	if History(Observation{}, fact(20), arrangement(a)) != Refuse {
++		t.Fatal("missing profile")
++	}
++}
++func arrangementWith(i int, a Slot, j int, b Slot) [2]Slot {
++	var v [2]Slot
++	v[i] = a
++	v[j] = b
++	return v
++}
++func TestGenerationParityLinksDuplicatesAndObservationBinding(t *testing.T) {
++	pr := profile(t)
++	a := makeSlot(t, pr, 1, Slot{}, true)
++	b := makeSlot(t, pr, 2, a, false)
++	bad := b
++	p, _ := ParsePending(b.Pending.Body)
++	p.PreviousComplete = witness(999)
++	body, _ := EncodePending(p)
++	bad.Pending = observe(105, body)
++	if History(pr, fact(20), arrangement(a, bad)) != Refuse {
++		t.Fatal("bad predecessor")
++	}
++	if History(pr, fact(20), arrangementWith(0, a, 1, b)) != Refuse {
++		t.Fatal("wrong parity")
++	}
++	duplicate := b
++	duplicate.Pending.File.Object = a.Pending.File.Object
++	if History(pr, fact(20), arrangementWith(1, a, 0, duplicate)) != Refuse {
++		t.Fatal("aliased record IDs")
++	}
++	mismatch := b
++	mismatch.Pending.File.Size++
++	if History(pr, fact(20), arrangementWith(1, a, 0, mismatch)) != Refuse {
++		t.Fatal("size mismatch")
++	}
++	mismatch = b
++	mismatch.Pending.File.Body[0] ^= 1
++	if History(pr, fact(20), arrangementWith(1, a, 0, mismatch)) != Refuse {
++		t.Fatal("hash mismatch")
++	}
++	c := makeSlot(t, pr, 3, a, false)
++	if History(pr, fact(20), arrangementWith(1, c, 0, b)) != Refuse {
++		t.Fatal("two pending")
++	}
++	c = makeSlot(t, pr, 4, a, true)
++	if History(pr, fact(20), arrangement(a, c)) != Refuse {
++		t.Fatal("generation gap")
++	}
++	if _, e := NextGeneration(^uint64(0)); e == nil {
++		t.Fatal("overflow")
++	}
++	if n, e := NextGeneration(0); e != nil || n != 1 {
++		t.Fatal("first generation")
++	}
++}
++func TestStrictParserAllTruncationsUnknownDuplicateUTF8Budget(t *testing.T) {
++	pr := profile(t)
++	s := makeSlot(t, pr, 1, Slot{}, true)
++	for _, v := range []struct {
++		body  []byte
++		parse func([]byte) error
++	}{{pr.Body, func(b []byte) error { _, e := ParseProfile(b); return e }}, {s.Pending.Body, func(b []byte) error { _, e := ParsePending(b); return e }}, {s.Complete.Body, func(b []byte) error { _, e := ParseComplete(b); return e }}} {
++		if v.parse(v.body) != nil {
++			t.Fatal("canonical")
++		}
++		for i := 0; i < len(v.body); i++ {
++			if v.parse(v.body[:i]) == nil {
++				t.Fatal("prefix", i)
++			}
++		}
++		for _, bad := range [][]byte{append(append([]byte(nil), v.body...), byte('\n')), bytes.Replace(v.body, []byte("{\"Schema\":1"), []byte("{\"Schema\":1,\"Schema\":1"), 1), bytes.Replace(v.body, []byte("{\"Schema\":1"), []byte("{\"Unknown\":1,\"Schema\":1"), 1), []byte{0xff}, bytes.Repeat([]byte(" "), Budget+1)} {
++			if v.parse(bad) == nil {
++				t.Fatal("noncanonical input")
++			}
++		}
++	}
++}
++func TestSourceUnionAndCompletionCannotInventInactiveRoles(t *testing.T) {
++	s := source(true)
++	s.Authority = fact(4)
++	if s.valid() {
++		t.Fatal("invented initial authority")
++	}
++	s = source(false)
++	s.AuthorityLock = Fact{}
++	if s.valid() {
++		t.Fatal("missing existing lock")
++	}
++	s = source(true)
++	s.Kind = "other"
++	if s.valid() {
++		t.Fatal("open kind")
++	}
++	s = source(true)
++	s.Seed.Binding = strings.Repeat("00", 32)
++	if s.valid() {
++		t.Fatal("zero seed")
++	}
++	s = source(true)
++	s.ControlRetention = witness(10)
++	if s.valid() {
++		t.Fatal("partial C")
++	}
++	s = source(true)
++	s.Controller = s.Private
++	if s.valid() {
++		t.Fatal("source alias")
++	}
++	pr := profile(t)
++	slot := makeSlot(t, pr, 1, Slot{}, true)
++	c, _ := ParseComplete(slot.Complete.Body)
++	c.Outcome = "retired-guest"
++	if _, e := EncodeComplete(c); e == nil {
++		t.Fatal("invented retirement")
++	}
++	c.FinalAuthority = fact(13)
++	c.FinalAuthorityLock = fact(14)
++	c.OfflineDisk = fact(15)
++	c.OfflineDiskBytes = 1
++	c.OfflineEvidenceDigest = [32]byte{1}
++	if _, e := EncodeComplete(c); e != nil {
++		t.Fatal("typed retired DATA")
++	}
++	c.Outcome = "no-guest-effect"
++	if _, e := EncodeComplete(c); e == nil {
++		t.Fatal("offline role in no-effect")
++	}
++}
++func TestCompletionMatchesExactPendingAndHistoricalSource(t *testing.T) {
++	pr := profile(t)
++	s := makeSlot(t, pr, 1, Slot{}, true)
++	c, _ := ParseComplete(s.Complete.Body)
++	c.Pending = witness(700)
++	b, _ := EncodeComplete(c)
++	s.Complete = observe(105, b)
++	if History(pr, fact(20), arrangement(s)) != Refuse {
++		t.Fatal("wrong pending")
++	}
++	s = makeSlot(t, pr, 1, Slot{}, true)
++	c, _ = ParseComplete(s.Complete.Body)
++	c.OriginalSource = source(false)
++	b, _ = EncodeComplete(c)
++	s.Complete = observe(105, b)
++	if History(pr, fact(20), arrangement(s)) != Refuse {
++		t.Fatal("rewritten initial source")
++	}
++}
++func TestIndependentConcurrentHistoryReads(t *testing.T) {
++	pr := profile(t)
++	a := makeSlot(t, pr, 1, Slot{}, true)
++	b := makeSlot(t, pr, 2, a, false)
++	slots := arrangement(a, b)
++	var wg sync.WaitGroup
++	for i := 0; i < 32; i++ {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for j := 0; j < 20; j++ {
++				if History(pr, fact(20), slots) != PendingShape {
++					t.Error("non-deterministic read")
++				}
++			}
++		}()
++	}
++	wg.Wait()
++}
++
++func TestAcrossHistoricalSourceAliases(t *testing.T) {
++	pr := profile(t)
++	a := makeSlot(t, pr, 1, Slot{}, false)
++	p, _ := ParsePending(a.Pending.Body)
++	p.Source.ServingImage = witness(30)
++	b, _ := EncodePending(p)
++	a.Pending = observe(12, b) // Profile's retained serving source, not today's.
++	if History(pr, fact(20), arrangement(a)) != Refuse {
++		t.Fatal("record aliased profile's older serving source")
++	}
++	a = makeSlot(t, pr, 1, Slot{}, true)
++	next := makeSlot(t, pr, 2, a, false)
++	p, _ = ParsePending(next.Pending.Body)
++	p.Source.ServingImage = a.Pending.File
++	b, _ = EncodePending(p)
++	next.Pending = observe(104, b)
++	if History(pr, fact(20), arrangement(a, next)) != Refuse {
++		t.Fatal("source in next slot aliased older record")
++	}
++	// Same genuine source roles across generations must continue to work.
++	next = makeSlot(t, pr, 2, a, true)
++	if History(pr, fact(20), arrangement(a, next)) != CompletedShape {
++		t.Fatal("shared historical source roles refused")
++	}
++}
++
++func TestCompletionFactsCannotAliasOtherRecord(t *testing.T) {
++	pr := profile(t)
++	a := makeSlot(t, pr, 1, Slot{}, true)
++	b := makeSlot(t, pr, 2, a, true)
++	c, _ := ParseComplete(b.Complete.Body)
++	c.Outcome = "retired-guest"
++	c.FinalAuthority, c.FinalAuthorityLock = c.OriginalSource.Authority, c.OriginalSource.AuthorityLock
++	c.OfflineDisk, c.OfflineDiskBytes, c.OfflineEvidenceDigest = Fact{a.Pending.File.Object, a.Pending.File.Descriptor}, 1, [32]byte{1}
++	body, e := EncodeComplete(c)
++	if e != nil {
++		t.Fatal(e)
++	}
++	b.Complete = observe(105, body)
++	if History(pr, fact(20), arrangement(a, b)) != Refuse {
++		t.Fatal("completed native source fact aliased older record")
++	}
++}
++
++func TestReclaimedPriorReferencesCannotBePermanentRoles(t *testing.T) {
++	pr := profile(t)
++	for _, role := range []Witness{pr.File, {Object: fact(20).Object, Size: 1, Written: 1, Descriptor: [32]byte{1}, Body: [32]byte{1}}} {
++		for _, complete := range []bool{false, true} {
++			s := makeSlot(t, pr, 2, Slot{}, true)
++			p, _ := ParsePending(s.Pending.Body)
++			if complete {
++				p.PreviousComplete = role
++			} else {
++				p.PreviousPending = role
++			}
++			if _, e := EncodePending(p); e == nil {
++				t.Fatal("permanent role accepted as prior record")
++			}
++			// A parse must reject the exact same shape even without Encode.
++			body, _ := json.Marshal(p)
++			body = append(body, '\n')
++			if _, e := ParsePending(body); e == nil {
++				t.Fatal("permanent prior record parsed")
++			}
++		}
++	}
++	// No invented global no-IDreuse rule for reclaimed history.
++	s := makeSlot(t, pr, 2, Slot{}, true)
++	p, _ := ParsePending(s.Pending.Body)
++	p.Source.ServingImage = p.PreviousPending
++	b, e := EncodePending(p)
++	if e != nil {
++		t.Fatal(e)
++	}
++	s.Pending = observe(104, b)
++	c, _ := ParseComplete(s.Complete.Body)
++	c.Pending = s.Pending.File
++	c.OriginalSource = p.Source
++	b, e = EncodeComplete(c)
++	if e != nil {
++		t.Fatal(e)
++	}
++	s.Complete = observe(105, b)
++	if History(pr, fact(20), arrangement(s)) != CompletedShape {
++		t.Fatal("blanket reclaimed-ID history restriction")
++	}
++}
+--- a/pkg/managementconfig/initialization_windows.go
++++ b/pkg/managementconfig/initialization_windows.go
+@@ -52,6 +52,9 @@
+ // are a current preparation state only under the retained sole-service lease;
+ // mixed or malformed files refuse. This does not adopt an existing unsafe home.
+ func OpenInitialized(ctx context.Context, home, suffix string) (created *Created, result error) {
++	if requireGuestNegativeOriginalProducer() != nil {
++		return nil, ErrPublication
++	}
+ 	root, e := ResolveOrbWinRoot(home, suffix)
+ 	if e != nil {
+ 		return nil, ErrPublication
+--- a/pkg/managementconfig/private_windows.go
++++ b/pkg/managementconfig/private_windows.go
+@@ -339,6 +339,12 @@
+ 	if objectKind(h, directory) != nil {
+ 		return ErrCreate
+ 	}
++	return verifyPrivateDACL(h, sid, directory)
++}
++
++// DACL-only half of existing policy. Callers must FIRST prove exact file kind,
++// persistent ACL volume and their closed-role link count; no new SID exemption.
++func verifyPrivateDACL(h windows.Handle, sid string, directory bool) error {
+ 	sd, e := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+ 	if e != nil {
+ 		return ErrCreate
+--- a/pkg/managementconfig/runtime_fresh_owner_windows.go
++++ b/pkg/managementconfig/runtime_fresh_owner_windows.go
+@@ -19,27 +19,29 @@
+ // Construction returns partial custody before reporting failure. Call Close;
+ // an unknown result retains the whole graph and the controller.
+ type FreshSetupOwner struct {
+-	self             *FreshSetupOwner
+-	mu               sync.Mutex
+-	selection        *authoritypath.ProductSelectionOwner
+-	storage          *nativeRuntimeStorage
+-	image            *ServingImageLease
+-	forwarder        *ServingImageLease
+-	forwarderStarted bool
+-	pidWriteStarted  bool
+-	origin           *nativeRuntimeBuildOrigin
+-	keys             []*freshRegistryResource
+-	intent           runtimeFreshIntent
+-	seed             *nativeFreshSeedCapture
+-	fenceObject      *runtimeStorageObject
+-	created          *Created
+-	legacyDenial     *runtimeFreshLegacyDenial
+-	observation      *FreshRuntimeObservation
+-	publication      *nativeFreshRuntimePublisher
+-	sealed           *nativeFreshCommittedReceipt
+-	captureComplete  bool
+-	unknown, closed  bool
+-	closeErr         error
++	initialGuestScope *nativeInitialGuestScope // actual derivative root, not mutable public wrapper
++	guestGuard        *nativeInitialGuestGuard // original negative-only derivative; never a parsed grant
++	self              *FreshSetupOwner
++	mu                sync.Mutex
++	selection         *authoritypath.ProductSelectionOwner
++	storage           *nativeRuntimeStorage
++	image             *ServingImageLease
++	forwarder         *ServingImageLease
++	forwarderStarted  bool
++	pidWriteStarted   bool
++	origin            *nativeRuntimeBuildOrigin
++	keys              []*freshRegistryResource
++	intent            runtimeFreshIntent
++	seed              *nativeFreshSeedCapture
++	fenceObject       *runtimeStorageObject
++	created           *Created
++	legacyDenial      *runtimeFreshLegacyDenial
++	observation       *FreshRuntimeObservation
++	publication       *nativeFreshRuntimePublisher
++	sealed            *nativeFreshCommittedReceipt
++	captureComplete   bool
++	unknown, closed   bool
++	closeErr          error
+ }
+ type freshRegistryResource struct {
+ 	handle windows.Handle
+@@ -423,6 +425,16 @@
+ 	if !registered {
+ 		return ErrUpgrade
+ 	}
++	if o.initialGuestScope != nil && !o.initialGuestScope.closedForParents(o, o.initialGuestScope.authority) {
++		if o.initialGuestScope.owner != o || o.initialGuestScope.authority == nil || o.initialGuestScope.unknown.Load() {
++			o.fence()
++		}
++		return ErrUpgrade
++	}
++	if !o.initialGuestGuardCloseKnownLocked() {
++		o.fence()
++		return ErrUpgrade
++	}
+ 	// Borrowed storage uncertainty must fence BEFORE our image/origin/registry
+ 	// suffix can be queried or closed. Incomplete actual birth may still clean up.
+ 	if !o.knownStorageCloseLocked() {
+--- a/pkg/managementconfig/runtime_fresh_startup_windows.go
++++ b/pkg/managementconfig/runtime_fresh_startup_windows.go
+@@ -51,6 +51,9 @@
+ }
+ 
+ func captureFreshCommittedStartup(ctx context.Context, root *InstanceRoot) (f *freshCommittedStartupPermit, result error) {
++	if requireGuestNegativeOriginalProducer() != nil {
++		return nil, ErrUpgrade
++	}
+ 	if !freshBoundedContext(ctx) || root == nil {
+ 		return nil, ErrUpgrade
+ 	}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_abi_windows_amd64_test.go
+@@ -0,0 +1,8 @@
++//go:build windows && amd64
++
++package managementconfig
++
++import "unsafe"
++
++// Compile-time ABI guard only; no package PE is executed for this packet.
++var _ [0 - int(unsafe.Offsetof(guestNegativeFrame{}.full)%8)]byte
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_model.go
+@@ -0,0 +1,41 @@
++package managementconfig
++
++import "errors"
++
++var ErrGuestNegative = errors.New("guest negative state refuses mutation; preserved state requires scoped recovery")
++
++// DATA only: pending status must be examined before any potentially live output.
++func guestReadOpenState(failed, pending, has, valid bool, status uint32, disposition uintptr) (discard, unknown bool) {
++	if pending || status == 0x103 {
++		return false, true
++	}
++	if failed {
++		return !has, has
++	}
++	if !valid || status != 0 || disposition != 1 {
++		return false, true
++	}
++	return false, false
++}
++func guestReadNames(names []string, slot bool) bool {
++	seen := map[string]bool{}
++	for _, n := range names {
++		if seen[n] {
++			return false
++		}
++		seen[n] = true
++		if slot {
++			if n != "pending" && n != "complete" {
++				return false
++			}
++		} else if n != "profile" && n != "slot.0" && n != "slot.1" {
++			return false
++		}
++	}
++	return true
++}
++
++// Reader-only epoch has no original pending producer factory. This is only a
++// refusal cut, never a configurable authorizer. Replace it with genuine typed
++// source admission when that producer is implemented; never flip it to nil.
++func requireGuestNegativeOriginalProducer() error { return ErrGuestNegative }
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_model_test.go
+@@ -0,0 +1,182 @@
++package managementconfig
++
++import (
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"path/filepath"
++	"runtime"
++	"testing"
++)
++
++func TestGuestNegativeOpenPendingContradictionsAndAbsent(t *testing.T) {
++	for _, tt := range []struct {
++		failed, pending, has, valid bool
++		status                      uint32
++		disp                        uintptr
++		drop, unknown               bool
++	}{{true, true, false, false, 0, 0, false, true}, {false, false, false, false, 0x103, 0, false, true}, {true, false, true, true, 0, 0, false, true}, {false, false, false, false, 0, 1, false, true}, {false, false, true, true, 0, 2, false, true}, {true, false, false, false, 0, 0, true, false}, {false, false, true, true, 0, 1, false, false}} {
++		d, u := guestReadOpenState(tt.failed, tt.pending, tt.has, tt.valid, tt.status, tt.disp)
++		if d != tt.drop || u != tt.unknown {
++			t.Fatal(tt, d, u)
++		}
++	}
++}
++func TestGuestNegativeFixedNames(t *testing.T) {
++	for _, ns := range [][]string{{"profile", "slot.0", "slot.1"}, {"profile"}, {}} {
++		if !guestReadNames(ns, false) {
++			t.Fatal(ns)
++		}
++	}
++	for _, ns := range [][]string{{"PROFILE"}, {"profile", "profile"}, {"../profile"}, {"profile", "slot.2"}, {"pending"}} {
++		if guestReadNames(ns, false) {
++			t.Fatal(ns)
++		}
++	}
++	if !guestReadNames([]string{"pending", "complete"}, true) || guestReadNames([]string{"profile"}, true) {
++		t.Fatal("slot roles")
++	}
++}
++func guestSourceRoot(t *testing.T) string {
++	t.Helper()
++	_, p, _, ok := runtime.Caller(0)
++	if !ok {
++		t.Fatal("source")
++	}
++	return filepath.Clean(filepath.Join(filepath.Dir(p), "../.."))
++}
++func functionCalls(t *testing.T, path, name string) []string {
++	t.Helper()
++	f, e := parser.ParseFile(token.NewFileSet(), path, nil, 0)
++	if e != nil {
++		t.Fatal(e)
++	}
++	var calls []string
++	found := false
++	for _, d := range f.Decls {
++		fn, ok := d.(*ast.FuncDecl)
++		if !ok || fn.Name.Name != name {
++			continue
++		}
++		found = true
++		ast.Inspect(fn.Body, func(n ast.Node) bool {
++			c, ok := n.(*ast.CallExpr)
++			if !ok {
++				return true
++			}
++			switch x := c.Fun.(type) {
++			case *ast.Ident:
++				calls = append(calls, x.Name)
++			case *ast.SelectorExpr:
++				calls = append(calls, x.Sel.Name)
++			}
++			return true
++		})
++	}
++	if !found {
++		t.Fatal("missing actual source function", name)
++	}
++	return calls
++}
++func assertCallBefore(t *testing.T, calls []string, a, b string) {
++	t.Helper()
++	ia, ib := -1, -1
++	for i, v := range calls {
++		if v == a && ia < 0 {
++			ia = i
++		}
++		if v == b && ib < 0 {
++			ib = i
++		}
++	}
++	if ia < 0 || ib < 0 || ia >= ib {
++		t.Fatalf("actual source edge %s before %s: %v", a, b, calls)
++	}
++}
++
++// Checks actual dispatch/producer source AST, not just the model's return value.
++// Neither main, constructors nor package initializers are executed by this test.
++func TestGuestNegativeActualEarlyDispatchAndDirectFreshEdges(t *testing.T) {
++	root := guestSourceRoot(t)
++	main := functionCalls(t, filepath.Join(root, "cmd/rdd/main.go"), "main")
++	for _, effect := range []string{"prepareOrbWinEnvironment", "privateRuntimeOperation", "autoWorkerCommand", "newServiceCommand"} { // NewServeCommand is registered through newServiceCommand, checked below.
++		assertCallBefore(t, main, "guestNegativeBeforeEnvironment", effect)
++	}
++	exitCalls := functionCalls(t, filepath.Join(root, "pkg/managementconfig/runtime_inspection_cli_windows.go"), "inspectionNativeExitKnown")
++	foundSelectorExit := false
++	for _, c := range exitCalls {
++		foundSelectorExit = foundSelectorExit || c == "ProductSelectionExitKnown"
++	}
++	if !foundSelectorExit {
++		t.Fatal("early readonly escape ignores selector domain")
++	}
++	assertCallBefore(t, main, "earlyRuntimeSetup", "guestNegativeBeforeEnvironment")
++	assertCallBefore(t, main, "RuntimeInspectionCLI", "guestNegativeBeforeEnvironment")
++	// Main's actual early handled branch exits directly, never ordinary fallback.
++	mainAST, e := parser.ParseFile(token.NewFileSet(), filepath.Join(root, "cmd/rdd/main.go"), nil, 0)
++	if e != nil {
++		t.Fatal(e)
++	}
++	closed := false
++	ast.Inspect(mainAST, func(node ast.Node) bool {
++		v, ok := node.(*ast.IfStmt)
++		if !ok {
++			return true
++		}
++		a, ok := v.Init.(*ast.AssignStmt)
++		if !ok || len(a.Rhs) != 1 {
++			return true
++		}
++		call, ok := a.Rhs[0].(*ast.CallExpr)
++		if !ok {
++			return true
++		}
++		name, ok := call.Fun.(*ast.SelectorExpr)
++		if !ok || name.Sel.Name != "RuntimeInspectionCLI" {
++			return true
++		}
++		if len(v.Body.List) != 1 || v.Else != nil {
++			t.Fatal("inspection selected branch is not terminal")
++		}
++		expr, ok := v.Body.List[0].(*ast.ExprStmt)
++		if !ok {
++			t.Fatal("inspection exit")
++		}
++		exit, ok := expr.X.(*ast.CallExpr)
++		if !ok {
++			t.Fatal("inspection exit call")
++		}
++		sel, ok := exit.Fun.(*ast.SelectorExpr)
++		if !ok || sel.Sel.Name != "Exit" {
++			t.Fatal("inspection falls through")
++		}
++		pkg, ok := sel.X.(*ast.Ident)
++		if !ok || pkg.Name != "os" {
++			t.Fatal("not actual os.Exit")
++		}
++		closed = true
++		return true
++	})
++	if !closed {
++		t.Fatal("missing actual closed inspection dispatch")
++	}
++	// Every early mutable escape reaches a separately guarded actual service entry.
++	early := functionCalls(t, filepath.Join(root, "cmd/rdd/runtime_setup_windows.go"), "runEarlyRuntimeSetup")
++	if len(early) == 0 {
++		t.Fatal("early source")
++	}
++	found := false
++	for _, c := range early {
++		found = found || c == "RunFreshSetupOperation"
++	}
++	if !found {
++		t.Fatal("unbound early producer")
++	}
++	f := filepath.Join(root, "pkg/service/cmd/fresh_setup_windows.go")
++	assertCallBefore(t, functionCalls(t, f, "RunFreshSetupOperation"), "RequireGuestMutationBeforeOptions", "newFreshProtocolIO")
++	assertCallBefore(t, functionCalls(t, f, "runFreshSetupService"), "RequireGuestMutationBeforeOptions", "CaptureSelectedFreshSetupOwner")
++	assertCallBefore(t, functionCalls(t, filepath.Join(root, "pkg/managementconfig/initialization_windows.go"), "OpenInitialized"), "requireGuestNegativeOriginalProducer", "ResolveOrbWinRoot")
++	assertCallBefore(t, functionCalls(t, filepath.Join(root, "pkg/managementconfig/runtime_fresh_startup_windows.go"), "captureFreshCommittedStartup"), "requireGuestNegativeOriginalProducer", "openInstanceParentMode")
++	creator := functionCalls(t, filepath.Join(root, "pkg/controllers/lima/limavm/controllers/limavm_controller.go"), "Reconcile")
++	assertCallBefore(t, creator, "requireManagedHostagent", "Create")
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_producer_model.go
+@@ -0,0 +1,111 @@
++package managementconfig
++
++import (
++	"crypto/sha256"
++	"encoding/hex"
++	"encoding/json"
++	"io"
++	"strings"
++)
++
++const guestInitialPreparationRole = "orbwin-owned-guest-preparation-v1"
++
++const guestInitialGuardGeneration uint64 = 1
++
++// One fixed role selects BOTH the native directory name and History's array
++// index. Generation1 lives in slot.1; its canonical empty peer is slot.0.
++func guestInitialGuardSlotRole() (index int, name string) {
++	index = int(guestInitialGuardGeneration % 2)
++	return index, [2]string{"slot.0", "slot.1"}[index]
++}
++
++// The hash inputs are DATA from the producer's private original snapshot. This
++// pure helper cannot select an archive, issue a scope, or authorize execution.
++func guestInitialPreparationDigests(archive string, image [32]byte, commit string) (profile, recipe [32]byte, ok bool) {
++	if archive == "" || image == ([32]byte{}) {
++		return
++	}
++	if commit != "" {
++		b, e := hex.DecodeString(commit)
++		if e != nil || len(b) != 20 || hex.EncodeToString(b) != commit {
++			return
++		}
++	}
++	h := sha256.New()
++	if _, e := io.Copy(h, strings.NewReader(archive)); e != nil {
++		return
++	}
++	var archiveHash [32]byte
++	copy(archiveHash[:], h.Sum(nil))
++	descriptor := struct {
++		Purpose        string
++		Version        int
++		Archive, Image [32]byte
++		Commit         string
++	}{guestInitialPreparationRole, 1, archiveHash, image, commit}
++	b, e := json.Marshal(descriptor)
++	if e != nil {
++		return
++	}
++	profile = sha256.Sum256(b)
++	recipe = sha256.Sum256(append([]byte("orbwin-initial-guest-recipe-v1\x00"), b...))
++	ok = true
++	return
++}
++
++// Pure sequencing DATA for the one initial CREATE-only recipe. None of these
++// fields authorizes a native effect or substitutes for actual source custody.
++type guestInitialGuardStep uint8
++
++const (
++	guestInitialGuardDirectory guestInitialGuardStep = iota + 1
++	guestInitialGuardRootBarrier
++	guestInitialGuardProfile
++	guestInitialGuardProfileBarrier
++	guestInitialGuardSlot
++	guestInitialGuardSlotBarrier
++	guestInitialGuardPending
++	guestInitialGuardPendingBarrier
++)
++
++type guestInitialGuardSequence struct {
++	next                              guestInitialGuardStep
++	entered, failed, unknown, durable bool
++}
++
++func (s *guestInitialGuardSequence) begin(step guestInitialGuardStep) bool {
++	if s == nil || s.failed || s.unknown || s.durable || s.entered {
++		return false
++	}
++	if s.next == 0 {
++		s.next = guestInitialGuardDirectory
++	}
++	if step != s.next || step < guestInitialGuardDirectory || step > guestInitialGuardPendingBarrier {
++		return false
++	}
++	s.entered = true
++	return true
++}
++func (s *guestInitialGuardSequence) settle(known, successful bool) bool {
++	if s == nil || !s.entered || s.failed || s.unknown || s.durable {
++		return false
++	}
++	if !known {
++		s.unknown, s.failed = true, true
++		return false
++	}
++	s.entered = false
++	if !successful {
++		s.failed = true
++		return false
++	}
++	if s.next == guestInitialGuardPendingBarrier {
++		s.durable = true
++	} else {
++		s.next++
++	}
++	return true
++}
++func (s *guestInitialGuardSequence) closeKnown() bool {
++	return s != nil && !s.entered && !s.unknown
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_producer_model_test.go
+@@ -0,0 +1,125 @@
++package managementconfig
++
++import (
++	"crypto/sha256"
++	negativeguard "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig/guestnegative"
++	"strings"
++	"testing"
++)
++
++func TestInitialGuestGuardPhysicalRoleMatchesStrictHistory(t *testing.T) {
++	fact := func(id uint32) negativeguard.Fact {
++		return negativeguard.Fact{Object: negativeguard.Object{Volume: 1, Low: id}, Descriptor: [32]byte{1}}
++	}
++	witness := func(id uint32) negativeguard.Witness {
++		return negativeguard.Witness{Object: fact(id).Object, Size: 1, Written: 1, Descriptor: [32]byte{1}, Body: [32]byte{1}}
++	}
++	observe := func(id uint32, body []byte) negativeguard.Observation {
++		w := witness(id)
++		w.Size = uint64(len(body))
++		w.Body = sha256.Sum256(body)
++		return negativeguard.Observation{Body: body, File: w}
++	}
++	source := negativeguard.Source{Kind: "initial-fresh", Private: fact(1), Public: fact(2), Controller: fact(3), Intent: witness(4), Seed: negativeguard.Seed{Object: fact(5).Object, Descriptor: [32]byte{1}, Written: 1, Binding: strings.Repeat("01", 32)}, ServingImage: witness(6)}
++	profileBytes, e := negativeguard.EncodeProfile(negativeguard.Profile{Schema: 1, Purpose: negativeguard.Purpose, ProfileVersion: 1, Source: source})
++	if e != nil {
++		t.Fatal(e)
++	}
++	profile := observe(10, profileBytes)
++	pendingBytes, e := negativeguard.EncodePending(negativeguard.Pending{Schema: 1, Purpose: negativeguard.Purpose, Generation: guestInitialGuardGeneration, Phase: "guest-lifetime-pending", Profile: profile.File, Directory: fact(11), Source: source, GuestProfileDigest: [32]byte{1}, RecipeDigest: [32]byte{2}, OperationNonce: [16]byte{3}})
++	if e != nil {
++		t.Fatal(e)
++	}
++	index, name := guestInitialGuardSlotRole()
++	if index != 1 || name != "slot.1" {
++		t.Fatal("wrong native physical role", index, name)
++	}
++	var slots [2]negativeguard.Slot
++	slots[index].Pending = observe(12, pendingBytes)
++	if negativeguard.History(profile, fact(11), slots) != negativeguard.PendingShape {
++		t.Fatal("physical role differs from strict classifier")
++	}
++	slots[0], slots[1] = slots[1], slots[0]
++	if negativeguard.History(profile, fact(11), slots) != negativeguard.Refuse {
++		t.Fatal("reversed physical parity accepted")
++	}
++}
++
++func TestInitialGuestGuardCannotSkipDurabilityCut(t *testing.T) {
++	for cut := guestInitialGuardDirectory; cut <= guestInitialGuardPendingBarrier; cut++ {
++		var s guestInitialGuardSequence
++		for step := guestInitialGuardDirectory; step < cut; step++ {
++			if !s.begin(step) || !s.settle(true, true) {
++				t.Fatal("prefix", step)
++			}
++		}
++		if s.durable || s.begin(cut+1) {
++			t.Fatal("missing persistent cut accepted", cut)
++		}
++		if !s.begin(cut) || s.closeKnown() || s.begin(cut) {
++			t.Fatal("unreturned operation released/reentered", cut)
++		}
++		if s.settle(false, false) || s.closeKnown() || s.settle(true, true) || s.begin(cut) || s.durable {
++			t.Fatal("unknown replay/release", cut)
++		}
++	}
++}
++func TestInitialGuestGuardKnownFailureHasNoRetryOrSuffix(t *testing.T) {
++	for cut := guestInitialGuardDirectory; cut <= guestInitialGuardPendingBarrier; cut++ {
++		var s guestInitialGuardSequence
++		for step := guestInitialGuardDirectory; step <= cut; step++ {
++			if !s.begin(step) {
++				t.Fatal("prefix", step)
++			}
++			if s.settle(true, step != cut) != (step != cut) {
++				t.Fatal("settlement", step)
++			}
++		}
++		if !s.closeKnown() || s.begin(cut) || s.begin(cut+1) || s.durable {
++			t.Fatal("known partial retried/continued", cut)
++		}
++	}
++}
++func TestInitialGuestGuardOnlyFinalBarrierIsDurable(t *testing.T) {
++	var s guestInitialGuardSequence
++	for step := guestInitialGuardDirectory; step <= guestInitialGuardPendingBarrier; step++ {
++		if !s.begin(step) || !s.settle(true, true) {
++			t.Fatal(step)
++		}
++		if s.durable != (step == guestInitialGuardPendingBarrier) {
++			t.Fatal("premature durable", step)
++		}
++	}
++	if !s.closeKnown() || s.begin(guestInitialGuardDirectory) || s.settle(true, true) {
++		t.Fatal("recipe repeated")
++	}
++}
++
++func TestInitialGuestPreparationBindsActualSnapshotAndServingCode(t *testing.T) {
++	var image [32]byte
++	image[0] = 1
++	p, r, ok := guestInitialPreparationDigests("original-archive", image, "")
++	if !ok || p == r || p == ([32]byte{}) || r == ([32]byte{}) {
++		t.Fatal("binding absent")
++	}
++	q, s, ok := guestInitialPreparationDigests("different-archive", image, "")
++	if !ok || q == p || s == r {
++		t.Fatal("archive omitted")
++	}
++	image[1] = 2
++	q, s, ok = guestInitialPreparationDigests("original-archive", image, "")
++	if !ok || q == p || s == r {
++		t.Fatal("actual serving image omitted")
++	}
++	for _, commit := range []string{"not-a-commit", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"} {
++		if _, _, ok := guestInitialPreparationDigests("archive", image, commit); ok {
++			t.Fatal("noncanonical commit")
++		}
++	}
++	if _, _, ok := guestInitialPreparationDigests("", image, ""); ok {
++		t.Fatal("management-only build accepted")
++	}
++	if _, _, ok := guestInitialPreparationDigests("archive", [32]byte{}, ""); ok {
++		t.Fatal("missing actual image accepted")
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_producer_windows.go
+@@ -0,0 +1,457 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"encoding/hex"
++	"runtime"
++	"unsafe"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/embedded"
++	negativeguard "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig/guestnegative"
++	"golang.org/x/sys/windows"
++)
++
++// Initial negative-only derivative: SAME Fresh owner and SAME storage closers.
++// No complete/reclaim/execution method, path/handle getter or parsed-DATA grant.
++// Caller holds o.mu -> image.mu -> n.mu. Unknown retains that original graph.
++type nativeInitialGuestGuard struct {
++	owner                         *FreshSetupOwner
++	archive                       string
++	imageHash                     [32]byte
++	profileDigest, recipeDigest   [32]byte
++	sequence                      guestInitialGuardSequence
++	queries                       []*initialGuestGuardQuery
++	fullIDs                       map[*runtimeStorageResource][24]byte
++	guard, slot, profile, pending *runtimeStorageObject
++	profileBody, pendingBody      []byte
++	source                        negativeguard.Source
++	err                           error
++}
++type initialGuestGuardQuery struct {
++	input             windows.Handle // borrowed actual input; never another closer
++	info              windows.ByHandleFileInformation
++	alignment         uint64
++	full              [24]byte
++	kind              uint32
++	sd                *windows.SECURITY_DESCRIPTOR
++	entered, returned bool
++	err               error
++}
++
++func (g *nativeInitialGuestGuard) originalLocked() bool {
++	if g == nil || g.owner == nil || g.owner.guestGuard != g || g.owner.self != g.owner || g.owner.closed || g.owner.unknown || g.owner.storage == nil || g.sequence.unknown {
++		return false
++	}
++	o := g.owner
++	freshSetupOwners.Lock()
++	registered := freshSetupOwners.owners[o]
++	freshSetupOwners.Unlock()
++	return registered && o.nativeOutputsAdmittedLocked() && o.image != nil && servingImageCaptureKnown(o.image)
++}
++func (g *nativeInitialGuestGuard) failLocked(unknown bool) error {
++	g.err = ErrGuestNegative
++	g.sequence.failed = true
++	if unknown {
++		g.sequence.unknown = true
++		g.owner.unknown = true
++		g.owner.storage.fence()
++	}
++	return ErrGuestNegative
++}
++
++// Pure cached barrier checked BEFORE Fresh Close's first native/ancestor suffix.
++func (o *FreshSetupOwner) initialGuestGuardCloseKnownLocked() bool {
++	g := o.guestGuard
++	if g == nil {
++		return true
++	}
++	if g.owner != o || !g.sequence.closeKnown() {
++		return false
++	}
++	for _, q := range g.queries {
++		if q == nil || q.entered && !q.returned {
++			return false
++		}
++	}
++	return true
++}
++func (g *nativeInitialGuestGuard) queryLocked(h windows.Handle) *initialGuestGuardQuery {
++	if !g.originalLocked() || h == 0 || h == windows.InvalidHandle || len(g.queries) >= 128 {
++		return nil
++	}
++	q := &initialGuestGuardQuery{input: h}
++	g.queries = append(g.queries, q)
++	return q
++}
++func (g *nativeInitialGuestGuard) afterQueryLocked(q *initialGuestGuardQuery, e error) error {
++	q.err, q.returned = e, true
++	if e == windows.ERROR_IO_PENDING || e == windows.STATUS_PENDING {
++		return g.failLocked(true)
++	}
++	if e != nil {
++		return ErrGuestNegative
++	}
++	return nil
++}
++
++// New native outputs are retained before entry. Accepted SD policy and its
++// synchronous allocation/copy wrapper contract are reused without new exemptions.
++func (g *nativeInitialGuestGuard) measureLocked(ctx context.Context, r *runtimeStorageResource, directory, private bool) (*runtimeStorageObject, error) {
++	if !freshBoundedContext(ctx) || !g.originalLocked() || r == nil || r.attempted || r.handle == 0 {
++		return nil, ErrGuestNegative
++	}
++	n, image := g.owner.storage, g.owner.image
++	owned := false
++	for _, v := range n.resources {
++		owned = owned || v == r
++	}
++	if len(image.resources) > 0 && len(image.chain) > 0 && image.resources[len(image.resources)-1] == r && r.handle == image.chain[len(image.chain)-1] {
++		owned = true
++	}
++	if !owned {
++		return nil, ErrGuestNegative
++	}
++	q := g.queryLocked(r.handle)
++	if q == nil {
++		return nil, ErrGuestNegative
++	}
++	q.entered = true
++	if g.afterQueryLocked(q, windows.GetFileInformationByHandle(q.input, &q.info)) != nil {
++		return nil, ErrGuestNegative
++	}
++	info := q.info
++	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != directory || !directory && info.NumberOfLinks != 1 {
++		return nil, ErrGuestNegative
++	}
++	q = g.queryLocked(r.handle)
++	if q == nil {
++		return nil, ErrGuestNegative
++	}
++	q.entered = true
++	if g.afterQueryLocked(q, windows.GetFileInformationByHandleEx(q.input, windows.FileIdInfo, &q.full[0], 24)) != nil || !inspectionFullIDKnown(q.full) {
++		return nil, ErrGuestNegative
++	}
++	full := q.full
++	if old, present := g.fullIDs[r]; present && old != full {
++		return nil, ErrGuestNegative
++	}
++	if g.fullIDs == nil {
++		g.fullIDs = make(map[*runtimeStorageResource][24]byte)
++	}
++	g.fullIDs[r] = full
++	q = g.queryLocked(r.handle)
++	if q == nil {
++		return nil, ErrGuestNegative
++	}
++	q.entered = true
++	q.kind, q.err = windows.GetFileType(q.input)
++	if g.afterQueryLocked(q, q.err) != nil || q.kind != windows.FILE_TYPE_DISK {
++		return nil, ErrGuestNegative
++	}
++	if private {
++		if verifyPrivate(r.handle, n.sid, directory) != nil {
++			return nil, ErrGuestNegative
++		}
++	} else if checkReadObject(r.handle, n.sid, directory) != nil {
++		return nil, ErrGuestNegative
++	}
++	q = g.queryLocked(r.handle)
++	if q == nil {
++		return nil, ErrGuestNegative
++	}
++	q.entered = true
++	q.sd, q.err = windows.GetSecurityInfo(q.input, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	if g.afterQueryLocked(q, q.err) != nil || q.sd == nil {
++		return nil, ErrGuestNegative
++	}
++	size := q.sd.Length()
++	control, _, e := q.sd.Control()
++	if e != nil || control&windows.SE_SELF_RELATIVE == 0 || size < 20 || size > 65536 {
++		return nil, ErrGuestNegative
++	}
++	id := runtimeStorageIdentity{volume: info.VolumeSerialNumber, high: info.FileIndexHigh, low: info.FileIndexLow, attributes: info.FileAttributes, links: info.NumberOfLinks, size: uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow), written: info.LastWriteTime, descriptor: sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(q.sd)), int(size)))}
++	if directory {
++		id.size = 0
++		id.written = windows.Filetime{}
++	}
++	return &runtimeStorageObject{resource: r, identity: id, directory: directory, private: private}, nil
++}
++func initialGuestGuardFact(o *runtimeStorageObject) negativeguard.Fact {
++	return negativeguard.Fact{Object: negativeguard.Object{Volume: o.identity.volume, High: o.identity.high, Low: o.identity.low}, Descriptor: o.identity.descriptor}
++}
++func initialGuestGuardWitness(o *runtimeStorageObject, body []byte) negativeguard.Witness {
++	f := initialGuestGuardFact(o)
++	return negativeguard.Witness{Object: f.Object, Size: o.identity.size, Written: uint64(o.identity.written.HighDateTime)<<32 | uint64(o.identity.written.LowDateTime), Descriptor: f.Descriptor, Body: sha256.Sum256(body)}
++}
++func (g *nativeInitialGuestGuard) openLocked(ctx context.Context, parent *runtimeStorageObject, name string, directory bool, disposition, access, share uint32) (*runtimeStorageObject, error) {
++	if !g.originalLocked() || !freshBoundedContext(ctx) || parent == nil {
++		return nil, ErrGuestNegative
++	}
++	sd, e := privateDescriptor(g.owner.storage.sid, directory)
++	if e != nil {
++		return nil, ErrGuestNegative
++	}
++	if disposition == windows.FILE_OPEN {
++		sd = nil
++	}
++	n := g.owner.storage
++	if !freshBoundedContext(ctx) {
++		return nil, ErrGuestNegative
++	}
++	h, e := n.open(parent.resource.handle, name, directory, disposition, access, share, sd)
++	if e != nil {
++		return nil, e
++	}
++	r := n.keep(h) // exact output attachment, sole original storage closer
++	return g.measureLocked(ctx, r, directory, true)
++}
++func (g *nativeInitialGuestGuard) barrierLocked(ctx context.Context, o *runtimeStorageObject) error {
++	if !g.originalLocked() || !freshBoundedContext(ctx) || o == nil {
++		return ErrGuestNegative
++	}
++	return g.owner.storage.flushStorage(o.resource)
++}
++func (g *nativeInitialGuestGuard) immutableRecordLocked(ctx context.Context, parent *runtimeStorageObject, name string, body []byte) (*runtimeStorageObject, error) {
++	if len(body) == 0 || len(body) > negativeguard.Budget {
++		return nil, ErrGuestNegative
++	}
++	n := g.owner.storage
++	writer, e := g.openLocked(ctx, parent, name, false, windows.FILE_CREATE, windows.FILE_READ_DATA|windows.FILE_WRITE_DATA, windows.FILE_SHARE_READ)
++	if e != nil {
++		return nil, e
++	}
++	if _, e = n.transferStorage(writer.resource, body, true); e != nil {
++		return nil, e
++	}
++	if g.barrierLocked(ctx, writer) != nil {
++		return nil, ErrGuestNegative
++	}
++	expected, e := g.measureLocked(ctx, writer.resource, false, true)
++	if e != nil {
++		return nil, e
++	}
++	if expected.identity.size != uint64(len(body)) {
++		return nil, ErrGuestNegative
++	}
++	// The original writer positively closes before immutable admission. Account
++	// only for documented writer-close timestamp finalization, then bind exact ID.
++	if n.closeTemporary(writer.resource) != nil {
++		return nil, ErrGuestNegative
++	}
++	reader, e := g.openLocked(ctx, parent, name, false, windows.FILE_OPEN, windows.FILE_READ_DATA, windows.FILE_SHARE_READ)
++	if e != nil || !runtimeStorageCreatedSame(reader.identity, expected.identity) || g.fullIDs[reader.resource] != g.fullIDs[writer.resource] {
++		return nil, ErrGuestNegative
++	}
++	actual, e := n.read(reader, false)
++	if e != nil || !bytes.Equal(actual, body) || !freshBoundedContext(ctx) {
++		return nil, ErrGuestNegative
++	}
++	measured, e := g.measureLocked(ctx, reader.resource, false, true)
++	if e != nil || measured.identity != reader.identity {
++		return nil, ErrGuestNegative
++	}
++	return reader, nil
++}
++
++// PrepareInitialGuestNegativeGuard creates only durable NEGATIVE evidence. It
++// does not relax any reader/guest/controller gate in this dormant source slice.
++// No caller path, digest, parsed record or future Created/publisher is accepted.
++func (o *FreshSetupOwner) PrepareInitialGuestNegativeGuard(ctx context.Context) (failure error) {
++	if o == nil || o.self != o || !freshBoundedContext(ctx) {
++		return ErrGuestNegative
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if !o.createdAdmissionLocked(ctx) || !o.legacyDenialReadyLocked() || o.guestGuard != nil || o.seed == nil || o.intent.Schema != 2 || o.storage.freshRecovery != nil {
++		return ErrGuestNegative
++	}
++	// Pure original publication BEFORE the first native proof or query.
++	g := &nativeInitialGuestGuard{owner: o, archive: embedded.Distro, err: ErrGuestNegative}
++	o.guestGuard = g
++	defer func() {
++		if recover() != nil {
++			o.fence()
++			g.sequence.unknown = true
++			g.sequence.failed = true
++			g.err = ErrGuestNegative
++			failure = ErrGuestNegative
++		}
++	}()
++	if g.archive == "" {
++		g.sequence.failed = true
++		return ErrGuestNegative
++	}
++	if o.origin.checkMappedSelf(ctx, o.intent.Transaction) != nil {
++		g.sequence.failed = true
++		return ErrGuestNegative
++	}
++	o.image.mu.Lock()
++	defer o.image.mu.Unlock()
++	n := o.storage
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	defer func() {
++		if recover() != nil {
++			g.failLocked(true)
++			failure = ErrGuestNegative
++		}
++		if failure != nil {
++			g.err = ErrGuestNegative
++			g.sequence.failed = true
++			if n.unknown || n.nativeOpen != nil || n.storageIOUnsettled() {
++				g.failLocked(true)
++			}
++		}
++	}()
++	if !g.originalLocked() || len(n.ancestry) < 2 || n.parent == nil || n.controller == nil || n.predecessor != nil || n.checkPrevious() != nil || o.seed.checkLocked(ctx) != nil || o.checkLegacyStartDenialLocked(ctx) != nil {
++		return ErrGuestNegative
++	}
++	private, e := g.measureLocked(ctx, n.ancestry[len(n.ancestry)-1].resource, true, true)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	public, e := g.measureLocked(ctx, n.parent.resource, true, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	controller, e := g.measureLocked(ctx, n.controller.resource, false, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	intent, e := g.measureLocked(ctx, o.fenceObject.resource, false, true)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	intentBody, e := encodeRuntimeFreshIntent(o.intent)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	read, e := n.read(intent, false)
++	if e != nil || !bytes.Equal(read, intentBody) {
++		return ErrGuestNegative
++	}
++	seed, e := g.measureLocked(ctx, o.seed.object.resource, false, true)
++	if e != nil || seed.identity.size != 0 {
++		return ErrGuestNegative
++	}
++	if len(o.image.resources) == 0 {
++		return ErrGuestNegative
++	}
++	image, e := g.measureLocked(ctx, o.image.resources[len(o.image.resources)-1], false, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	g.imageHash = o.image.image.Hash
++	imageBytes, e := hex.DecodeString(o.intent.Image)
++	if e != nil || !bytes.Equal(imageBytes, g.imageHash[:]) || image.identity.volume != o.image.image.Volume || image.identity.high != o.image.image.High || image.identity.low != o.image.image.Low {
++		return ErrGuestNegative
++	}
++	var ok bool
++	g.profileDigest, g.recipeDigest, ok = guestInitialPreparationDigests(g.archive, g.imageHash, o.intent.Commit)
++	if !ok {
++		return ErrGuestNegative
++	}
++	g.source = negativeguard.Source{Kind: "initial-fresh", Private: initialGuestGuardFact(private), Public: initialGuestGuardFact(public), Controller: initialGuestGuardFact(controller), Intent: initialGuestGuardWitness(intent, intentBody), Seed: negativeguard.Seed{Object: initialGuestGuardFact(seed).Object, Descriptor: seed.identity.descriptor, Written: uint64(seed.identity.written.HighDateTime)<<32 | uint64(seed.identity.written.LowDateTime), Binding: o.intent.Seed.Binding}, ServingImage: initialGuestGuardWitness(image, nil)}
++	g.source.ServingImage.Body = g.imageHash
++	g.profileBody, e = negativeguard.EncodeProfile(negativeguard.Profile{Schema: 1, Purpose: negativeguard.Purpose, ProfileVersion: 1, Source: g.source})
++	if e != nil {
++		return ErrGuestNegative
++	}
++	// Exact original private-directory writer exists only to flush namespace.
++	parentWriter, e := g.openLocked(ctx, n.ancestry[len(n.ancestry)-2], ".orbwin-private", true, windows.FILE_OPEN, windows.GENERIC_WRITE|windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
++	if e != nil || parentWriter.identity != private.identity || g.fullIDs[parentWriter.resource] != g.fullIDs[private.resource] {
++		return ErrGuestNegative
++	}
++	// Last original context observation AFTER all slow proof/SD steps and
++	// immediately before the first persistent CREATE. No cancellation rollback.
++	if !freshBoundedContext(ctx) || !g.sequence.begin(guestInitialGuardDirectory) {
++		return ErrGuestNegative
++	}
++	g.guard, e = g.openLocked(ctx, private, "authority.fresh.control.guest", true, windows.FILE_CREATE, windows.GENERIC_WRITE|windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardRootBarrier) {
++		return ErrGuestNegative
++	}
++	e = g.barrierLocked(ctx, parentWriter)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardProfile) {
++		return ErrGuestNegative
++	}
++	g.profile, e = g.immutableRecordLocked(ctx, g.guard, "profile", g.profileBody)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardProfileBarrier) {
++		return ErrGuestNegative
++	}
++	e = g.barrierLocked(ctx, g.guard)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardSlot) {
++		return ErrGuestNegative
++	}
++	slotIndex, slotName := guestInitialGuardSlotRole()
++	g.slot, e = g.openLocked(ctx, g.guard, slotName, true, windows.FILE_CREATE, windows.GENERIC_WRITE|windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardSlotBarrier) {
++		return ErrGuestNegative
++	}
++	e = g.barrierLocked(ctx, g.guard)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	var nonce [16]byte
++	b, e := hex.DecodeString(o.intent.Transaction)
++	if e != nil || len(b) != 16 {
++		return ErrGuestNegative
++	}
++	copy(nonce[:], b)
++	g.pendingBody, e = negativeguard.EncodePending(negativeguard.Pending{Schema: 1, Purpose: negativeguard.Purpose, Generation: guestInitialGuardGeneration, Phase: "guest-lifetime-pending", Profile: initialGuestGuardWitness(g.profile, g.profileBody), Directory: initialGuestGuardFact(g.guard), Source: g.source, GuestProfileDigest: g.profileDigest, RecipeDigest: g.recipeDigest, OperationNonce: nonce})
++	if e != nil {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardPending) {
++		return ErrGuestNegative
++	}
++	g.pending, e = g.immutableRecordLocked(ctx, g.slot, "pending", g.pendingBody)
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	if !g.sequence.begin(guestInitialGuardPendingBarrier) {
++		return ErrGuestNegative
++	}
++	e = g.barrierLocked(ctx, g.slot)
++	if e == nil {
++		e = g.barrierLocked(ctx, g.guard)
++	}
++	if !g.sequence.settle(!n.unknown, e == nil) {
++		return ErrGuestNegative
++	}
++	profileObservation := negativeguard.Observation{Body: g.profileBody, File: initialGuestGuardWitness(g.profile, g.profileBody)}
++	pendingObservation := negativeguard.Observation{Body: g.pendingBody, File: initialGuestGuardWitness(g.pending, g.pendingBody)}
++	var slots [2]negativeguard.Slot
++	slots[slotIndex].Pending = pendingObservation
++	// Generation1's peer is empty by this exact original directory CREATE
++	// recipe, not by trusting parser absence or adopting an existing directory.
++	if negativeguard.History(profileObservation, initialGuestGuardFact(g.guard), slots) != negativeguard.PendingShape {
++		return ErrGuestNegative
++	}
++	if n.closeTemporary(parentWriter.resource) != nil {
++		return g.failLocked(true)
++	}
++	g.err = nil
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_producer_windows_test.go
+@@ -0,0 +1,40 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"testing"
++	"unsafe"
++)
++
++// Compile-only in the source packet. No native constructor or package PE run.
++var _ [0 - int(unsafe.Offsetof(initialGuestGuardQuery{}.full)%8)]byte
++
++func TestInitialGuestGuardRejectsUnownedInputsBeforeNative(t *testing.T) {
++	for _, o := range []*FreshSetupOwner{nil, {}, {self: &FreshSetupOwner{}}, {captureComplete: true}} {
++		if o.PrepareInitialGuestNegativeGuard(context.Background()) == nil {
++			t.Fatal("unowned/unbounded source accepted")
++		}
++	}
++}
++func TestInitialGuestGuardParentCloseRetainsUnreturnedQuery(t *testing.T) {
++	o := &FreshSetupOwner{}
++	g := &nativeInitialGuestGuard{owner: o}
++	o.guestGuard = g
++	if !o.initialGuestGuardCloseKnownLocked() {
++		t.Fatal("empty original derivative not known")
++	}
++	g.queries = append(g.queries, &initialGuestGuardQuery{entered: true})
++	if o.initialGuestGuardCloseKnownLocked() {
++		t.Fatal("unreturned query released parent")
++	}
++	g.queries[0].returned = true
++	if !o.initialGuestGuardCloseKnownLocked() {
++		t.Fatal("known terminal query held forever")
++	}
++	g.sequence.unknown = true
++	if o.initialGuestGuardCloseKnownLocked() {
++		t.Fatal("unknown released parent")
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_reader_other.go
+@@ -0,0 +1,10 @@
++//go:build !windows
++
++package managementconfig
++
++import "context"
++
++func RequireGuestMutationBeforeOptions(context.Context) error { return nil }
++func (a *ManagedRuntimeAuthority) RequireGuestNegativeBeforeControllers(context.Context) error {
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_reader_windows.go
+@@ -0,0 +1,547 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"runtime"
++	"sort"
++	"strings"
++	"sync"
++	"time"
++	"unsafe"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/authoritypath"
++	negativeguard "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/managementconfig/guestnegative"
++	"golang.org/x/sys/windows"
++)
++
++// Native owner exists before selector/native effects. No caller source/handle or
++// parsed record can register it. This observer owns no controller/write grant.
++type nativeGuestNegativeRead struct {
++	self                     *nativeGuestNegativeRead
++	selection                *authoritypath.ProductSelectionOwner
++	selected                 *authoritypath.Selection
++	frames                   []*guestNegativeFrame
++	objects                  []*guestNegativeObject
++	snapshots                []guestNegativeSnapshot
++	unknown, closing, closed bool
++	closeErr                 error
++}
++type guestNegativeFrame struct {
++	owner                                            *nativeGuestNegativeRead
++	handle                                           windows.Handle
++	input                                            windows.Handle // query input only, never a closer
++	text                                             *windows.NTUnicodeString
++	oa                                               windows.OBJECT_ATTRIBUTES
++	io                                               windows.IO_STATUS_BLOCK
++	info                                             windows.ByHandleFileInformation
++	fullAlignment                                    uint64   // Native FILE_ID_INFO buffer alignment.
++	full                                             [24]byte // actual FILE_ID_INFO vol64+ID128; never equated to projected DATA
++	sd                                               *windows.SECURITY_DESCRIPTOR
++	body                                             []byte
++	words                                            []uint64
++	count, kind                                      uint32
++	raw                                              uintptr
++	err                                              error
++	entered, returned, closeAttempted, closeReturned bool
++}
++type guestNegativeObject struct {
++	frame                         *guestNegativeFrame
++	parent                        *guestNegativeObject
++	name                          string
++	directory, private, traversal bool
++	identity                      runtimeStorageIdentity
++	full                          [24]byte
++	body                          []byte
++}
++type guestNegativeSnapshot struct {
++	object *guestNegativeObject
++	names  []string
++	slot   bool
++}
++
++var guestNegativeReads = struct {
++	sync.Mutex
++	failed bool
++	owners map[*nativeGuestNegativeRead]bool
++}{owners: make(map[*nativeGuestNegativeRead]bool)}
++var guestNegativeClose = imageOutputKernel.NewProc("CloseHandle")
++
++func (n *nativeGuestNegativeRead) fence() {
++	n.unknown = true
++	guestNegativeReads.Lock()
++	guestNegativeReads.failed = true
++	guestNegativeReads.owners[n] = true
++	guestNegativeReads.Unlock()
++}
++func (n *nativeGuestNegativeRead) original() bool {
++	if n == nil || n.self != n || n.unknown || n.closed {
++		return false
++	}
++	guestNegativeReads.Lock()
++	known := !guestNegativeReads.failed && guestNegativeReads.owners[n]
++	guestNegativeReads.Unlock()
++	return known
++}
++func (n *nativeGuestNegativeRead) known(ctx context.Context) bool {
++	return n.original() && !n.closing && freshBoundedContext(ctx) && n.selection != nil && n.selection.KnownForReadOnlyInspection() == nil
++}
++func (n *nativeGuestNegativeRead) frame() *guestNegativeFrame {
++	if !n.original() || len(n.frames) >= 512 {
++		return nil
++	}
++	f := &guestNegativeFrame{owner: n}
++	n.frames = append(n.frames, f)
++	return f
++}
++func (n *nativeGuestNegativeRead) after(f *guestNegativeFrame, e error) error {
++	f.err = e
++	f.returned = true
++	if e == windows.ERROR_IO_PENDING || e == windows.STATUS_PENDING {
++		n.fence()
++		return ErrGuestNegative
++	}
++	if e != nil {
++		return ErrGuestNegative
++	}
++	return nil
++}
++func (n *nativeGuestNegativeRead) open(ctx context.Context, parent *guestNegativeObject, name string, dir, private, traversal bool) (*guestNegativeObject, error) {
++	if !n.known(ctx) || parent != nil && !n.owns(parent) {
++		return nil, ErrGuestNegative
++	}
++	f := n.frame()
++	if f == nil {
++		return nil, ErrGuestNegative
++	}
++	var e error
++	f.text, e = windows.NewNTUnicodeString(name)
++	if e != nil {
++		return nil, ErrGuestNegative
++	}
++	f.oa = windows.OBJECT_ATTRIBUTES{ObjectName: f.text, Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE}
++	f.oa.Length = uint32(unsafe.Sizeof(f.oa))
++	if parent != nil {
++		f.oa.RootDirectory = parent.frame.handle
++	}
++	access := uint32(windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES | windows.SYNCHRONIZE)
++	options := uint32(windows.FILE_OPEN_REPARSE_POINT | windows.FILE_SYNCHRONOUS_IO_NONALERT | windows.FILE_NON_DIRECTORY_FILE)
++	share := uint32(windows.FILE_SHARE_READ)
++	if dir {
++		access |= windows.FILE_LIST_DIRECTORY | windows.FILE_TRAVERSE
++		options &^= windows.FILE_NON_DIRECTORY_FILE
++		options |= windows.FILE_DIRECTORY_FILE
++		share |= windows.FILE_SHARE_WRITE
++	} else {
++		access |= windows.FILE_READ_DATA
++	}
++	f.entered = true
++	f.err = windows.NtCreateFile(&f.handle, access, &f.oa, &f.io, nil, 0, share, windows.FILE_OPEN, options, 0, 0)
++	f.returned = true
++	// Return pending before examining kernel-pending IOSB/H cells.
++	if f.err == windows.STATUS_PENDING || f.err == windows.ERROR_IO_PENDING {
++		n.fence()
++		return nil, ErrGuestNegative
++	}
++	if uint32(f.io.Status) == 0x103 {
++		n.fence()
++		return nil, ErrGuestNegative
++	}
++	discard, unknown := guestReadOpenState(f.err != nil, false, f.handle != 0, f.handle != 0 && f.handle != windows.InvalidHandle, uint32(f.io.Status), f.io.Information)
++	if unknown {
++		n.fence()
++		return nil, ErrGuestNegative
++	}
++	if discard {
++		return nil, f.err
++	}
++	o := &guestNegativeObject{frame: f, parent: parent, name: name, directory: dir, private: private, traversal: traversal}
++	n.objects = append(n.objects, o)
++	if n.measure(ctx, o) != nil {
++		return nil, ErrGuestNegative
++	}
++	return o, nil
++}
++func (n *nativeGuestNegativeRead) owns(o *guestNegativeObject) bool {
++	if o == nil || o.frame == nil || o.frame.owner != n || !o.frame.returned || o.frame.err != nil || o.frame.closeAttempted || o.frame.handle == 0 {
++		return false
++	}
++	held := false
++	for _, f := range n.frames {
++		held = held || f == o.frame
++	}
++	if !held {
++		return false
++	}
++	for _, p := range n.objects {
++		if p == o {
++			return true
++		}
++	}
++	return false
++}
++func (n *nativeGuestNegativeRead) measure(ctx context.Context, o *guestNegativeObject) error {
++	if !n.known(ctx) || !n.owns(o) {
++		return ErrGuestNegative
++	}
++	f := n.frame()
++	if f == nil {
++		return ErrGuestNegative
++	}
++	f.input = o.frame.handle
++	f.entered = true
++	information := f
++	if n.after(f, windows.GetFileInformationByHandle(f.input, &f.info)) != nil {
++		return ErrGuestNegative
++	}
++	if f.info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (f.info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != o.directory || !o.directory && f.info.NumberOfLinks != 1 {
++		return ErrGuestNegative
++	}
++	f = n.frame()
++	if f == nil {
++		return ErrGuestNegative
++	}
++	f.input = o.frame.handle
++	f.entered = true
++	if n.after(f, windows.GetFileInformationByHandleEx(f.input, windows.FileIdInfo, &f.full[0], 24)) != nil || !inspectionFullIDKnown(f.full) {
++		return ErrGuestNegative
++	}
++	full := f.full
++	f = n.frame()
++	if f == nil {
++		return ErrGuestNegative
++	}
++	f.input = o.frame.handle
++	f.entered = true
++	f.kind, f.err = windows.GetFileType(f.input)
++	f.returned = true
++	if n.after(f, f.err) != nil || f.kind != windows.FILE_TYPE_DISK {
++		return ErrGuestNegative
++	}
++	// Reuse accepted synchronous existing SD policy/normal-return allocation-copy-
++	// free contract. This is not a claim of raw allocator custody inside x/sys.
++	if o.private {
++		if verifyPrivate(o.frame.handle, n.selected.Owner(), o.directory) != nil {
++			return ErrGuestNegative
++		}
++	} else if checkReadObject(o.frame.handle, n.selected.Owner(), o.directory) != nil {
++		return ErrGuestNegative
++	}
++	f = n.frame()
++	if f == nil {
++		return ErrGuestNegative
++	}
++	f.input = o.frame.handle
++	f.entered = true
++	var e error
++	f.sd, e = windows.GetSecurityInfo(f.input, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	f.err = e
++	f.returned = true
++	if n.after(f, e) != nil {
++		return ErrGuestNegative
++	}
++	if f.sd == nil {
++		n.fence()
++		return ErrGuestNegative
++	}
++	size := f.sd.Length()
++	control, _, ce := f.sd.Control()
++	if ce != nil || control&windows.SE_SELF_RELATIVE == 0 || size < 20 || size > 65536 {
++		return ErrGuestNegative
++	}
++	descriptor := sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(f.sd)), int(size)))
++	// Actual full ID remains owned independently. Legacy projection is only the
++	// existing record wire; no ReFS/full-ID claim follows from these 3 fields.
++	info := information.info
++	id := runtimeStorageIdentity{volume: info.VolumeSerialNumber, high: info.FileIndexHigh, low: info.FileIndexLow, attributes: info.FileAttributes, links: info.NumberOfLinks, size: uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow), written: info.LastWriteTime, descriptor: descriptor}
++	if o.directory {
++		id.size = 0
++		id.written = windows.Filetime{}
++	}
++	if o.identity != (runtimeStorageIdentity{}) && (o.identity != id || o.full != full) {
++		return ErrGuestNegative
++	}
++	o.identity = id
++	o.full = full
++	return nil
++}
++func (n *nativeGuestNegativeRead) walk(ctx context.Context, path string) (*guestNegativeObject, error) {
++	volume, parts, e := readerComponents(path)
++	if e != nil || len(parts) > 40 {
++		return nil, ErrGuestNegative
++	}
++	o, e := n.open(ctx, nil, `\??\`+volume, true, false, true)
++	if e != nil {
++		return nil, e
++	}
++	for i, p := range parts {
++		o, e = n.open(ctx, o, p, true, i == len(parts)-1, i != len(parts)-1)
++		if e != nil {
++			return nil, e
++		}
++	}
++	return o, nil
++}
++func (n *nativeGuestNegativeRead) read(ctx context.Context, o *guestNegativeObject) ([]byte, error) {
++	if !n.known(ctx) || !n.owns(o) || o.directory || o.identity.size == 0 || o.identity.size > negativeguard.Budget {
++		return nil, ErrGuestNegative
++	}
++	f := n.frame()
++	if f == nil {
++		return nil, ErrGuestNegative
++	}
++	f.input = o.frame.handle
++	f.body = make([]byte, int(o.identity.size)+1)
++	f.entered = true
++	if n.after(f, windows.ReadFile(f.input, f.body, &f.count, nil)) != nil || f.count != uint32(o.identity.size) {
++		return nil, ErrGuestNegative
++	}
++	o.body = f.body[:int(f.count)]
++	if n.measure(ctx, o) != nil {
++		return nil, ErrGuestNegative
++	}
++	return o.body, nil
++}
++func (n *nativeGuestNegativeRead) list(ctx context.Context, o *guestNegativeObject, slot bool) ([]string, error) {
++	if !n.known(ctx) || !n.owns(o) || !o.directory {
++		return nil, ErrGuestNegative
++	}
++	var names []string
++	for page := 0; page < 2; page++ {
++		f := n.frame()
++		if f == nil {
++			return nil, ErrGuestNegative
++		}
++		f.input = o.frame.handle
++		f.words = make([]uint64, 8192)
++		class := uint32(windows.FileFullDirectoryInfo)
++		if page == 0 {
++			class = windows.FileFullDirectoryRestartInfo
++		}
++		f.entered = true
++		e := windows.GetFileInformationByHandleEx(f.input, class, (*byte)(unsafe.Pointer(&f.words[0])), 65536)
++		f.err = e
++		f.returned = true
++		if e == windows.ERROR_NO_MORE_FILES {
++			sort.Strings(names)
++			if !guestReadNames(names, slot) {
++				return nil, ErrGuestNegative
++			}
++			return names, nil
++		}
++		if n.after(f, e) != nil {
++			return nil, ErrGuestNegative
++		}
++		values, e := inspectionDirectoryPage(unsafe.Slice((*byte)(unsafe.Pointer(&f.words[0])), 65536))
++		if e != nil || len(names)+len(values) > 3 {
++			return nil, ErrGuestNegative
++		}
++		names = append(names, values...)
++	}
++	return nil, ErrGuestNegative
++}
++func guestNegativeFact(o *guestNegativeObject) negativeguard.Fact {
++	return negativeguard.Fact{Object: negativeguard.Object{Volume: o.identity.volume, High: o.identity.high, Low: o.identity.low}, Descriptor: o.identity.descriptor}
++}
++func guestNegativeObservation(o *guestNegativeObject) negativeguard.Observation {
++	return negativeguard.Observation{Body: o.body, File: negativeguard.Witness{Object: guestNegativeFact(o).Object, Size: uint64(len(o.body)), Written: uint64(o.identity.written.HighDateTime)<<32 | uint64(o.identity.written.LowDateTime), Descriptor: o.identity.descriptor, Body: sha256.Sum256(o.body)}}
++}
++func (n *nativeGuestNegativeRead) capture(ctx context.Context) error {
++	var e error
++	n.selection, e = authoritypath.CaptureCurrentProduct(ctx)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	n.selected, e = n.selection.Selection(ctx)
++	if e != nil || n.selected == nil {
++		return ErrGuestNegative
++	}
++	parent, e := n.walk(ctx, n.selected.Parent())
++	if e != nil {
++		return ErrGuestNegative
++	}
++	guard, e := n.open(ctx, parent, "authority.fresh.control.guest", true, true, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	names, e := n.list(ctx, guard, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	n.snapshots = append(n.snapshots, guestNegativeSnapshot{guard, names, false})
++	profile, e := n.open(ctx, guard, "profile", false, true, false)
++	if e != nil {
++		return ErrGuestNegative
++	}
++	if _, e = n.read(ctx, profile); e != nil {
++		return ErrGuestNegative
++	}
++	parsedProfile, pe := negativeguard.ParseProfile(profile.body)
++	if pe != nil || parsedProfile.Source.Private != guestNegativeFact(parent) {
++		return ErrGuestNegative
++	}
++	var slots [2]negativeguard.Slot
++	for i, name := range []string{"slot.0", "slot.1"} {
++		d, e := n.open(ctx, guard, name, true, true, false)
++		if e == windows.STATUS_OBJECT_NAME_NOT_FOUND {
++			continue
++		}
++		if e != nil {
++			return ErrGuestNegative
++		}
++		entries, e := n.list(ctx, d, true)
++		if e != nil {
++			return ErrGuestNegative
++		}
++		n.snapshots = append(n.snapshots, guestNegativeSnapshot{d, entries, true})
++		for _, entry := range entries {
++			file, e := n.open(ctx, d, entry, false, true, false)
++			if e != nil {
++				return ErrGuestNegative
++			}
++			if _, e = n.read(ctx, file); e != nil {
++				return ErrGuestNegative
++			}
++			if entry == "pending" {
++				slots[i].Pending = guestNegativeObservation(file)
++			} else {
++				slots[i].Complete = guestNegativeObservation(file)
++			}
++		}
++	}
++	if negativeguard.History(guestNegativeObservation(profile), guestNegativeFact(guard), slots) != negativeguard.CompletedShape {
++		return ErrGuestNegative
++	}
++	for _, o := range n.objects {
++		if n.measure(ctx, o) != nil {
++			return ErrGuestNegative
++		}
++	}
++	for _, s := range n.snapshots {
++		now, e := n.list(ctx, s.object, s.slot)
++		if e != nil || !equalGuestNames(now, s.names) {
++			return ErrGuestNegative
++		}
++	}
++	selectedAgain, se := n.selection.Selection(ctx)
++	if se != nil || !selectedAgain.Same(n.selected) || ctx.Err() != nil {
++		return ErrGuestNegative
++	}
++	return nil
++}
++func equalGuestNames(a, b []string) bool {
++	return bytes.Equal([]byte(strings.Join(a, "\x00")), []byte(strings.Join(b, "\x00")))
++}
++func (n *nativeGuestNegativeRead) close() (result error) {
++	if n.closed {
++		return n.closeErr
++	}
++	if !n.original() || n.closing {
++		return ErrGuestNegative
++	}
++	n.closing = true
++	n.closeErr = ErrGuestNegative
++	defer func() {
++		if recover() != nil {
++			n.fence()
++			result = ErrGuestNegative
++		}
++	}()
++	for _, f := range n.frames {
++		if f.entered && !f.returned {
++			n.fence()
++			return ErrGuestNegative
++		}
++	}
++	if n.selection != nil && n.selection.KnownForReadOnlyInspection() != nil {
++		n.fence()
++		return ErrGuestNegative
++	}
++	for i := len(n.frames) - 1; i >= 0; i-- {
++		f := n.frames[i]
++		if f.handle == 0 {
++			continue
++		}
++		if f.closeAttempted {
++			n.fence()
++			return ErrGuestNegative
++		}
++		f.closeAttempted = true
++		f.raw, _, f.err = guestNegativeClose.Call(uintptr(f.handle))
++		f.closeReturned = true
++		if uint32(f.raw) == 0 {
++			n.fence()
++			return ErrGuestNegative
++		}
++		f.handle = 0
++	}
++	if n.selection != nil && n.selection.Close() != nil {
++		n.fence()
++		return ErrGuestNegative
++	}
++	n.closed = true
++	n.closeErr = nil
++	guestNegativeReads.Lock()
++	delete(guestNegativeReads.owners, n)
++	guestNegativeReads.Unlock()
++	return nil
++}
++
++// Before-options negative cut ONLY. Missing producer/profile/pending refuses.
++// Native unknown never returns to an os.Exit caller; exact owner stays live.
++func RequireGuestNegativeBeforeOptions(ctx context.Context) (failure error) {
++	if runtime.GOARCH != "amd64" || !freshBoundedContext(ctx) {
++		guestNegativeWaitForKnownExit()
++		return ErrGuestNegative
++	}
++	n := &nativeGuestNegativeRead{}
++	n.self = n
++	guestNegativeReads.Lock()
++	if guestNegativeReads.failed || len(guestNegativeReads.owners) >= 16 {
++		guestNegativeReads.Unlock()
++		guestNegativeWaitForKnownExit()
++		return ErrGuestNegative
++	}
++	guestNegativeReads.owners[n] = true
++	guestNegativeReads.Unlock()
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	defer runtime.KeepAlive(n)
++	defer func() {
++		if recover() != nil {
++			n.fence()
++			failure = ErrGuestNegative
++		}
++		if n.close() != nil {
++			n.fence()
++		}
++		guestNegativeWaitForKnownExit()
++	}()
++	return n.capture(ctx)
++}
++
++// Read consistency cannot mint the original same-process pending producer or
++// inherited schema2 endpoint. Refuse mutable entry until its real factory exists.
++func RequireGuestMutationBeforeOptions(ctx context.Context) error {
++	if RequireGuestNegativeBeforeOptions(ctx) != nil {
++		return ErrGuestNegative
++	}
++	return requireGuestNegativeOriginalProducer()
++}
++
++// Cached conjunction only; never query/retry/close from keeper. A live normal
++// concurrent reader may positively settle; any sticky domain failure cannot.
++func guestNegativeWaitForKnownExit() {
++	for {
++		guestNegativeReads.Lock()
++		known := !guestNegativeReads.failed && len(guestNegativeReads.owners) == 0
++		guestNegativeReads.Unlock()
++		if known && authoritypath.ProductSelectionExitKnown() {
++			return
++		}
++		time.Sleep(time.Second)
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_guard_reader_windows_test.go
+@@ -0,0 +1,24 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"testing"
++)
++
++// Actual negative guards compile only in this packet. No native test execution.
++func TestGuestNegativeActualOriginalGuardsBeforeNative(t *testing.T) {
++	if (&nativeGuestNegativeRead{}).original() {
++		t.Fatal("unregistered")
++	}
++	if (&nativeGuestNegativeRead{}).owns(&guestNegativeObject{}) {
++		t.Fatal("forged object")
++	}
++	if RequireGuestNegativeBeforeOptions(nil) == nil {
++		t.Fatal("nil context")
++	}
++	if (*ManagedRuntimeAuthority)(nil).RequireGuestNegativeBeforeControllers(context.Background()) == nil {
++		t.Fatal("nil authority")
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_archive_windows.go
+@@ -0,0 +1,228 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"hash"
++	"io"
++	"runtime"
++	"strings"
++	"unsafe"
++
++	"github.com/rancher-sandbox/rancher-desktop-daemon/pkg/xz"
++	"golang.org/x/sys/windows"
++)
++
++var initialGuestSetInformation = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetInformationFile")
++
++type initialGuestArchiveWriter struct {
++	scope    *nativeInitialGuestScope
++	ctx      context.Context
++	resource *runtimeStorageResource
++	hash     hash.Hash
++}
++
++func (w *initialGuestArchiveWriter) Write(body []byte) (int, error) {
++	s := w.scope
++	if len(body) == 0 {
++		return 0, nil
++	}
++	if !s.originalHeld() || !freshBoundedContext(w.ctx) || !s.stream.begin(len(body)) {
++		return 0, ErrInitialGuestScope
++	}
++	total := 0
++	for total < len(body) {
++		if !freshBoundedContext(w.ctx) {
++			s.stream.settle(total, true)
++			e := w.ctx.Err()
++			if e == nil {
++				e = ErrInitialGuestScope
++			}
++			return total, e
++		}
++		size := initialGuestNativeChunk(uint64(len(body) - total))
++		// io.Writer p is BORROWED, including after an error return. Publish an
++		// independent scope-owned copy BEFORE native storage retains its slice.
++		owned, ok := s.writeCell.copyInput(body[total : total+size])
++		if !ok {
++			s.stream.settle(total, false)
++			return total, s.fail()
++		}
++		count, e := s.owner.storage.transferStorage(w.resource, owned, true)
++		if e != nil || count != uint32(len(owned)) {
++			s.writeCell.settle(false)
++			s.stream.settle(total, false)
++			if count <= uint32(len(owned)) {
++				total += int(count)
++			}
++			return total, s.fail()
++		}
++		// Only positively completed COPIED bytes contribute to the digest.
++		w.hash.Write(owned)
++		if !s.writeCell.settle(true) {
++			s.stream.settle(total, false)
++			return total, s.fail()
++		}
++		total += int(count)
++	}
++	if !s.stream.settle(total, true) {
++		return total, s.fail()
++	}
++	return total, nil
++}
++func (s *nativeInitialGuestScope) linkBasedisk(ctx context.Context, image *runtimeStorageObject) error {
++	if !s.originalHeld() || !freshBoundedContext(ctx) || image == nil || len(s.directories) != 4 {
++		return ErrInitialGuestScope
++	}
++	f := s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	// RootDirectory=NULL selects the SAME original source file's parent;
++	// fixed sibling basedisk only, no Replace/DELETE/other-file role.
++	record := initialGuestLinkRecord()
++	length := len(record)
++	f.words = make([]uint64, (length+7)/8)
++	copy(unsafe.Slice((*byte)(unsafe.Pointer(&f.words[0])), len(f.words)*8), record)
++	if !freshBoundedContext(ctx) {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.raw, _, _ = initialGuestSetInformation.Call(uintptr(image.resource.handle), uintptr(unsafe.Pointer(&f.io)), uintptr(unsafe.Pointer(&f.words[0])), uintptr(length), 11)
++	f.returned = true
++	if uint32(f.raw) == 0x103 {
++		return s.fail()
++	}
++	known, success := initialGuestLinkReply(f.raw, uintptr(f.io.Status), f.io.Information)
++	if !known {
++		return s.fail()
++	}
++	if !success {
++		return ErrInitialGuestScope
++	}
++	s.archiveLinked = true
++	return nil
++}
++func (i *InitialGuestCreationScope) StageInitialImport(ctx context.Context) (result error) {
++	s, e := i.exact()
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	unlock, e := s.lockSource(ctx)
++	if e != nil {
++		return e
++	}
++	defer unlock()
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	if !s.captured || s.stageEntered || s.prepared || s.command != nil {
++		return ErrInitialGuestScope
++	}
++	s.stageEntered = true
++	defer func() {
++		if recover() != nil {
++			result = s.fail()
++		}
++		if result != nil && s.owner.storage.unknown {
++			s.fail()
++		}
++	}()
++	if s.owner.storage.check() != nil || s.proveNegativeGuard(ctx) != nil || s.owner.checkLegacyStartDenialLocked(ctx) != nil || s.captureRegistration(ctx, false) != nil {
++		return ErrInitialGuestScope
++	}
++	n := s.owner.storage
++	// A same-ID write lease flushes namespace changes; no new parent grant.
++	home, e := s.openFile(ctx, n.parent, "home", true, false, windows.GENERIC_WRITE|windows.FILE_TRAVERSE, 0)
++	if e != nil || home.identity != s.directories[0].identity || s.fullIDs[home.resource] != s.fullIDs[s.directories[0].resource] {
++		return ErrInitialGuestScope
++	}
++	parent := home
++	for _, name := range []string{".rdorbwin", "lima", "orbwin"} {
++		child, e := s.openFile(ctx, parent, name, true, true, windows.GENERIC_WRITE|windows.FILE_TRAVERSE, 0)
++		if e != nil {
++			return ErrInitialGuestScope
++		}
++		s.directories = append(s.directories, child)
++		if n.flushStorage(parent.resource) != nil {
++			return ErrInitialGuestScope
++		}
++		parent = child
++	}
++	writer, e := s.openFile(ctx, parent, "image", false, true, windows.FILE_READ_DATA|windows.FILE_WRITE_DATA|windows.FILE_WRITE_ATTRIBUTES, 1)
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	// Existing pure reader API only. Never call its path/temp/rename helper.
++	w := &initialGuestArchiveWriter{scope: s, ctx: ctx, resource: writer.resource, hash: sha256.New()}
++	if xz.Decompress(ctx, strings.NewReader(s.guard.archive), w) != nil || s.stream.bytes == 0 || s.stream.busy || s.stream.unknown {
++		return ErrInitialGuestScope
++	}
++	copy(s.archiveHash[:], w.hash.Sum(nil))
++	if n.flushStorage(writer.resource) != nil || s.linkBasedisk(ctx, writer) != nil || n.flushStorage(parent.resource) != nil {
++		return ErrInitialGuestScope
++	}
++	expected, e := s.measure(writer.resource, false, true, 2)
++	if e != nil || expected.identity.size != s.stream.bytes {
++		return ErrInitialGuestScope
++	}
++	if n.closeTemporary(writer.resource) != nil {
++		return s.fail()
++	}
++	s.image, e = s.openFile(ctx, parent, "image", false, false, windows.FILE_READ_DATA, 2)
++	if e != nil || !runtimeStorageCreatedSame(s.image.identity, expected.identity) || s.fullIDs[s.image.resource] != s.fullIDs[writer.resource] {
++		return ErrInitialGuestScope
++	}
++	s.basedisk, e = s.openFile(ctx, parent, "basedisk", false, false, windows.FILE_READ_DATA, 2)
++	if e != nil || s.basedisk.identity != s.image.identity || s.fullIDs[s.basedisk.resource] != s.fullIDs[s.image.resource] {
++		return ErrInitialGuestScope
++	}
++	if s.checkArchive(ctx) != nil || n.flushStorage(parent.resource) != nil || n.closeTemporary(home.resource) != nil || !freshBoundedContext(ctx) {
++		return ErrInitialGuestScope
++	}
++	s.prepared = true
++	return nil
++}
++func (s *nativeInitialGuestScope) checkArchive(ctx context.Context) error {
++	if s.image == nil || s.basedisk == nil || !s.originalHeld() {
++		return ErrInitialGuestScope
++	}
++	for _, o := range []*runtimeStorageObject{s.image, s.basedisk} {
++		measured, e := s.measure(o.resource, false, true, 2)
++		if e != nil || measured.identity != o.identity {
++			return ErrInitialGuestScope
++		}
++	}
++	if s.fullIDs[s.image.resource] != s.fullIDs[s.basedisk.resource] {
++		return ErrInitialGuestScope
++	}
++	if _, e := windows.SetFilePointer(s.basedisk.resource.handle, 0, nil, windows.FILE_BEGIN); e != nil {
++		return ErrInitialGuestScope
++	}
++	h := sha256.New()
++	buffer := make([]byte, initialGuestNativeChunkBudget)
++	var total uint64
++	for total < s.basedisk.identity.size {
++		if !freshBoundedContext(ctx) {
++			return ErrInitialGuestScope
++		}
++		remaining := s.basedisk.identity.size - total
++		chunk := buffer[:initialGuestNativeChunk(remaining)]
++		count, e := s.owner.storage.transferStorage(s.basedisk.resource, chunk, false)
++		if e != nil || count == 0 || count > uint32(len(chunk)) {
++			return ErrInitialGuestScope
++		}
++		h.Write(chunk[:count])
++		total += uint64(count)
++	}
++	extra := make([]byte, 1)
++	count, e := s.owner.storage.transferStorage(s.basedisk.resource, extra, false)
++	if count != 0 || e != nil && e != windows.ERROR_HANDLE_EOF || !bytes.Equal(h.Sum(nil), s.archiveHash[:]) {
++		return ErrInitialGuestScope
++	}
++	return nil
++}
++
++var _ io.Writer = (*initialGuestArchiveWriter)(nil)
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_command_windows.go
+@@ -0,0 +1,252 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"os"
++	"os/exec"
++	"runtime"
++	"strings"
++	"syscall"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++type initialGuestCommand struct {
++	scope                                                *nativeInitialGuestScope
++	cmd                                                  *exec.Cmd
++	original                                             *os.Process
++	state                                                initialGuestCommandState
++	output                                               initialGuestOutput
++	input                                                *bytes.Reader
++	done                                                 chan struct{}
++	result                                               error
++	process                                              windows.Handle // genuine WithHandle-source duplicate; sole native closer below
++	duplicateRaw, mappingRaw, waitRaw, exitRaw, closeRaw uintptr
++	lastError                                            error
++	mappingFile                                          windows.Handle // borrowed class44 in/out word, never a closer
++	mappingLength, exitCode                              uint32
++	closeAttempted                                       bool
++}
++
++var initialGuestDuplicate = windows.NewLazySystemDLL("kernel32.dll").NewProc("DuplicateHandle")
++var initialGuestProcessQuery = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQueryInformationProcess")
++var initialGuestWait = windows.NewLazySystemDLL("kernel32.dll").NewProc("WaitForSingleObject")
++var initialGuestExit = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetExitCodeProcess")
++var initialGuestProcessClose = windows.NewLazySystemDLL("kernel32.dll").NewProc("CloseHandle")
++
++func (i *InitialGuestCreationScope) ImportInitial(ctx context.Context) (result error) {
++	s, e := i.exact()
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	unlock, e := s.lockSource(ctx)
++	if e != nil {
++		return e
++	}
++	runtime.LockOSThread()
++	threadHeld := true
++	defer func() {
++		if threadHeld {
++			runtime.UnlockOSThread()
++		}
++	}()
++	sourceHeld := true
++	defer func() {
++		if sourceHeld {
++			unlock()
++		}
++		if recover() != nil {
++			result = s.fail()
++		}
++	}()
++	if !s.captured || !s.prepared || s.command != nil || s.importObserved {
++		return ErrInitialGuestScope
++	}
++	c := &initialGuestCommand{scope: s, done: make(chan struct{}), result: ErrInitialGuestScope, input: bytes.NewReader(nil)}
++	args := initialGuestImportArgs(s.instancePath)
++	if args == nil {
++		return ErrInitialGuestScope
++	}
++	systemRoot := s.systemDirectory[:strings.LastIndex(s.systemDirectory, `\`)]
++	c.cmd = &exec.Cmd{Path: s.toolPath, Args: append([]string{s.toolPath}, args...), Dir: s.instancePath, Env: []string{"SystemRoot=" + systemRoot, "WINDIR=" + systemRoot}, Stdin: c.input, Stdout: &c.output, Stderr: &c.output, SysProcAttr: &syscall.SysProcAttr{HideWindow: true}}
++	s.command = c // Original Cmd/input/stdio/result BEFORE native preflight.
++	preflight := func() error {
++		if s.owner.storage.check() != nil || s.proveOriginalSource() != nil || s.proveNegativeGuard(ctx) != nil || s.checkArchive(ctx) != nil || s.captureRegistration(ctx, false) != nil {
++			return ErrInitialGuestScope
++		}
++		_, e := s.openFile(ctx, s.directories[3], "ext4.vhdx", false, false, windows.FILE_READ_ATTRIBUTES, 1)
++		if e != windows.STATUS_OBJECT_NAME_NOT_FOUND {
++			return ErrInitialGuestScope
++		}
++		if s.checkSystemAncestors(ctx) != nil {
++			return ErrInitialGuestScope
++		}
++		tool, e := s.measure(s.tool.resource, false, false, 0)
++		if e != nil || tool.identity != s.tool.identity || !freshBoundedContext(ctx) {
++			return ErrInitialGuestScope
++		}
++		return nil
++	}
++	if e = preflight(); e != nil {
++		c.state.failed = true
++		return ErrInitialGuestScope
++	}
++	sourceHeld = false
++	unlock()
++	// No ancestor lock crosses Start/WithHandle/Wait. Parent closers check a
++	// cached negative barrier without taking this mutex or joining workers.
++	s.mu.Lock()
++	held := true
++	defer func() {
++		if held {
++			s.mu.Unlock()
++		}
++		if recover() != nil {
++			s.fail()
++			result = ErrInitialGuestScope
++		}
++	}()
++	if s.closed.Load() || s.unknown.Load() || !runtimeStorageDomainKnown() || !freshBoundedContext(ctx) || s.command != c || c.cmd.Process != nil || c.cmd.Cancel != nil || c.cmd.WaitDelay != 0 || !c.state.begin() {
++		c.state.failed = true
++		return ErrInitialGuestScope
++	}
++	s.importEntered.Store(true) // loss of never-started cleanup BEFORE actual Start
++	startErr := c.cmd.Start()   // accepted pinned Go normal-return/managed-stdio profile
++	if !c.state.started(startErr == nil, startErr == nil) || c.cmd.Process == nil {
++		return s.fail()
++	}
++	c.original = c.cmd.Process // exact actual returned object; never reconstructed by PID
++	withErr := c.original.WithHandle(func(source uintptr) {
++		// QUERY_INFORMATION supports the existing qualified live class44
++		// mapping binding; SYNCHRONIZE supports original terminal observation.
++		c.duplicateRaw, _, c.lastError = initialGuestDuplicate.Call(uintptr(windows.CurrentProcess()), source, uintptr(windows.CurrentProcess()), uintptr(unsafe.Pointer(&c.process)), windows.PROCESS_QUERY_INFORMATION|windows.SYNCHRONIZE, 0, 0)
++	})
++	if withErr != nil || uint32(c.duplicateRaw) == 0 || c.process == 0 || c.process == windows.InvalidHandle || !c.state.capture(true) {
++		return s.fail()
++	}
++	c.mappingFile = s.tool.resource.handle
++	c.mappingRaw, _, _ = initialGuestProcessQuery.Call(uintptr(c.process), 44, uintptr(unsafe.Pointer(&c.mappingFile)), unsafe.Sizeof(c.mappingFile), uintptr(unsafe.Pointer(&c.mappingLength)))
++	// Pending/failed NTSTATUS is tested BEFORE any possibly pending out word.
++	if uint32(c.mappingRaw) != 0 {
++		return s.fail()
++	}
++	if c.mappingFile != s.tool.resource.handle {
++		return s.fail()
++	}
++	if !c.state.beginWait() {
++		return s.fail()
++	}
++	held = false
++	s.mu.Unlock()
++	threadHeld = false
++	runtime.UnlockOSThread()
++	go c.waitOriginal()
++	return i.AwaitInitialImport(ctx)
++}
++func (c *initialGuestCommand) waitOriginal() {
++	s := c.scope
++	defer func() {
++		if recover() != nil {
++			s.fail()
++		}
++		runtime.KeepAlive(c)
++		runtime.KeepAlive(s)
++	}()
++	e := c.cmd.Wait() // sole original waiter; normal managed IO workers join here
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.command != c || c.original == nil || c.cmd.Process != c.original || c.cmd.ProcessState == nil {
++		c.state.waited(false, false)
++		s.fail()
++		return
++	}
++	positive := c.state.waited(true, e == nil && c.cmd.ProcessState.ExitCode() == 0)
++	c.result = ErrInitialGuestScope
++	if positive {
++		c.waitRaw, _, c.lastError = initialGuestWait.Call(uintptr(c.process), 0)
++		if uint32(c.waitRaw) != uint32(windows.WAIT_OBJECT_0) {
++			s.fail()
++			return
++		}
++		c.exitRaw, _, c.lastError = initialGuestExit.Call(uintptr(c.process), uintptr(unsafe.Pointer(&c.exitCode)))
++		if uint32(c.exitRaw) == 0 || c.exitCode != 0 {
++			s.fail()
++			return
++		}
++		c.result = nil
++	}
++	close(c.done)
++}
++func (i *InitialGuestCreationScope) AwaitInitialImport(ctx context.Context) (result error) {
++	s, e := i.exact()
++	if e != nil || !freshBoundedContext(ctx) {
++		return ErrInitialGuestScope
++	}
++	s.mu.Lock()
++	c := s.command
++	if c == nil || !c.state.waitEntered || s.unknown.Load() {
++		s.mu.Unlock()
++		return ErrInitialGuestScope
++	}
++	done := c.done
++	s.mu.Unlock()
++	select {
++	case <-done:
++	case <-ctx.Done():
++		return ctx.Err()
++	}
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	unlock, e := s.lockSource(ctx)
++	if e != nil {
++		return e
++	}
++	defer unlock()
++	if s.command != c || c.result != nil || !c.state.settled() {
++		return ErrInitialGuestScope
++	}
++	if s.proofAttempted {
++		return s.proofErr
++	}
++	s.proofAttempted = true
++	s.proofErr = ErrInitialGuestScope
++	defer func() {
++		if recover() != nil {
++			result = s.fail()
++		}
++	}()
++	// CLI0 is insufficient. Only this SAME original creation operation binds
++	// its registration/disk. No adoption or retry after an import error exists.
++	if s.owner.storage.check() != nil || s.proveNegativeGuard(ctx) != nil || s.captureRegistration(ctx, true) != nil {
++		return ErrInitialGuestScope
++	}
++	s.disk, e = s.openFile(ctx, s.directories[3], "ext4.vhdx", false, false, windows.FILE_READ_ATTRIBUTES, 1)
++	if e != nil || s.disk.identity.size == 0 || !freshBoundedContext(ctx) {
++		return ErrInitialGuestScope
++	}
++	s.importObserved = true
++	s.proofErr = nil
++	return nil // observation, not guest/writer/checkpoint admission
++}
++func (c *initialGuestCommand) closeProcess() error {
++	if c.process == 0 {
++		if c.state.entered && !c.state.settled() {
++			return ErrInitialGuestScope
++		}
++		return nil
++	}
++	if c.closeAttempted || !c.state.settled() {
++		return ErrInitialGuestScope
++	}
++	c.closeAttempted = true
++	c.closeRaw, _, c.lastError = initialGuestProcessClose.Call(uintptr(c.process))
++	if uint32(c.closeRaw) == 0 {
++		return ErrInitialGuestScope
++	}
++	c.process = 0
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_model.go
+@@ -0,0 +1,275 @@
++package managementconfig
++
++import (
++	"encoding/binary"
++	"errors"
++	"strconv"
++	"strings"
++	"sync"
++)
++
++var ErrInitialGuestScope = errors.New("initial guest source unavailable or incomplete; preserved state requires scoped recovery")
++
++const initialGuestArchiveMaximum uint64 = 64 << 30
++const initialGuestOutputBudget = 4096
++
++// Locator DATA only; the actual caller uses retained GetSystemDirectoryW output.
++func initialGuestSystemComponents(path string) (string, []string, bool) {
++	if len(path) < 4 || len(path) > 1024 || path[1] != ':' || path[2] != '\\' || !((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) || strings.ContainsAny(path[2:], ":/\x00") {
++		return "", nil, false
++	}
++	parts := strings.Split(path[3:], `\`)
++	if len(parts) < 2 || len(parts) > 32 || !strings.EqualFold(parts[len(parts)-1], "System32") {
++		return "", nil, false
++	}
++	for _, part := range parts {
++		if part == "" || part == "." || part == ".." || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") || strings.ContainsAny(part, `<>"|?*`) {
++			return "", nil, false
++		}
++	}
++	return path[:3], parts, true
++}
++
++// Negative cache only. Local native settlement cannot certify guest absence.
++func initialGuestParentRelease(closed, originalImportEntered bool) bool {
++	return closed && !originalImportEntered
++}
++
++// DATA recipe, never permission. Only the native scope supplies its original
++// instance path to this private fixed-role constructor.
++func initialGuestImportArgs(instance string) []string {
++	if len(instance) < 4 || len(instance) > 900 || instance[1] != ':' || instance[2] != '\\' || strings.ContainsAny(instance[2:], ":/\x00") {
++		return nil
++	}
++	parts := strings.Split(instance[3:], `\`)
++	for _, p := range parts {
++		if p == "" || p == "." || p == ".." {
++			return nil
++		}
++	}
++	if len(parts) < 3 || parts[len(parts)-3] != ".rdorbwin" || parts[len(parts)-2] != "lima" || parts[len(parts)-1] != "orbwin" {
++		return nil
++	}
++	return []string{"--import", "lima-orbwin", instance, instance + `\basedisk`, "--version", "2"}
++}
++func initialGuestSIDBytes(value string) ([]byte, bool) {
++	p := strings.Split(value, "-")
++	if len(p) < 4 || len(p) > 18 || p[0] != "S" || p[1] != "1" {
++		return nil, false
++	}
++	authority, e := strconv.ParseUint(p[2], 10, 48)
++	if e != nil || strconv.FormatUint(authority, 10) != p[2] {
++		return nil, false
++	}
++	b := make([]byte, 8+4*(len(p)-3))
++	b[0] = 1
++	b[1] = byte(len(p) - 3)
++	for i := 0; i < 6; i++ {
++		b[7-i] = byte(authority)
++		authority >>= 8
++	}
++	for i, s := range p[3:] {
++		n, e := strconv.ParseUint(s, 10, 32)
++		if e != nil || strconv.FormatUint(n, 10) != s {
++			return nil, false
++		}
++		for j := 0; j < 4; j++ {
++			b[8+4*i+j] = byte(n)
++			n >>= 8
++		}
++	}
++	return b, true
++}
++
++type initialGuestCommandState struct{ entered, returned, captured, waitEntered, waitReturned, failed, unknown bool }
++
++func (s *initialGuestCommandState) begin() bool {
++	if s.entered || s.failed || s.unknown {
++		return false
++	}
++	s.entered = true
++	return true
++}
++func (s *initialGuestCommandState) started(known, success bool) bool {
++	if !s.entered || s.returned || s.unknown {
++		return false
++	}
++	s.returned = true
++	if !known {
++		s.unknown = true
++		s.failed = true
++		return false
++	}
++	if !success {
++		s.failed = true
++		return false
++	}
++	return true
++}
++func (s *initialGuestCommandState) capture(known bool) bool {
++	if !s.returned || s.failed || s.unknown || s.captured {
++		return false
++	}
++	if !known {
++		s.unknown = true
++		s.failed = true
++		return false
++	}
++	s.captured = true
++	return true
++}
++func (s *initialGuestCommandState) beginWait() bool {
++	if !s.captured || s.waitEntered || s.unknown {
++		return false
++	}
++	s.waitEntered = true
++	return true
++}
++func (s *initialGuestCommandState) waited(known, success bool) bool {
++	if !s.waitEntered || s.waitReturned {
++		return false
++	}
++	s.waitReturned = true
++	if !known {
++		s.unknown = true
++	}
++	if !known || !success {
++		s.failed = true
++		return false
++	}
++	return !s.unknown && !s.failed
++}
++func (s *initialGuestCommandState) settled() bool {
++	return !s.unknown && (!s.entered && s.failed || s.waitReturned)
++}
++
++// Only live bytes are bounded; no lifetime frame/chunk counter or restart cap.
++type initialGuestStreamState struct {
++	bytes         uint64
++	request       int
++	busy, unknown bool
++}
++
++func (s *initialGuestStreamState) begin(n int) bool {
++	if s.busy || s.unknown || n < 0 || s.bytes > initialGuestArchiveMaximum || uint64(n) > initialGuestArchiveMaximum-s.bytes {
++		return false
++	}
++	s.busy = true
++	s.request = n
++	return true
++}
++func (s *initialGuestStreamState) settle(n int, known bool) bool {
++	if !s.busy || s.unknown {
++		return false
++	}
++	if !known || n < 0 || n > s.request {
++		s.unknown = true
++		return false
++	}
++	s.busy = false
++	s.bytes += uint64(n)
++	return true
++}
++
++type initialGuestOutput struct {
++	mu   sync.Mutex
++	tail []byte
++}
++
++func (b *initialGuestOutput) Write(p []byte) (int, error) {
++	b.mu.Lock()
++	defer b.mu.Unlock()
++	n := len(p)
++	if n >= initialGuestOutputBudget {
++		b.tail = append(b.tail[:0], p[n-initialGuestOutputBudget:]...)
++	} else {
++		extra := len(b.tail) + n - initialGuestOutputBudget
++		if extra > 0 {
++			copy(b.tail, b.tail[extra:])
++			b.tail = b.tail[:len(b.tail)-extra]
++		}
++		b.tail = append(b.tail, p...)
++	}
++	return n, nil
++}
++
++// Fixed FILE_LINK_INFORMATION DATA. Native owner copies into aligned retained
++// words before entry. No caller name/flags/parent or ReplaceIfExists input.
++func initialGuestLinkRecord() []byte {
++	name := "basedisk"
++	b := make([]byte, 20+2*len(name))
++	binary.LittleEndian.PutUint32(b[16:20], uint32(2*len(name)))
++	for j, u := range []byte(name) {
++		binary.LittleEndian.PutUint16(b[20+2*j:], uint16(u))
++	}
++	return b
++}
++func initialGuestLinkReply(raw, status, information uintptr) (known, success bool) {
++	if uint32(raw) == 0x103 || uint32(status) == 0x103 {
++		return false, false
++	}
++	return true, uint32(raw) == 0 && uint32(status) == 0 && information == 0
++}
++func initialGuestRegistryReply(raw uintptr) (uint32, bool) { return uint32(raw), uint32(raw) == 997 }
++
++// Match the existing native storage16KiB per-call budget; the Windows compile
++// guard asserts equality. This bounds a reusable cell, not archive lifetime.
++const initialGuestNativeChunkBudget = 16 << 10
++
++func initialGuestNativeChunk(remaining uint64) int {
++	if remaining > initialGuestNativeChunkBudget {
++		return initialGuestNativeChunkBudget
++	}
++	return int(remaining)
++}
++
++type initialGuestOwnedWriteCell struct {
++	data          []byte
++	busy, unknown bool
++}
++
++func (c *initialGuestOwnedWriteCell) copyInput(borrowed []byte) ([]byte, bool) {
++	if c.busy || c.unknown || len(borrowed) == 0 || len(borrowed) > initialGuestNativeChunkBudget {
++		return nil, false
++	}
++	if cap(c.data) < len(borrowed) {
++		c.data = make([]byte, len(borrowed))
++	} else {
++		c.data = c.data[:len(borrowed)]
++	}
++	copy(c.data, borrowed)
++	c.busy = true
++	return c.data, true
++}
++func (c *initialGuestOwnedWriteCell) settle(positive bool) bool {
++	if !c.busy || c.unknown {
++		return false
++	}
++	if !positive {
++		c.unknown = true
++		return false
++	}
++	c.busy = false
++	return true
++}
++
++type initialGuestFileLinkRole uint8
++
++const (
++	initialGuestPrivateSingleLink initialGuestFileLinkRole = iota + 1
++	initialGuestOriginalArchivePair
++	initialGuestActualSystemCode
++)
++
++func initialGuestLinksAllowed(role initialGuestFileLinkRole, count uint32) bool {
++	switch role {
++	case initialGuestPrivateSingleLink:
++		return count == 1
++	case initialGuestOriginalArchivePair:
++		return count == 2
++	case initialGuestActualSystemCode:
++		return count > 0
++	default:
++		return false
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_model_test.go
+@@ -0,0 +1,320 @@
++package managementconfig
++
++import (
++	"bytes"
++	"encoding/binary"
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"path/filepath"
++	"reflect"
++	"runtime"
++	"strings"
++	"testing"
++)
++
++func TestInitialGuestActualSystemDirectoryLocatorBounds(t *testing.T) {
++	for _, p := range []string{`C:\Windows\System32`, `D:\OS Root\Windows\sYsTeM32`} {
++		v, parts, ok := initialGuestSystemComponents(p)
++		if !ok || v+strings.Join(parts, `\`) != p {
++			t.Fatalf("valid actual locator %q", p)
++		}
++	}
++	for _, p := range []string{"", `C:\System32`, `C:\Windows\SysWOW64`, `relative\System32`, `\\server\Windows\System32`, `\\?\C:\Windows\System32`, `C:\Windows\..\System32`, `C:\Windows\\System32`, `C:\Windows.\System32`, `C:\Windows\System32\`, `C:\Windows:stream\System32`, `C:/Windows/System32`, "C:\\Windows\\System32\x00", `C:\` + strings.Repeat(`x\`, 33) + `System32`} {
++		if _, _, ok := initialGuestSystemComponents(p); ok {
++			t.Fatalf("unsafe locator %q", p)
++		}
++	}
++}
++
++// Read source only: regression catches the original unreachable private-only
++// walker even though no actual API/native fixture runs in this test program.
++func TestInitialGuestSystemCaptureUsesClosedOwnedWalker(t *testing.T) {
++	_, source, _, ok := runtime.Caller(0)
++	if !ok {
++		t.Fatal("source location unavailable")
++	}
++	parse := func(name string) *ast.File {
++		f, e := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(source), name), nil, 0)
++		if e != nil {
++			t.Fatal(e)
++		}
++		return f
++	}
++	var capture, walk, volumeOpen, relativeOpen, reply, keep, precheck bool
++	for _, file := range []string{"runtime_guest_initial_scope_windows.go", "runtime_guest_initial_system_windows.go", "runtime_guest_initial_command_windows.go"} {
++		f := parse(file)
++		for _, decl := range f.Decls {
++			fn, ok := decl.(*ast.FuncDecl)
++			if !ok || fn.Body == nil {
++				continue
++			}
++			ast.Inspect(fn.Body, func(node ast.Node) bool {
++				call, ok := node.(*ast.CallExpr)
++				if !ok {
++					return true
++				}
++				sel, ok := call.Fun.(*ast.SelectorExpr)
++				if !ok {
++					return true
++				}
++				if fn.Name.Name == "captureSystemWSL" {
++					if sel.Sel.Name == "walk" {
++						walk = true
++					}
++					if sel.Sel.Name == "captureSystemAncestors" {
++						capture = true
++					}
++				}
++				if fn.Name.Name == "captureSystemAncestors" {
++					if sel.Sel.Name == "walk" {
++						walk = true
++					}
++					if sel.Sel.Name == "open" {
++						relativeOpen = true
++					}
++					if sel.Sel.Name == "nativeOpenReply" {
++						reply = true
++					}
++					if sel.Sel.Name == "keep" {
++						keep = true
++					}
++					if x, ok := sel.X.(*ast.Ident); ok && x.Name == "runtimeStorageCreateFile" && sel.Sel.Name == "Call" {
++						volumeOpen = true
++					}
++				}
++				if sel.Sel.Name == "checkSystemAncestors" {
++					precheck = true
++				}
++				return true
++			})
++		}
++	}
++	if walk || !capture || !volumeOpen || !relativeOpen || !reply || !keep || !precheck {
++		t.Fatalf("closed capture route missing: %v %v %v %v %v %v %v", walk, capture, volumeOpen, relativeOpen, reply, keep, precheck)
++	}
++}
++
++func TestInitialImportHasOnlyOneFixedTargetAndVersion2(t *testing.T) {
++	p := `C:\Owned\.rdorbwin\lima\orbwin`
++	want := []string{"--import", "lima-orbwin", p, p + `\basedisk`, "--version", "2"}
++	if !reflect.DeepEqual(initialGuestImportArgs(p), want) {
++		t.Fatal("recipe")
++	}
++	for _, bad := range []string{`C:\Owned\.rdother\lima\orbwin`, `C:\Owned\.rdorbwin\lima\other`, `C:\..\.rdorbwin\lima\orbwin`, `relative`} {
++		if initialGuestImportArgs(bad) != nil {
++			t.Fatal("foreign role", bad)
++		}
++	}
++}
++func TestInitialStartUnknownCannotWaitRetryOrSettlePositive(t *testing.T) {
++	var s initialGuestCommandState
++	if !s.begin() || s.started(false, false) || s.begin() || s.capture(true) || s.beginWait() || s.settled() {
++		t.Fatal("ambiguous birth adopted")
++	}
++}
++func TestInitialWaitRequiresOriginalCaptureAndIsSole(t *testing.T) {
++	var s initialGuestCommandState
++	if !s.begin() || !s.started(true, true) || s.beginWait() || !s.capture(true) || !s.beginWait() || s.beginWait() || !s.waited(true, true) || s.waited(true, true) || !s.settled() {
++		t.Fatal("original capture/wait sequencing")
++	}
++}
++func TestInitialNonzeroImportNeverBecomesSuccessOnReplay(t *testing.T) {
++	var s initialGuestCommandState
++	s.begin()
++	s.started(true, true)
++	s.capture(true)
++	s.beginWait()
++	if s.waited(true, false) || s.waited(true, true) || s.begin() || !s.failed || !s.settled() {
++		t.Fatal("failed import replayed/adopted")
++	}
++}
++func TestInitialStreamingHasNoLifetimeChunkCapAndRetainsUnknown(t *testing.T) {
++	var s initialGuestStreamState
++	for i := 0; i < 100000; i++ {
++		if !s.begin(1024) || !s.settle(1024, true) {
++			t.Fatal("lifetime cap", i)
++		}
++	}
++	if s.bytes != 102400000 || !s.begin(32) || s.settle(0, false) || s.begin(1) || !s.busy || !s.unknown {
++		t.Fatal("unknown buffer reused")
++	}
++}
++func TestInitialDiagnosticOutputRetainsOnlyBoundedTail(t *testing.T) {
++	var b initialGuestOutput
++	original := bytes.Repeat([]byte("x"), 100000)
++	b.Write(original)
++	b.Write([]byte("tail"))
++	if len(b.tail) != initialGuestOutputBudget || !bytes.HasSuffix(b.tail, []byte("tail")) {
++		t.Fatal("live diagnostic bound")
++	}
++}
++func TestInitialSIDPolicyInputIsCanonicalOriginalSourceData(t *testing.T) {
++	b, ok := initialGuestSIDBytes("S-1-5-21-1-2-3-1001")
++	if !ok || len(b) != 28 || b[0] != 1 || b[1] != 5 {
++		t.Fatal("canonical SID")
++	}
++	for _, s := range []string{"S-1-05-21-1", "S-2-5-21-1", "S-1-5-4294967296"} {
++		if _, ok := initialGuestSIDBytes(s); ok {
++			t.Fatal("invalid SID")
++		}
++	}
++}
++
++func TestInitialKnownPrebirthRefusalClosesButCannotLaunch(t *testing.T) {
++	var s initialGuestCommandState
++	s.failed = true // original preflight returned before Start admission
++	if !s.settled() || s.begin() || s.beginWait() {
++		t.Fatal("known prebirth refusal became a birth or held forever")
++	}
++}
++func TestInitialStreamRejectsContradictoryCountAndBudgetOverflow(t *testing.T) {
++	var s initialGuestStreamState
++	if !s.begin(8) || s.settle(9, true) || !s.unknown || s.begin(1) {
++		t.Fatal("contradictory native count accepted/reused")
++	}
++	s = initialGuestStreamState{bytes: initialGuestArchiveMaximum - 4}
++	if s.begin(5) || !s.begin(4) || !s.settle(4, true) || s.begin(1) {
++		t.Fatal("archive byte limit bypassed")
++	}
++}
++
++func TestInitialImportSettlementIsNeverGuestAbsentPermission(t *testing.T) {
++	if initialGuestParentRelease(false, false) || initialGuestParentRelease(false, true) || initialGuestParentRelease(true, true) || !initialGuestParentRelease(true, false) {
++		t.Fatal("local close substituted for actual NoGuest completion")
++	}
++}
++
++func TestInitialHardlinkIsFixedNonreplaceSiblingOnly(t *testing.T) {
++	b := initialGuestLinkRecord()
++	if len(b) != 36 || binary.LittleEndian.Uint32(b[16:20]) != 16 || !bytes.Equal(b[:16], make([]byte, 16)) {
++		t.Fatal("not fixed nonreplace/current-parent link")
++	}
++	var name []byte
++	for j := 20; j < len(b); j += 2 {
++		u := binary.LittleEndian.Uint16(b[j:])
++		if u > 127 {
++			t.Fatal("nonfixed link name")
++		}
++		name = append(name, byte(u))
++	}
++	if string(name) != "basedisk" {
++		t.Fatal("other link role")
++	}
++}
++func TestInitialHardlinkPendingAndWideStatusAccounting(t *testing.T) {
++	for _, tt := range []struct {
++		raw, status, info uintptr
++		known, success    bool
++	}{{0, 0, 0, true, true}, {0x100000000, 0x200000000, 0, true, true}, {0x103, 0, 0, false, false}, {0, 0x103, 0, false, false}, {0xc0000001, 0, 0, true, false}, {0, 0, 0x100000000, true, false}} {
++		k, s := initialGuestLinkReply(tt.raw, tt.status, tt.info)
++		if k != tt.known || s != tt.success {
++			t.Fatal(tt, k, s)
++		}
++	}
++	code, pending := initialGuestRegistryReply(0x100000103)
++	if code != 259 || pending {
++		t.Fatal("LSTATUS NO_MORE_ITEMS confused with NTSTATUS_PENDING")
++	}
++	if _, pending = initialGuestRegistryReply(0x1000003e5); !pending {
++		t.Fatal("Win32 pending normalized incorrectly")
++	}
++}
++
++func TestInitialOwnedPendingWriteSurvivesLegalCallerReuse(t *testing.T) {
++	caller := []byte("original native payload")
++	var cell initialGuestOwnedWriteCell
++	pending, ok := cell.copyInput(caller)
++	if !ok {
++		t.Fatal("cell admission")
++	}
++	expected := append([]byte(nil), pending...)
++	if cell.settle(false) {
++		t.Fatal("unknown returned positive")
++	}
++	// Legal io.Writer caller behavior AFTER Write has returned an error.
++	for i := range caller {
++		caller[i] = 'X'
++	}
++	if !bytes.Equal(pending, expected) || !bytes.Equal(cell.data, expected) {
++		t.Fatal("pending native payload aliases borrowed writer input")
++	}
++	if _, ok := cell.copyInput([]byte("retry")); ok || cell.settle(true) || !cell.busy || !cell.unknown {
++		t.Fatal("unknown cell reused/cleared/revived")
++	}
++}
++func TestInitialLaterChunkUnknownOwnsOnlyItsIndependentCell(t *testing.T) {
++	caller := bytes.Repeat([]byte("q"), initialGuestNativeChunkBudget*3+79)
++	var cell initialGuestOwnedWriteCell
++	first, _ := cell.copyInput(caller[:initialGuestNativeChunk(uint64(len(caller)))])
++	if len(first) > 16<<10 || !cell.settle(true) {
++		t.Fatal("first native cell")
++	}
++	at := len(first)
++	second, _ := cell.copyInput(caller[at : at+initialGuestNativeChunk(uint64(len(caller)-at))])
++	expected := append([]byte(nil), second...)
++	cell.settle(false)
++	for i := range caller {
++		caller[i] = 'r'
++	}
++	if !bytes.Equal(second, expected) {
++		t.Fatal("later pending native chunk changed after caller reuse")
++	}
++	if _, ok := cell.copyInput(caller); ok {
++		t.Fatal("later unknown allowed another chunk")
++	}
++}
++func TestInitialReadWriteChunksCoverLargerPayloadWithoutBudgetViolation(t *testing.T) {
++	for _, size := range []uint64{0, 1, 16384, 16385, 32768, 32769, 1048579, initialGuestArchiveMaximum} {
++		var total uint64
++		for total < size {
++			n := initialGuestNativeChunk(size - total)
++			if n < 1 || n > 16<<10 || uint64(n) > size-total {
++				t.Fatal("invalid native segment", size, total, n)
++			}
++			total += uint64(n)
++		}
++		if total != size {
++			t.Fatal("missing/duplicate bytes", size, total)
++		}
++	}
++}
++func TestInitialOwnedCellReusesOnlyAfterPositiveSettlement(t *testing.T) {
++	var cell initialGuestOwnedWriteCell
++	caller := bytes.Repeat([]byte("a"), initialGuestNativeChunkBudget)
++	var original *byte
++	for i := 0; i < 100000; i++ {
++		caller[0] = byte(i)
++		owned, ok := cell.copyInput(caller)
++		if !ok || owned[0] != byte(i) {
++			t.Fatal("positive reuse stopped", i)
++		}
++		if i == 0 {
++			original = &owned[0]
++		} else if &owned[0] != original {
++			t.Fatal("unbounded cell allocation/history")
++		}
++		caller[0] ^= 255
++		if owned[0] != byte(i) {
++			t.Fatal("owned cell aliases caller")
++		}
++		if !cell.settle(true) {
++			t.Fatal("positive cell did not settle")
++		}
++	}
++	if _, ok := cell.copyInput(make([]byte, initialGuestNativeChunkBudget+1)); ok {
++		t.Fatal("oversized native cell accepted")
++	}
++}
++
++func TestInitialLinkPoliciesRemainClosedAndDistinct(t *testing.T) {
++	for _, tt := range []struct {
++		role  initialGuestFileLinkRole
++		count uint32
++		want  bool
++	}{{initialGuestPrivateSingleLink, 1, true}, {initialGuestPrivateSingleLink, 2, false}, {initialGuestOriginalArchivePair, 1, false}, {initialGuestOriginalArchivePair, 2, true}, {initialGuestOriginalArchivePair, 3, false}, {initialGuestActualSystemCode, 0, false}, {initialGuestActualSystemCode, 1, true}, {initialGuestActualSystemCode, 5, true}, {0, 1, false}} {
++		if initialGuestLinksAllowed(tt.role, tt.count) != tt.want {
++			t.Fatal(tt)
++		}
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_registry_windows.go
+@@ -0,0 +1,267 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"encoding/binary"
++	"strings"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++var initialGuestRegClose = windows.NewLazySystemDLL("advapi32.dll").NewProc("RegCloseKey")
++
++func (s *nativeInitialGuestScope) openKey(parent *initialGuestKey, name string) (*initialGuestKey, error) {
++	f := s.newFrame()
++	if f == nil {
++		return nil, ErrInitialGuestScope
++	}
++	k := &initialGuestKey{}
++	f.key = k
++	s.keys = append(s.keys, k)
++	var e error
++	f.text, e = windows.UTF16FromString(name)
++	if e != nil {
++		return nil, ErrInitialGuestScope
++	}
++	f.entered = true
++	if parent == nil {
++		k.name = `\REGISTRY\USER\` + s.owner.storage.sid
++		f.raw, _, _ = inspectionOpenCurrentUser.Call(windows.KEY_READ, uintptr(unsafe.Pointer(&k.handle)))
++	} else {
++		k.name = parent.name + `\` + name
++		f.raw, _, _ = managedRegOpenKey.Call(uintptr(parent.handle), uintptr(unsafe.Pointer(&f.text[0])), 8, windows.KEY_READ, uintptr(unsafe.Pointer(&k.handle)))
++	}
++	e = s.status(f)
++	if e != nil {
++		if s.unknown.Load() {
++			return nil, e
++		}
++		if k.handle != 0 {
++			return nil, s.fail()
++		}
++		s.keys = s.keys[:len(s.keys)-1]
++		return nil, e
++	}
++	if k.handle == 0 || k.handle == windows.InvalidHandle {
++		return nil, s.fail()
++	}
++	if s.checkKey(k) != nil {
++		return nil, ErrInitialGuestScope
++	}
++	return k, nil
++}
++func (s *nativeInitialGuestScope) checkKey(k *initialGuestKey) error {
++	if k == nil || k.handle == 0 || k.closeAttempted {
++		return ErrInitialGuestScope
++	}
++	f := s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.words = make([]uint64, 512)
++	f.entered = true
++	f.raw, _, _ = inspectionQueryKey.Call(uintptr(k.handle), 3, uintptr(unsafe.Pointer(&f.words[0])), uintptr(len(f.words)*8), uintptr(unsafe.Pointer(&f.needed)))
++	f.returned = true
++	if uint32(f.raw) == 0x103 {
++		return s.fail()
++	}
++	if uint32(f.raw) != 0 || f.needed < 6 || f.needed > uint32(len(f.words)*8) {
++		return ErrInitialGuestScope
++	}
++	raw := unsafe.Slice((*byte)(unsafe.Pointer(&f.words[0])), int(f.needed))
++	size := binary.LittleEndian.Uint32(raw)
++	if size == 0 || size%2 != 0 || size+4 != f.needed {
++		return ErrInitialGuestScope
++	}
++	name, e := inspectionRegistryString(append(append([]byte(nil), raw[4:]...), 0, 0))
++	if e != nil || !strings.EqualFold(name, k.name) {
++		return ErrInitialGuestScope
++	}
++	_, _, e = s.value(k, "SymbolicLinkValue")
++	if e != windows.ERROR_FILE_NOT_FOUND {
++		return ErrInitialGuestScope
++	}
++	f = s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.raw, _, _ = inspectionGetKeySecurity.Call(uintptr(k.handle), 7, 0, uintptr(unsafe.Pointer(&f.needed)))
++	f.returned = true
++	if uint32(f.raw) == 997 {
++		return s.fail()
++	}
++	if uint32(f.raw) != 122 || f.needed < 20 || f.needed > inspectionSecurityLimit {
++		return ErrInitialGuestScope
++	}
++	capacity := f.needed
++	f.words = make([]uint64, (capacity+7)/8)
++	f.entered = true
++	f.returned = false
++	f.raw, _, _ = inspectionGetKeySecurity.Call(uintptr(k.handle), 7, uintptr(unsafe.Pointer(&f.words[0])), uintptr(unsafe.Pointer(&f.needed)))
++	if s.status(f) != nil || f.needed > capacity || f.needed < 20 {
++		return ErrInitialGuestScope
++	}
++	digest, e := inspectionRegistrySecurity(unsafe.Slice((*byte)(unsafe.Pointer(&f.words[0])), int(f.needed)), s.user)
++	if e != nil || k.descriptor != ([32]byte{}) && k.descriptor != digest {
++		return ErrInitialGuestScope
++	}
++	k.descriptor = digest
++	return nil
++}
++func (s *nativeInitialGuestScope) value(k *initialGuestKey, name string) ([]byte, uint32, error) {
++	f := s.newFrame()
++	if f == nil {
++		return nil, 0, ErrInitialGuestScope
++	}
++	var e error
++	f.text, e = windows.UTF16FromString(name)
++	if e != nil {
++		return nil, 0, ErrInitialGuestScope
++	}
++	f.words = make([]uint64, 256)
++	f.count = uint32(len(f.words) * 8)
++	f.entered = true
++	f.raw, _, _ = managedRegQuery.Call(uintptr(k.handle), uintptr(unsafe.Pointer(&f.text[0])), 0, uintptr(unsafe.Pointer(&f.kind)), uintptr(unsafe.Pointer(&f.words[0])), uintptr(unsafe.Pointer(&f.count)))
++	if e = s.status(f); e != nil {
++		return nil, 0, e
++	}
++	if f.count > uint32(len(f.words)*8) {
++		return nil, 0, ErrInitialGuestScope
++	}
++	return append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(&f.words[0])), int(f.count))...), f.kind, nil
++}
++func (s *nativeInitialGuestScope) closeKey(k *initialGuestKey) error {
++	if k == nil || k.handle == 0 {
++		return nil
++	}
++	if k.closeAttempted {
++		return ErrInitialGuestScope
++	}
++	k.closeAttempted = true
++	f := s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.raw, _, _ = initialGuestRegClose.Call(uintptr(k.handle))
++	if s.status(f) != nil {
++		return s.fail()
++	}
++	k.handle = 0
++	return nil
++}
++func (s *nativeInitialGuestScope) ensureLxss(ctx context.Context) error {
++	if s.currentUser == nil {
++		root, e := s.openKey(nil, "")
++		if e != nil {
++			return ErrInitialGuestScope
++		}
++		s.currentUser = root
++	}
++	if s.lxss != nil {
++		return s.checkKey(s.lxss)
++	}
++	parent := s.currentUser
++	for _, name := range []string{"Software", "Microsoft", "Windows", "CurrentVersion", "Lxss"} {
++		if !freshBoundedContext(ctx) {
++			return ErrInitialGuestScope
++		}
++		k, e := s.openKey(parent, name)
++		if e != nil {
++			return e
++		}
++		parent = k
++	}
++	s.lxss = parent
++	return nil
++}
++
++// Absence is only one observation in the original scope; never an import grant.
++// This never changes registry data and never adopts after an import error.
++func (s *nativeInitialGuestScope) captureRegistration(ctx context.Context, expectPresent bool) error {
++	if !freshBoundedContext(ctx) {
++		return ErrInitialGuestScope
++	}
++	e := s.ensureLxss(ctx)
++	if e == windows.ERROR_FILE_NOT_FOUND || e == windows.ERROR_PATH_NOT_FOUND {
++		if expectPresent {
++			return ErrInitialGuestScope
++		}
++		return nil
++	}
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	found := false
++	for index := uint32(0); index <= 512; index++ {
++		if !freshBoundedContext(ctx) {
++			return ErrInitialGuestScope
++		}
++		f := s.newFrame()
++		if f == nil {
++			return ErrInitialGuestScope
++		}
++		f.text = make([]uint16, 64)
++		f.count = uint32(len(f.text))
++		f.entered = true
++		f.raw, _, _ = managedRegEnum.Call(uintptr(s.lxss.handle), uintptr(index), uintptr(unsafe.Pointer(&f.text[0])), uintptr(unsafe.Pointer(&f.count)), 0, 0, 0, 0)
++		e = s.status(f)
++		if e == windows.ERROR_NO_MORE_ITEMS {
++			if found != expectPresent {
++				return ErrInitialGuestScope
++			}
++			return s.checkKey(s.lxss)
++		}
++		if e != nil || index == 512 || f.count == 0 || f.count >= uint32(len(f.text)) {
++			return ErrInitialGuestScope
++		}
++		guid := strings.ToLower(windows.UTF16ToString(f.text[:f.count]))
++		if !freshRuntimeGUID(guid) {
++			return ErrInitialGuestScope
++		}
++		key, e := s.openKey(s.lxss, guid)
++		if e != nil {
++			return ErrInitialGuestScope
++		}
++		body, kind, e := s.value(key, "DistributionName")
++		if e != nil || kind != windows.REG_SZ {
++			return ErrInitialGuestScope
++		}
++		name, e := inspectionRegistryString(body)
++		if e != nil {
++			return ErrInitialGuestScope
++		}
++		if runtimeFreshOwnedRegistrationName(name) {
++			if !expectPresent || found {
++				return ErrInitialGuestScope
++			}
++			found = true
++			body, kind, e = s.value(key, "BasePath")
++			if e != nil || kind != windows.REG_SZ {
++				return ErrInitialGuestScope
++			}
++			base, e := inspectionRegistryString(body)
++			if e != nil {
++				return ErrInitialGuestScope
++			}
++			body, kind, e = s.value(key, "Version")
++			if e != nil || kind != windows.REG_DWORD || len(body) != 4 || !runtimeFreshGuestRegistrationMatches(name, base, s.owner.storage.home, binary.LittleEndian.Uint32(body)) {
++				return ErrInitialGuestScope
++			}
++			s.selected = key
++		} else {
++			if s.closeKey(key) != nil {
++				return ErrInitialGuestScope
++			}
++			if len(s.keys) == 0 || s.keys[len(s.keys)-1] != key {
++				return s.fail()
++			}
++			s.keys = s.keys[:len(s.keys)-1]
++		}
++	}
++	return ErrInitialGuestScope
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_scope_windows.go
+@@ -0,0 +1,473 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"crypto/sha256"
++	"runtime"
++	"sync"
++	"sync/atomic"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++// This wrapper is not a source ledger. Both actual parents retain the original
++// native object independently, even if a caller overwrites a wrapper value.
++type InitialGuestCreationScope struct{ native *nativeInitialGuestScope }
++type nativeInitialGuestScope struct {
++	self                                                 *InitialGuestCreationScope
++	owner                                                *FreshSetupOwner
++	authority                                            *nativeManagedRuntimeAuthority
++	guard                                                *nativeInitialGuestGuard
++	mu                                                   sync.Mutex
++	unknown, closed                                      atomic.Bool
++	importEntered                                        atomic.Bool // irreversible ORIGINAL admission; never parsed completion DATA
++	closeAttempted                                       bool
++	closeErr                                             error
++	frame                                                *initialGuestNativeFrame
++	keys                                                 []*initialGuestKey
++	currentUser, lxss, selected                          *initialGuestKey
++	user                                                 []byte
++	instancePath, systemDirectory, toolPath              string
++	tool, image, basedisk, disk                          *runtimeStorageObject
++	systemTool, archiveWriter, archiveImage, archiveBase *runtimeStorageResource
++	archiveLinked                                        bool // set only by actual fixed native nonreplace hardlink success
++	systemResources                                      []*runtimeStorageResource
++	systemAncestors                                      []*runtimeStorageObject
++	directories                                          []*runtimeStorageObject
++	fullIDs                                              map[*runtimeStorageResource][24]byte
++	archiveHash                                          [32]byte
++	ownerLockFull                                        [24]byte
++	stream                                               initialGuestStreamState
++	writeCell                                            initialGuestOwnedWriteCell // original private copy, never borrowed io.Writer p
++	captured, stageEntered, prepared, importObserved     bool
++	proofAttempted                                       bool
++	proofErr                                             error
++	command                                              *initialGuestCommand
++}
++type initialGuestKey struct {
++	handle         windows.Handle
++	name           string
++	descriptor     [32]byte
++	closeAttempted bool
++}
++
++// One reusable synchronous cell. A pending/contradictory/unreturned call keeps
++// this exact frame forever; only a positively returned call may replace it.
++type initialGuestNativeFrame struct {
++	entered, returned   bool
++	raw                 uintptr
++	err                 error
++	key                 *initialGuestKey
++	text                []uint16
++	words               []uint64
++	needed, count, kind uint32
++	info                windows.ByHandleFileInformation
++	align               uint64
++	full                [24]byte
++	path                [1040]uint16
++	io                  windows.IO_STATUS_BLOCK
++	sd                  *windows.SECURITY_DESCRIPTOR
++	mappingFile         windows.Handle
++	mappingLength       uint32
++}
++
++var initialGuestSystemDirectory = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetSystemDirectoryW")
++
++func (*InitialGuestCreationScope) String() string   { return "original initial guest creation scope" }
++func (*InitialGuestCreationScope) GoString() string { return "original initial guest creation scope" }
++func (s *nativeInitialGuestScope) fail() error {
++	s.unknown.Store(true)
++	s.authority.image.managedUnknown.Store(true)
++	runtimeStorageDomain.Lock()
++	runtimeStorageDomain.failed = true
++	runtimeStorageDomain.Unlock()
++	return ErrInitialGuestScope
++}
++func (i *InitialGuestCreationScope) exact() (*nativeInitialGuestScope, error) {
++	if i == nil || i.native == nil || i.native.self != i {
++		return nil, ErrInitialGuestScope
++	}
++	return i.native, nil
++}
++
++// Parent Close reads only this negative cached barrier. It never waits for the
++// scope mutex or native work while holding ancestor locks.
++func (s *nativeInitialGuestScope) closedForParents(o *FreshSetupOwner, a *nativeManagedRuntimeAuthority) bool {
++	return s != nil && s.owner == o && s.authority == a && !s.unknown.Load() && initialGuestParentRelease(s.closed.Load(), s.importEntered.Load())
++}
++
++// Caller holds o -> publisher -> Created -> image -> authority -> storage.
++func (s *nativeInitialGuestScope) originalHeld() bool {
++	if s == nil || s.unknown.Load() || s.closed.Load() || s.owner == nil || s.authority == nil {
++		return false
++	}
++	o, a := s.owner, s.authority
++	return o.initialGuestScope == s && a.initialGuestScope == s && initialGuestParentsHeld(o, a) && s.guard != nil && o.guestGuard == s.guard && s.guard.owner == o && s.guard.err == nil && s.guard.sequence.durable && !s.guard.sequence.failed && s.guard.originalLocked() && s.guard.imageHash == a.image.image.Hash
++}
++func initialGuestParentsHeld(o *FreshSetupOwner, a *nativeManagedRuntimeAuthority) bool {
++	if o == nil || a == nil || o.self != o || o.closed || o.unknown || o.storage == nil || o.created == nil || o.created != a.created || o.image == nil || o.image != a.image || a.self == nil || a.self.native != a || a.publisher == nil || !a.main.captured || !a.admitted() || !servingImageCaptureKnown(a.image) {
++		return false
++	}
++	tuple := o.created.freshAuthority
++	if tuple == nil || tuple.self != tuple || tuple.owner != o || tuple.created != o.created {
++		return false
++	}
++	if o.created.managedOwnerLock == 0 || o.created.managedOwnerLock == windows.InvalidHandle {
++		return false
++	}
++	locks := 0
++	for _, h := range o.created.authorityHandles {
++		if h == o.created.managedOwnerLock {
++			locks++
++		}
++	}
++	if locks != 1 {
++		return false
++	}
++	count := 0
++	for _, member := range a.image.managedAuthorities {
++		if member == a.self {
++			count++
++		}
++	}
++	return count == 1
++}
++func (s *nativeInitialGuestScope) lockSource(ctx context.Context) (func(), error) {
++	if !freshBoundedContext(ctx) || s == nil || s.owner == nil || s.owner.storage == nil || s.authority == nil || s.authority.publisher == nil || s.authority.created == nil || s.authority.image == nil {
++		return nil, ErrInitialGuestScope
++	}
++	o, a := s.owner, s.authority
++	o.mu.Lock()
++	a.publisher.mu.Lock()
++	a.created.mu.Lock()
++	a.image.mu.Lock()
++	a.mu.Lock()
++	o.storage.mu.Lock()
++	s.mu.Lock()
++	unlock := func() {
++		s.mu.Unlock()
++		o.storage.mu.Unlock()
++		a.mu.Unlock()
++		a.image.mu.Unlock()
++		a.created.mu.Unlock()
++		a.publisher.mu.Unlock()
++		o.mu.Unlock()
++	}
++	if !s.originalHeld() {
++		unlock()
++		return nil, ErrInitialGuestScope
++	}
++	return unlock, nil
++}
++func (s *nativeInitialGuestScope) newFrame() *initialGuestNativeFrame {
++	if s.unknown.Load() || s.closed.Load() || s.frame != nil && s.frame.entered && !s.frame.returned {
++		s.fail()
++		return nil
++	}
++	f := &initialGuestNativeFrame{}
++	s.frame = f
++	return f
++}
++func (s *nativeInitialGuestScope) status(f *initialGuestNativeFrame) error {
++	f.returned = true
++	v, pending := initialGuestRegistryReply(f.raw)
++	if pending {
++		return s.fail()
++	}
++	if v != 0 {
++		return windows.Errno(v)
++	}
++	return nil
++}
++func (s *nativeInitialGuestScope) measure(r *runtimeStorageResource, dir, private bool, links uint32) (*runtimeStorageObject, error) {
++	if s.unknown.Load() || r == nil || !s.owner.storage.storageIOResourceKnown(r) {
++		return nil, ErrInitialGuestScope
++	}
++	f := s.newFrame()
++	if f == nil {
++		return nil, ErrInitialGuestScope
++	}
++	f.entered = true
++	f.err = windows.GetFileInformationByHandle(r.handle, &f.info)
++	f.returned = true
++	if f.err == windows.ERROR_IO_PENDING {
++		return nil, s.fail()
++	}
++	if f.err != nil {
++		return nil, ErrInitialGuestScope
++	}
++	info := f.info
++	role := initialGuestPrivateSingleLink
++	if !private {
++		if dir && !s.systemAncestorResource(r) || !dir && r != s.systemTool {
++			return nil, ErrInitialGuestScope
++		}
++		role = initialGuestActualSystemCode
++	} else if !dir && links == 2 {
++		role = initialGuestOriginalArchivePair
++	} else if !dir && links != 1 {
++		return nil, ErrInitialGuestScope
++	}
++	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || (info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0) != dir || !dir && !initialGuestLinksAllowed(role, info.NumberOfLinks) {
++		return nil, ErrInitialGuestScope
++	}
++	f = s.newFrame()
++	if f == nil {
++		return nil, ErrInitialGuestScope
++	}
++	f.entered = true
++	f.err = windows.GetFileInformationByHandleEx(r.handle, windows.FileIdInfo, &f.full[0], 24)
++	f.returned = true
++	if f.err == windows.ERROR_IO_PENDING {
++		return nil, s.fail()
++	}
++	if f.err != nil || !inspectionFullIDKnown(f.full) {
++		return nil, ErrInitialGuestScope
++	}
++	full := f.full
++	if old, present := s.fullIDs[r]; present && old != full {
++		return nil, ErrInitialGuestScope
++	}
++	if s.fullIDs == nil {
++		s.fullIDs = make(map[*runtimeStorageResource][24]byte)
++	}
++	s.fullIDs[r] = full
++	f = s.newFrame()
++	if f == nil {
++		return nil, ErrInitialGuestScope
++	}
++	f.entered = true
++	f.kind, f.err = windows.GetFileType(r.handle)
++	f.returned = true
++	if f.err == windows.ERROR_IO_PENDING {
++		return nil, s.fail()
++	}
++	if f.err != nil || f.kind != windows.FILE_TYPE_DISK {
++		return nil, ErrInitialGuestScope
++	}
++	if private {
++		if !dir && links == 2 {
++			if !s.archiveLinked || s.archiveWriter == nil || (r != s.archiveWriter && r != s.archiveImage && r != s.archiveBase) || full != s.fullIDs[s.archiveWriter] {
++				return nil, ErrInitialGuestScope
++			}
++			if objectKindCheckedLinks(r.handle, false, false) != nil || verifyPrivateDACL(r.handle, s.owner.storage.sid, false) != nil {
++				return nil, ErrInitialGuestScope
++			}
++		} else if verifyPrivate(r.handle, s.owner.storage.sid, dir) != nil {
++			return nil, ErrInitialGuestScope
++		}
++	} else {
++		if dir {
++			if !s.systemAncestorResource(r) || checkReadObject(r.handle, s.owner.storage.sid, true) != nil {
++				return nil, ErrInitialGuestScope
++			}
++		} else if r != s.systemTool || systemCodeKind(r.handle) != nil || checkObjectDACL(r.handle, "", false) != nil {
++			return nil, ErrInitialGuestScope
++		}
++	}
++	// Accepted synchronous GetSecurityInfo allocation/copy wrapper dependency.
++	f = s.newFrame()
++	if f == nil {
++		return nil, ErrInitialGuestScope
++	}
++	f.entered = true
++	f.sd, f.err = windows.GetSecurityInfo(r.handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	f.returned = true
++	if f.err != nil || f.sd == nil {
++		return nil, ErrInitialGuestScope
++	}
++	n := f.sd.Length()
++	control, _, e := f.sd.Control()
++	if e != nil || control&windows.SE_SELF_RELATIVE == 0 || n < 20 || n > 65536 {
++		return nil, ErrInitialGuestScope
++	}
++	id := runtimeStorageIdentity{volume: info.VolumeSerialNumber, high: info.FileIndexHigh, low: info.FileIndexLow, attributes: info.FileAttributes, links: info.NumberOfLinks, size: uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow), written: info.LastWriteTime, descriptor: sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(f.sd)), int(n)))}
++	if dir {
++		id.size = 0
++		id.written = windows.Filetime{}
++	}
++	return &runtimeStorageObject{resource: r, identity: id, directory: dir, private: private}, nil
++}
++func (s *nativeInitialGuestScope) openFile(ctx context.Context, parent *runtimeStorageObject, name string, dir, create bool, access uint32, links uint32) (*runtimeStorageObject, error) {
++	if !s.originalHeld() || !freshBoundedContext(ctx) || parent == nil {
++		return nil, ErrInitialGuestScope
++	}
++	disposition := uint32(windows.FILE_OPEN)
++	var sd *windows.SECURITY_DESCRIPTOR
++	var e error
++	if create {
++		disposition = windows.FILE_CREATE
++		sd, e = privateDescriptor(s.owner.storage.sid, dir)
++		if e != nil {
++			return nil, ErrInitialGuestScope
++		}
++	}
++	share := uint32(windows.FILE_SHARE_READ)
++	if dir {
++		share |= windows.FILE_SHARE_WRITE
++	}
++	if !freshBoundedContext(ctx) {
++		return nil, ErrInitialGuestScope
++	}
++	n := s.owner.storage
++	h, e := n.open(parent.resource.handle, name, dir, disposition, access, share, sd)
++	if e != nil {
++		return nil, e
++	}
++	r := n.keep(h)
++	if len(s.directories) == 4 && parent == s.directories[3] && !dir {
++		if create && name == "image" && links == 1 {
++			s.archiveWriter = r
++		}
++		if !create && links == 2 && name == "image" {
++			s.archiveImage = r
++		}
++		if !create && links == 2 && name == "basedisk" {
++			s.archiveBase = r
++		}
++	}
++	return s.measure(r, dir, true, links)
++}
++func (a *ManagedRuntimeAuthority) CaptureInitialGuestCreationScope(ctx context.Context, o *FreshSetupOwner) (out *InitialGuestCreationScope, result error) {
++	n, e := a.exact()
++	if e != nil || o == nil || o.self != o || !freshBoundedContext(ctx) || runtime.GOARCH != "amd64" {
++		return nil, ErrInitialGuestScope
++	}
++	// Pure publication and nonnil actual-parent checks before native work.
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	n.publisher.mu.Lock()
++	defer n.publisher.mu.Unlock()
++	n.created.mu.Lock()
++	defer n.created.mu.Unlock()
++	n.image.mu.Lock()
++	defer n.image.mu.Unlock()
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	if !initialGuestParentsHeld(o, n) || o.storage.freshRecovery != nil || n.controllersStarted || n.capturing != 0 || len(n.launches) != 0 || n.initialGuestScope != nil || o.initialGuestScope != nil || o.guestGuard == nil || o.guestGuard.err != nil || !o.guestGuard.sequence.durable || o.guestGuard.sequence.failed {
++		return nil, ErrInitialGuestScope
++	}
++	cap := &InitialGuestCreationScope{}
++	s := &nativeInitialGuestScope{self: cap, owner: o, authority: n, guard: o.guestGuard, closeErr: ErrInitialGuestScope}
++	cap.native = s
++	n.initialGuestScope = s
++	o.initialGuestScope = s
++	out = cap
++	o.storage.mu.Lock()
++	defer o.storage.mu.Unlock()
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	defer func() {
++		if recover() != nil {
++			result = s.fail()
++		}
++	}()
++	if !s.originalHeld() || !o.legacyDenialReadyLocked() || o.checkLegacyStartDenialLocked(ctx) != nil || o.storage.check() != nil || o.seed == nil || o.seed.checkLocked(ctx) != nil || s.proveOriginalSource() != nil || s.proveNegativeGuard(ctx) != nil {
++		return cap, ErrInitialGuestScope
++	}
++	if o.legacyDenial == nil || o.legacyDenial.directories[0] == nil {
++		return cap, ErrInitialGuestScope
++	}
++	home := o.legacyDenial.directories[0]
++	measured, e := s.measure(home.resource, true, true, 0)
++	if e != nil || measured.identity != home.identity {
++		return cap, ErrInitialGuestScope
++	}
++	s.directories = append(s.directories, home)
++	s.instancePath = o.storage.home + `\.rdorbwin\lima\orbwin`
++	if initialGuestImportArgs(s.instancePath) == nil {
++		return cap, ErrInitialGuestScope
++	}
++	s.user, _ = initialGuestSIDBytes(o.storage.sid)
++	if !inspectionValidExactSID(s.user) {
++		return cap, ErrInitialGuestScope
++	}
++	if s.captureRegistration(ctx, false) != nil {
++		return cap, ErrInitialGuestScope
++	}
++	// Initial scope never adopts an existing scaffold, even an empty one.
++	_, e = s.openFile(ctx, home, ".rdorbwin", true, false, windows.FILE_TRAVERSE, 0)
++	if e != windows.STATUS_OBJECT_NAME_NOT_FOUND {
++		return cap, ErrInitialGuestScope
++	}
++	if s.captureSystemWSL(ctx) != nil || !freshBoundedContext(ctx) {
++		return cap, ErrInitialGuestScope
++	}
++	s.captured = true
++	return cap, nil
++}
++func (s *nativeInitialGuestScope) captureSystemWSL(ctx context.Context) error {
++	f := s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.raw, _, f.err = initialGuestSystemDirectory.Call(uintptr(unsafe.Pointer(&f.path[0])), uintptr(len(f.path)))
++	f.returned = true
++	count := uint32(f.raw)
++	if count == 0 || count >= uint32(len(f.path)) {
++		return ErrInitialGuestScope
++	}
++	s.systemDirectory = windows.UTF16ToString(f.path[:count])
++	if _, _, ok := initialGuestSystemComponents(s.systemDirectory); !ok {
++		return ErrInitialGuestScope
++	}
++	dir, e := s.captureSystemAncestors(ctx)
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	h, e := s.owner.storage.open(dir.resource.handle, "wsl.exe", false, windows.FILE_OPEN, windows.FILE_EXECUTE|windows.FILE_READ_DATA, windows.FILE_SHARE_READ, nil)
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	s.systemTool = s.owner.storage.keep(h)
++	s.tool, e = s.measure(s.systemTool, false, false, 0)
++	if e != nil || s.tool.identity.size == 0 || s.tool.identity.size > 32<<20 {
++		return ErrInitialGuestScope
++	}
++	s.toolPath = s.systemDirectory + `\wsl.exe`
++	return nil
++}
++func (i *InitialGuestCreationScope) Close() (result error) {
++	s, e := i.exact()
++	if e != nil {
++		return ErrInitialGuestScope
++	}
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	if s.closed.Load() {
++		return s.closeErr
++	}
++	if s.unknown.Load() || !runtimeStorageDomainKnown() || s.closeAttempted || s.writeCell.busy || s.writeCell.unknown || s.frame != nil && s.frame.entered && !s.frame.returned {
++		return ErrInitialGuestScope
++	}
++	if s.command != nil && !s.command.state.settled() {
++		return ErrInitialGuestScope
++	}
++	s.closeAttempted = true
++	s.closeErr = ErrInitialGuestScope
++	defer func() {
++		if recover() != nil {
++			result = s.fail()
++		}
++		if result != nil {
++			s.closeErr = ErrInitialGuestScope
++		}
++	}()
++	if s.command != nil && s.command.closeProcess() != nil {
++		return s.fail()
++	}
++	for j := len(s.keys) - 1; j >= 0; j-- {
++		if s.closeKey(s.keys[j]) != nil {
++			return s.fail()
++		}
++	}
++	s.closeErr = nil
++	s.closed.Store(true)
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_source_windows.go
+@@ -0,0 +1,123 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"crypto/sha256"
++	"golang.org/x/sys/windows"
++	"unsafe"
++)
++
++// Revalidate the ORIGINAL producer's durable negative objects, not parsed
++// pending metadata or a cached prepared flag. Generic record links remain1.
++func (s *nativeInitialGuestScope) proveNegativeGuard(ctx context.Context) error {
++	if !s.originalHeld() {
++		return ErrInitialGuestScope
++	}
++	g := s.guard
++	for _, o := range []*runtimeStorageObject{g.guard, g.profile, g.pending} {
++		if o == nil {
++			return ErrInitialGuestScope
++		}
++		actual, e := s.measure(o.resource, o.directory, true, 1)
++		if e != nil || actual.identity != o.identity || s.fullIDs[o.resource] != g.fullIDs[o.resource] {
++			return ErrInitialGuestScope
++		}
++	}
++	for _, record := range []struct {
++		o    *runtimeStorageObject
++		body []byte
++	}{{g.profile, g.profileBody}, {g.pending, g.pendingBody}} {
++		body, e := s.owner.storage.read(record.o, false)
++		if e != nil || !bytes.Equal(body, record.body) || !freshBoundedContext(ctx) {
++			return ErrInitialGuestScope
++		}
++	}
++	return nil
++}
++
++// Borrow ONLY the same original Created's actual authority-lock cell while its
++// mutex is held. It is not reconstructed into a resource or another closer.
++func (s *nativeInitialGuestScope) proveOriginalSource() error {
++	if !s.originalHeld() {
++		return ErrInitialGuestScope
++	}
++	c := s.authority.created
++	tuple := c.freshAuthority
++	f := s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.err = windows.GetFileInformationByHandle(c.managedOwnerLock, &f.info)
++	f.returned = true
++	if f.err == windows.ERROR_IO_PENDING {
++		return s.fail()
++	}
++	if f.err != nil {
++		return ErrInitialGuestScope
++	}
++	info := f.info
++	if info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 || info.NumberOfLinks != 1 || info.FileSizeHigh != 0 || info.FileSizeLow != 0 {
++		return ErrInitialGuestScope
++	}
++	f = s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.err = windows.GetFileInformationByHandleEx(c.managedOwnerLock, windows.FileIdInfo, &f.full[0], 24)
++	f.returned = true
++	if f.err == windows.ERROR_IO_PENDING {
++		return s.fail()
++	}
++	if f.err != nil || !inspectionFullIDKnown(f.full) {
++		return ErrInitialGuestScope
++	}
++	if s.ownerLockFull != ([24]byte{}) && s.ownerLockFull != f.full {
++		return ErrInitialGuestScope
++	}
++	s.ownerLockFull = f.full
++	if verifyPrivate(c.managedOwnerLock, s.owner.storage.sid, false) != nil {
++		return ErrInitialGuestScope
++	}
++	f = s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.entered = true
++	f.sd, f.err = windows.GetSecurityInfo(c.managedOwnerLock, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
++	f.returned = true
++	if f.err != nil || f.sd == nil {
++		return ErrInitialGuestScope
++	}
++	size := f.sd.Length()
++	control, _, e := f.sd.Control()
++	if e != nil || control&windows.SE_SELF_RELATIVE == 0 || size < 20 || size > 65536 {
++		return ErrInitialGuestScope
++	}
++	id := runtimeStorageIdentity{volume: info.VolumeSerialNumber, high: info.FileIndexHigh, low: info.FileIndexLow, attributes: info.FileAttributes, links: info.NumberOfLinks, written: info.LastWriteTime, descriptor: sha256.Sum256(unsafe.Slice((*byte)(unsafe.Pointer(f.sd)), int(size)))}
++	if id != tuple.ownerLock {
++		return ErrInitialGuestScope
++	}
++	// Existing class44 primitive, but this call's ORIGINAL in/out word and
++	// return-length backing are on the actual prepublished scope frame.
++	f = s.newFrame()
++	if f == nil {
++		return ErrInitialGuestScope
++	}
++	f.mappingFile = s.authority.image.chain[len(s.authority.image.chain)-1]
++	expected := f.mappingFile
++	f.entered = true
++	f.raw, _, _ = initialGuestProcessQuery.Call(uintptr(windows.CurrentProcess()), 44, uintptr(unsafe.Pointer(&f.mappingFile)), unsafe.Sizeof(f.mappingFile), uintptr(unsafe.Pointer(&f.mappingLength)))
++	f.returned = true
++	if uint32(f.raw) == 0x103 {
++		return s.fail()
++	}
++	if uint32(f.raw) != 0 || f.mappingFile != expected {
++		return ErrInitialGuestScope
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_system_windows.go
+@@ -0,0 +1,113 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"runtime"
++	"unsafe"
++
++	"golang.org/x/sys/windows"
++)
++
++func (s *nativeInitialGuestScope) systemAncestorResource(r *runtimeStorageResource) bool {
++	if s == nil || r == nil {
++		return false
++	}
++	count := 0
++	for _, actual := range s.systemResources {
++		if actual == r {
++			count++
++		}
++	}
++	return count == 1
++}
++
++// No path argument: only this original scope's retained native SystemDirectory
++// result selects the fixed SystemWSL ancestry. Generic storage.walk is unchanged.
++func (s *nativeInitialGuestScope) captureSystemAncestors(ctx context.Context) (*runtimeStorageObject, error) {
++	if !s.originalHeld() || !freshBoundedContext(ctx) || len(s.systemResources) != 0 || len(s.systemAncestors) != 0 {
++		return nil, ErrInitialGuestScope
++	}
++	volume, parts, ok := initialGuestSystemComponents(s.systemDirectory)
++	v, actual, e := readerComponents(s.systemDirectory)
++	if !ok || e != nil || v != volume || len(actual) != len(parts) {
++		return nil, ErrInitialGuestScope
++	}
++	for i := range parts {
++		if actual[i] != parts[i] {
++			return nil, ErrInitialGuestScope
++		}
++	}
++	n := s.owner.storage
++	if n.nativeOpen != nil || n.win32Open != nil || n.unknown || n.closeAttempted || !runtimeStorageDomainKnown() {
++		return nil, s.fail()
++	}
++	text, e := windows.NewNTUnicodeString(`\??\` + volume)
++	if e != nil {
++		return nil, ErrInitialGuestScope
++	}
++	f := &runtimeStorageNativeOpenFrame{owner: n, text: text, disposition: windows.FILE_OPEN}
++	f.resource = &runtimeStorageResource{nativeOpen: f}
++	f.attributes = windows.OBJECT_ATTRIBUTES{ObjectName: f.text, Attributes: windows.OBJ_CASE_INSENSITIVE | windows.OBJ_DONT_REPARSE}
++	f.attributes.Length = uint32(unsafe.Sizeof(f.attributes))
++	n.nativeOpen = f // exact HANDLE/IOSB/text/OA cell published before native entry
++	defer func() {
++		if p := recover(); p != nil {
++			s.fail()
++			panic(p)
++		}
++	}()
++	if !freshBoundedContext(ctx) {
++		n.nativeOpen = nil
++		return nil, ErrInitialGuestScope
++	}
++	f.state.entered = true
++	f.rawStatus, _, _ = runtimeStorageCreateFile.Call(uintptr(unsafe.Pointer(&f.resource.handle)), windows.FILE_TRAVERSE|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, uintptr(unsafe.Pointer(&f.attributes)), uintptr(unsafe.Pointer(&f.status)), 0, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, windows.FILE_OPEN, windows.FILE_DIRECTORY_FILE|windows.FILE_OPEN_REPARSE_POINT|windows.FILE_SYNCHRONOUS_IO_NONALERT, 0, 0)
++	runtime.KeepAlive(f)
++	h, e := n.nativeOpenReply(f)
++	if e != nil {
++		return nil, ErrInitialGuestScope
++	}
++	r := n.keep(h)
++	s.systemResources = append(s.systemResources, r) // role precedes measurement
++	o, e := s.measure(r, true, false, 0)
++	if e != nil {
++		return nil, e
++	}
++	s.systemAncestors = append(s.systemAncestors, o)
++	for _, part := range parts {
++		if !freshBoundedContext(ctx) {
++			return nil, ErrInitialGuestScope
++		}
++		h, e = n.open(o.resource.handle, part, true, windows.FILE_OPEN, windows.FILE_TRAVERSE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil)
++		if e != nil {
++			return nil, ErrInitialGuestScope
++		}
++		r = n.keep(h)
++		s.systemResources = append(s.systemResources, r)
++		o, e = s.measure(r, true, false, 0)
++		if e != nil {
++			return nil, e
++		}
++		s.systemAncestors = append(s.systemAncestors, o)
++	}
++	return o, nil
++}
++
++func (s *nativeInitialGuestScope) checkSystemAncestors(ctx context.Context) error {
++	_, parts, ok := initialGuestSystemComponents(s.systemDirectory)
++	if !ok || len(s.systemAncestors) != len(parts)+1 || len(s.systemResources) != len(s.systemAncestors) {
++		return ErrInitialGuestScope
++	}
++	for i, original := range s.systemAncestors {
++		if !freshBoundedContext(ctx) || original == nil || original.resource != s.systemResources[i] {
++			return ErrInitialGuestScope
++		}
++		actual, e := s.measure(original.resource, true, false, 0)
++		if e != nil || actual.identity != original.identity {
++			return ErrInitialGuestScope
++		}
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_guest_initial_windows_test.go
+@@ -0,0 +1,56 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"testing"
++	"unsafe"
++)
++
++// Compile-only. No management package PE or actual native method runs.
++var _ [0 - int(unsafe.Offsetof(initialGuestNativeFrame{}.full)%8)]byte
++
++func TestInitialKnownLiveCloseRefusalDoesNotPoisonParent(t *testing.T) {
++	o := &FreshSetupOwner{}
++	o.self = o
++	s := &nativeInitialGuestScope{owner: o, authority: &nativeManagedRuntimeAuthority{}}
++	o.initialGuestScope = s
++	freshSetupOwners.Lock()
++	freshSetupOwners.owners[o] = true
++	freshSetupOwners.Unlock()
++	defer func() { freshSetupOwners.Lock(); delete(freshSetupOwners.owners, o); freshSetupOwners.Unlock() }()
++	if o.Close() == nil || o.unknown || o.closed || s.unknown.Load() || s.closed.Load() {
++		t.Fatal("known live derivative was released or falsely made unknown")
++	}
++}
++
++func TestInitialScopeNoNilOrWrapperCopyAuthority(t *testing.T) {
++	if _, e := (*ManagedRuntimeAuthority)(nil).CaptureInitialGuestCreationScope(context.Background(), nil); e == nil {
++		t.Fatal("nil authority")
++	}
++	for _, i := range []*InitialGuestCreationScope{nil, {}, {native: &nativeInitialGuestScope{}}} {
++		if i.StageInitialImport(context.Background()) == nil || i.ImportInitial(context.Background()) == nil {
++			t.Fatal("unowned scope")
++		}
++	}
++	original := &InitialGuestCreationScope{}
++	native := &nativeInitialGuestScope{self: original}
++	original.native = native
++	copy := *original
++	if _, e := copy.exact(); e == nil {
++		t.Fatal("wrapper copy minted original")
++	}
++	parent := &FreshSetupOwner{initialGuestScope: native}
++	authority := &nativeManagedRuntimeAuthority{initialGuestScope: native}
++	native.owner = parent
++	native.authority = authority
++	*original = InitialGuestCreationScope{}
++	if parent.initialGuestScope != native || authority.initialGuestScope != native || native.closedForParents(parent, authority) {
++		t.Fatal("wrapper reassignment dropped original parent barrier")
++	}
++}
++
++// Compile-only link between pure segmentation budget and actual native engine.
++var _ [runtimeIdentityBudget - initialGuestNativeChunkBudget]byte
++var _ [initialGuestNativeChunkBudget - runtimeIdentityBudget]byte
+--- a/pkg/managementconfig/runtime_inspection_cli_windows.go
++++ b/pkg/managementconfig/runtime_inspection_cli_windows.go
+@@ -1,11 +1,14 @@
+ //go:build windows
+ 
+ package managementconfig
++
++import "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/authoritypath"
+ 
+ // No owner/handle/permit escapes this management-private predicate. Native
+ // completion is never inferred from error, deadline, DTO or output success.
+ func inspectionNativeExitKnown() bool {
+ 	inspectionNativeDomain.Lock()
+-	defer inspectionNativeDomain.Unlock()
+-	return !inspectionNativeDomain.failed && len(inspectionNativeDomain.owners) == 0
++	known := !inspectionNativeDomain.failed && len(inspectionNativeDomain.owners) == 0
++	inspectionNativeDomain.Unlock()
++	return known && authoritypath.ProductSelectionExitKnown()
+ }
+--- a/pkg/managementconfig/runtime_managed_authority_windows.go
++++ b/pkg/managementconfig/runtime_managed_authority_windows.go
+@@ -14,6 +14,7 @@
+ )
+ 
+ type nativeManagedRuntimeAuthority struct {
++	initialGuestScope    *nativeInitialGuestScope      // actual initial-only writer derivative
+ 	modernCandidateImage *ModernIncomingCandidateImage // original fixed-role READ derivative; no launch
+ 	modernIncomingImage  *ModernIncomingImage          // same-build borrowed code; no launch/transfer authority
+ 	modernSelfLease      *ModernSelfProcessLease       // dormant original self-process derivative; not a retirement/upgrade permit
+@@ -32,6 +33,29 @@
+ 	closeAttempt         runtimeStorageCloseAttempt
+ }
+ 
++// Original-owner negative gate, not a DATA state/argv admission. The real pending
++// producer is intentionally absent in this reader-only source slice.
++func (a *ManagedRuntimeAuthority) RequireGuestNegativeBeforeControllers(ctx context.Context) error {
++	n, e := a.exact()
++	if e != nil || !freshBoundedContext(ctx) {
++		return ErrGuestNegative
++	}
++	n.publisher.mu.Lock()
++	defer n.publisher.mu.Unlock()
++	n.created.mu.Lock()
++	defer n.created.mu.Unlock()
++	n.image.mu.Lock()
++	defer n.image.mu.Unlock()
++	n.mu.Lock()
++	defer n.mu.Unlock()
++	if !n.admitted() || !servingImageCaptureKnown(n.image) {
++		return ErrGuestNegative
++	}
++	// No actual continuation producer exists yet; refuse before native work
++	// while holding these real owner locks, rather than park a reader under them.
++	return ErrGuestNegative
++}
++
+ func (a *nativeManagedRuntimeAuthority) fence() {
+ 	a.unknown = true
+ 	if a.image != nil {
+@@ -507,6 +531,9 @@
+ 	defer n.created.mu.Unlock()
+ 	n.mu.Lock()
+ 	defer n.mu.Unlock()
++	if n.initialGuestScope != nil && !n.initialGuestScope.closedForParents(n.initialGuestScope.owner, n) {
++		return ErrUpgrade
++	}
+ 	if n.unknown || n.publisher.closeErr != nil || n.publisher.pending != nil || n.created.closeErr != nil {
+ 		return ErrUpgrade
+ 	}
+--- a/pkg/service/cmd/fresh_setup_windows.go
++++ b/pkg/service/cmd/fresh_setup_windows.go
+@@ -32,6 +32,9 @@
+ }
+ 
+ func RunFreshSetupOperation(ctx context.Context, input io.Reader, output io.Writer) (result error) {
++	if managementconfig.RequireGuestMutationBeforeOptions(ctx) != nil {
++		return errPrivateAuthority
++	}
+ 	defer func() { runtime.KeepAlive(output) }()
+ 	if ctx == nil || ctx.Err() != nil || input == nil || output == nil {
+ 		return errPrivateAuthority
+@@ -107,6 +110,9 @@
+ }
+ 
+ func runFreshSetupService(startup context.Context, observer *freshSetupObserver) (result error) {
++	if managementconfig.RequireGuestMutationBeforeOptions(startup) != nil {
++		return errPrivateAuthority
++	}
+ 	var owner *managementconfig.FreshSetupOwner
+ 	var w *windowsPrivateAuthority
+ 	defer func() {
+--- a/pkg/service/cmd/managed_runtime_windows.go
++++ b/pkg/service/cmd/managed_runtime_windows.go
+@@ -31,6 +31,9 @@
+ 	if e != nil {
+ 		return errPrivateAuthority
+ 	}
++	if a.RequireGuestNegativeBeforeControllers(bounded) != nil {
++		return errPrivateAuthority
++	}
+ 	home, e := os.UserHomeDir()
+ 	if e != nil || a.VerifyControllerDirectories(bounded, home, instance.LimaHome(), instance.Dir()) != nil {
+ 		return errPrivateAuthority

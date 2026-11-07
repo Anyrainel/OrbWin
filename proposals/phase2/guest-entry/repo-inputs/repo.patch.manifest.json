@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "component": "guest-entry-repo-inputs",
+  "selected": false,
+  "orderedSeries": false,
+  "parents": {
+    "declaredBeforeRepoManifestSHA256": "6fc84490bf8506f461b4c5faa704af8dd5b8a5721b7db2e03da254603463c7e9",
+    "declaredAfterRepoManifestSHA256": "5c0284fccbf3e3be01460d19c4553047f601e91004c423280db9e854cbcbd867"
+  },
+  "projection": "byte-exact declared repository input subset",
+  "excluded": [],
+  "beforeFiles": 8,
+  "afterFiles": 13,
+  "beforeManifestSHA256": "9a6ccfebfb3af1a33f1acd2fe10dd25a54efd974014ad0244dde44a946721589",
+  "afterManifestSHA256": "339d7086490ce75a61de37b569d9838b9877c955129653a03ac4c999bedae873",
+  "patchSHA256": "38671d88b8431410eaf7d8d755a087d84acfba3515c60b2a75f227dadff32d51",
+  "changedFiles": 9,
+  "changes": [
+    {
+      "path": "scripts/build-backend.mjs",
+      "before": {
+        "bytes": 16342,
+        "sha256": "fea3c660c560d5797acc048a30fdda01f5b27cbf9c8e75d99c20806189cfcdbd"
+      },
+      "after": {
+        "bytes": 17137,
+        "sha256": "f4222fb12b4bba95228961d640c1d5d91120d1c58742cad92fe82d0441b29ae0"
+      },
+      "rawBefore": {
+        "bytes": 16342,
+        "sha256": "fea3c660c560d5797acc048a30fdda01f5b27cbf9c8e75d99c20806189cfcdbd"
+      },
+      "rawAfter": {
+        "bytes": 17137,
+        "sha256": "f4222fb12b4bba95228961d640c1d5d91120d1c58742cad92fe82d0441b29ae0"
+      }
+    },
+    {
+      "path": "scripts/selected-guest-build-input.mjs",
+      "before": null,
+      "after": {
+        "bytes": 5646,
+        "sha256": "f350533661e79712a71f2d397bfcc41b1a0302df520b1d6b42fde4ec49f069bc"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 5646,
+        "sha256": "f350533661e79712a71f2d397bfcc41b1a0302df520b1d6b42fde4ec49f069bc"
+      }
+    },
+    {
+      "path": "scripts/selected-guest-build-input.test.mjs",
+      "before": null,
+      "after": {
+        "bytes": 5347,
+        "sha256": "ceaf7db2c07d060705aa93e16f392ad62edfa391ba0dc8e60e52fe44aeab4286"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 5347,
+        "sha256": "ceaf7db2c07d060705aa93e16f392ad62edfa391ba0dc8e60e52fe44aeab4286"
+      }
+    },
+    {
+      "path": "scripts/test-data/selected-guest/README.md",
+      "before": null,
+      "after": {
+        "bytes": 374,
+        "sha256": "d08a5a4a4edfa4948eb98427872721803bcede905f39fd0750ad92a9db78bcab"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 374,
+        "sha256": "d08a5a4a4edfa4948eb98427872721803bcede905f39fd0750ad92a9db78bcab"
+      }
+    },
+    {
+      "path": "scripts/test-data/selected-guest/base-lima-template.yaml",
+      "before": null,
+      "after": {
+        "bytes": 12045,
+        "sha256": "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 12045,
+        "sha256": "108f0774ac549e1619da24036eedce2de23d7443ec0a5916c418a3fc6ea5cda5"
+      }
+    },
+    {
+      "path": "scripts/test-data/selected-guest/base-manifest.yaml",
+      "before": null,
+      "after": {
+        "bytes": 11024,
+        "sha256": "7565bfc06cf11e103a09c6d98ce431a5045d14c9bb2a610958ae23d08e4a9679"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 11024,
+        "sha256": "7565bfc06cf11e103a09c6d98ce431a5045d14c9bb2a610958ae23d08e4a9679"
+      }
+    },
+    {
+      "path": "scripts/winio-build-input.mjs",
+      "before": {
+        "bytes": 27774,
+        "sha256": "b0a437c6e40c78e6a1cf57001484b14603c18317fddaae644369d7ae7c4071c0"
+      },
+      "after": {
+        "bytes": 28565,
+        "sha256": "2583f6c088feaec9d87a7000e262afdb861377e227f6263b00fb7dcf2dd46490"
+      },
+      "rawBefore": {
+        "bytes": 27774,
+        "sha256": "b0a437c6e40c78e6a1cf57001484b14603c18317fddaae644369d7ae7c4071c0"
+      },
+      "rawAfter": {
+        "bytes": 28565,
+        "sha256": "2583f6c088feaec9d87a7000e262afdb861377e227f6263b00fb7dcf2dd46490"
+      }
+    },
+    {
+      "path": "scripts/winio-build-input.test.mjs",
+      "before": {
+        "bytes": 16362,
+        "sha256": "401f735ff2ae338bb679a948dea790dc2b47b0d17951a7a3ca28e1b36a3ae1ba"
+      },
+      "after": {
+        "bytes": 17570,
+        "sha256": "928fc8a659c3facfd017b0934efe36f00945543714cd9766cc15c764e8a7b67f"
+      },
+      "rawBefore": {
+        "bytes": 16362,
+        "sha256": "401f735ff2ae338bb679a948dea790dc2b47b0d17951a7a3ca28e1b36a3ae1ba"
+      },
+      "rawAfter": {
+        "bytes": 17570,
+        "sha256": "928fc8a659c3facfd017b0934efe36f00945543714cd9766cc15c764e8a7b67f"
+      }
+    },
+    {
+      "path": "src-tauri/src/runtime_winio_provenance.rs",
+      "before": {
+        "bytes": 19796,
+        "sha256": "2c0635226440e89b81721887762d47b74f99cb7406f955b2ea1d2e2c92513add"
+      },
+      "after": {
+        "bytes": 21124,
+        "sha256": "48b7ddc2151d2570f00e2ac42a4ae9e660514b4133d62fc3afcb7cd3282f60cf"
+      },
+      "rawBefore": {
+        "bytes": 19796,
+        "sha256": "2c0635226440e89b81721887762d47b74f99cb7406f955b2ea1d2e2c92513add"
+      },
+      "rawAfter": {
+        "bytes": 21124,
+        "sha256": "48b7ddc2151d2570f00e2ac42a4ae9e660514b4133d62fc3afcb7cd3282f60cf"
+      }
+    }
+  ],
+  "strictPatchReplay": true,
+  "freshFilesystemExactTarget": true
+}

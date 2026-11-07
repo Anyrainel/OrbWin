@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "status": "isolated-source-exports-reconstruction-pass-not-selected",
+  "canonicalParentProjectionMatched": true,
+  "canonicalGitTree": "5300e3fff0cfa965301f261be311ba93241d2045",
+  "files": [
+    {
+      "path": "export-source-components.py",
+      "bytes": 12709,
+      "sha256": "bd8ae3ef98d9ab819bc75f3b4557c28c25241d71b775a753f5376a0aa1ee3c78"
+    },
+    {
+      "path": "export-verification.json",
+      "bytes": 919,
+      "sha256": "f0014147647d6f2664f214d1648db7d45f2ed109cd5d763157ea0ebfcea4fa3a"
+    },
+    {
+      "path": "guest-entry/NOTES.md",
+      "bytes": 1866,
+      "sha256": "fed03b02e8b331b1582c1e6a8bb9553b089ca7c13e90ef58d95e2531108e4e89"
+    },
+    {
+      "path": "guest-entry/rdd.patch",
+      "bytes": 103329,
+      "sha256": "e67c6536f89b36eeb8223de022d4973912209438a438adcaf28435555f5d23b0"
+    },
+    {
+      "path": "guest-entry/rdd.patch.after-manifest.json",
+      "bytes": 210146,
+      "sha256": "5b843dc054d920f188247e22c72717e24182e60d483410bca7d6cd245a29d31b"
+    },
+    {
+      "path": "guest-entry/rdd.patch.before-manifest.json",
+      "bytes": 207085,
+      "sha256": "c5f21bfd7bfe561a7b257d3deb9819d83028f577c1e6d5645c71ddfafa9eae83"
+    },
+    {
+      "path": "guest-entry/rdd.patch.manifest.json",
+      "bytes": 12209,
+      "sha256": "ca73e49ab16240ef1240a16483a9dae4e01ccea1262cd428fa394de2366236f7"
+    },
+    {
+      "path": "guest-entry/repo-inputs/repo.patch",
+      "bytes": 165204,
+      "sha256": "38671d88b8431410eaf7d8d755a087d84acfba3515c60b2a75f227dadff32d51"
+    },
+    {
+      "path": "guest-entry/repo-inputs/repo.patch.after-manifest.json",
+      "bytes": 2105,
+      "sha256": "339d7086490ce75a61de37b569d9838b9877c955129653a03ac4c999bedae873"
+    },
+    {
+      "path": "guest-entry/repo-inputs/repo.patch.before-manifest.json",
+      "bytes": 1249,
+      "sha256": "9a6ccfebfb3af1a33f1acd2fe10dd25a54efd974014ad0244dde44a946721589"
+    },
+    {
+      "path": "guest-entry/repo-inputs/repo.patch.manifest.json",
+      "bytes": 5254,
+      "sha256": "d2cc82be54c979318eefaef7a59fb2fa74aa7e862be6d2fd28101d0af29a18b6"
+    },
+    {
+      "path": "native-initial-scope3/NOTES.md",
+      "bytes": 2093,
+      "sha256": "5b0ea52b75acad045c0fc4d252154be836a5959b7900178061655b60f7f4bcd3"
+    },
+    {
+      "path": "native-initial-scope3/rdd.patch",
+      "bytes": 167866,
+      "sha256": "60d89a17136759de15fefd9310bf6968c487e550173e5dbb0ecebbc6c379b1bf"
+    },
+    {
+      "path": "native-initial-scope3/rdd.patch.after-manifest.json",
+      "bytes": 212035,
+      "sha256": "4a74eb67478d8d61caafbbec8269b73f528dd28054b46bdf3524681eaa094501"
+    },
+    {
+      "path": "native-initial-scope3/rdd.patch.before-manifest.json",
+      "bytes": 207085,
+      "sha256": "c5f21bfd7bfe561a7b257d3deb9819d83028f577c1e6d5645c71ddfafa9eae83"
+    },
+    {
+      "path": "native-initial-scope3/rdd.patch.manifest.json",
+      "bytes": 20148,
+      "sha256": "059dd59e2816e88065674efc3f2dd8caa716b2026fede8ac5c86e9df4fb3fb8a"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2784,
+      "sha256": "736afecbc339ae706c021a636057d64759f572e7575d433b3f7d1a83ff383a0e"
+    },
+    {
+      "path": "seal-export.py",
+      "bytes": 1511,
+      "sha256": "e08a729bc9d6a7ed8a1f0b455dd146526a2b52dfce91427f0094c48cd57027ff"
+    }
+  ],
+  "orderedSeries": false,
+  "activeLocksChanged": false,
+  "gitMutations": false,
+  "nativeOrBuildOrTargetRuns": false,
+  "packagingPeer": "pending-or-separate-no-acceptance-claim"
+}

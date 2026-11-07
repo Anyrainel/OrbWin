@@ -1,0 +1,179 @@
+--- a/src-tauri/src/native_persistent_setup.rs
++++ b/src-tauri/src/native_persistent_setup.rs
+@@ -56,7 +56,22 @@
+         command: Vec<u16>,
+         environment: Vec<u16>,
+         cwd: Vec<u16>,
+-        handles: [HANDLE; 3],
++        handles: [HANDLE; 4],
++        parent_child: HANDLE,
++        parent_reply: HANDLE,
++        parent_result: i32,
++        parent_error: u32,
++        parent_entered: bool,
++        parent_returned: bool,
++        parent_close: bool,
++        parent_times_result: i32,
++        parent_times_error: u32,
++        parent_times_entered: bool,
++        parent_times_returned: bool,
++        parent_created: windows_sys::Win32::Foundation::FILETIME,
++        parent_exit: windows_sys::Win32::Foundation::FILETIME,
++        parent_kernel: windows_sys::Win32::Foundation::FILETIME,
++        parent_user: windows_sys::Win32::Foundation::FILETIME,
+         startup: STARTUPINFOEXW,
+         attributes: Vec<usize>,
+         attribute_ptr: LPPROC_THREAD_ATTRIBUTE_LIST,
+@@ -141,6 +156,7 @@
+             }
+         }
+         raw_close(&mut f.log_child, &mut f.log_close)?;
++        raw_close(&mut f.parent_child, &mut f.parent_close)?;
+         raw_close(&mut f.pi.hThread, &mut f.thread_close)?;
+         if f.attribute_initialized {
+             if f.delete_entered {
+@@ -212,7 +228,22 @@
+                     command: Vec::new(),
+                     environment: Vec::new(),
+                     cwd: Vec::new(),
+-                    handles: [null_mut(); 3],
++                    handles: [null_mut(); 4],
++                    parent_child: null_mut(),
++                    parent_reply: null_mut(),
++                    parent_result: 0,
++                    parent_error: 0,
++                    parent_entered: false,
++                    parent_returned: false,
++                    parent_close: false,
++                    parent_times_result: 0,
++                    parent_times_error: 0,
++                    parent_times_entered: false,
++                    parent_times_returned: false,
++                    parent_created: unsafe { zeroed() },
++                    parent_exit: unsafe { zeroed() },
++                    parent_kernel: unsafe { zeroed() },
++                    parent_user: unsafe { zeroed() },
+                     startup: unsafe { zeroed() },
+                     attributes: Vec::new(),
+                     attribute_ptr: null_mut(),
+@@ -265,11 +296,7 @@
+                 {
+                     return Err("Fixed cached setup image required.".into());
+                 }
+-                f.command = command_line(&[
+-                    o.executable.path().as_os_str().encode_wide().collect(),
+-                    "private-runtime-operation".encode_utf16().collect(),
+-                    "setup".encode_utf16().collect(),
+-                ])?;
++
+                 let n = unsafe {
+                     windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW(
+                         f.windows.as_mut_ptr(),
+@@ -444,6 +471,71 @@
+                     }
+                 }
+                 f.handles[2] = f.log_child;
++                // Original boxed reply cells precede duplicate/query; no PID reopen.
++                f.parent_entered = true;
++                f.parent_result = unsafe {
++                    DuplicateHandle(
++                        GetCurrentProcess(),
++                        GetCurrentProcess(),
++                        GetCurrentProcess(),
++                        &mut f.parent_reply,
++                        PROCESS_QUERY_INFORMATION | SYNCHRONIZE,
++                        1,
++                        0,
++                    )
++                };
++                f.parent_error = unsafe { GetLastError() };
++                f.parent_returned = true;
++                match crate::persistent_setup_model::duplicate_reply(
++                    f.parent_result,
++                    f.parent_reply as usize,
++                    f.parent_error,
++                ) {
++                    crate::persistent_setup_model::HandleReply::Owned => {
++                        f.parent_child = f.parent_reply
++                    }
++                    crate::persistent_setup_model::HandleReply::NoOutput => {
++                        return Err("Persistent parent duplicate refused.".into())
++                    }
++                    crate::persistent_setup_model::HandleReply::Unknown => {
++                        f.acquisition.fail();
++                        return Err("Persistent parent duplicate unknown.".into());
++                    }
++                }
++                f.parent_times_entered = true;
++                f.parent_times_result = unsafe {
++                    GetProcessTimes(
++                        f.parent_child,
++                        &mut f.parent_created,
++                        &mut f.parent_exit,
++                        &mut f.parent_kernel,
++                        &mut f.parent_user,
++                    )
++                };
++                f.parent_times_error = unsafe { GetLastError() };
++                f.parent_times_returned = true;
++                if f.parent_times_result == 0 {
++                    if f.parent_times_error == ERROR_IO_PENDING {
++                        f.acquisition.fail();
++                    }
++                    return Err(format!(
++                        "Persistent parent creation refused (OS error {}).",
++                        f.parent_times_error
++                    ));
++                }
++                let creation = (u64::from(f.parent_created.dwHighDateTime) << 32)
++                    | u64::from(f.parent_created.dwLowDateTime);
++                let capsule = crate::persistent_setup_model::parent_capsule(
++                    f.parent_child as usize,
++                    creation,
++                )?;
++                f.command = command_line(&[
++                    o.executable.path().as_os_str().encode_wide().collect(),
++                    "private-runtime-operation".encode_utf16().collect(),
++                    "setup".encode_utf16().collect(),
++                    capsule.encode_utf16().collect(),
++                ])?;
++                f.handles[3] = f.parent_child;
+                 f.attribute_probe = unsafe {
+                     InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut f.attribute_bytes)
+                 };
+@@ -528,6 +620,7 @@
+                     raw_close(&mut p.child, &mut p.close_entered)?
+                 }
+                 raw_close(&mut f.log_child, &mut f.log_close)?;
++                raw_close(&mut f.parent_child, &mut f.parent_close)?;
+                 raw_close(&mut f.pi.hThread, &mut f.thread_close)?;
+                 if !f.launch.admit() {
+                     return Err("Persistent initial frame not admitted.".into());
+--- a/src-tauri/src/persistent_setup_model.rs
++++ b/src-tauri/src/persistent_setup_model.rs
+@@ -392,3 +392,25 @@
+         assert!(bounded.chars().count() < 1200);
+     }
+ }
++
++// Locator DATA, never guest/writer permission. Actual Go receiver checks its inherited original object.
++pub(crate) fn parent_capsule(handle: usize, creation: u64) -> Result<String, String> {
++    if handle == 0 || handle == usize::MAX || creation == 0 {
++        return Err("Persistent parent capsule refused.".into());
++    }
++    Ok(format!("--orbwin-setup-parent=2:{handle}:{creation}"))
++}
++#[cfg(test)]
++mod parent_capsule_tests {
++    use super::*;
++    #[test]
++    fn only_canonical_nonzero_original_locators() {
++        assert_eq!(
++            parent_capsule(24, u64::MAX).unwrap(),
++            "--orbwin-setup-parent=2:24:18446744073709551615"
++        );
++        assert!(parent_capsule(0, 1).is_err());
++        assert!(parent_capsule(usize::MAX, 1).is_err());
++        assert!(parent_capsule(2, 0).is_err());
++    }
++}

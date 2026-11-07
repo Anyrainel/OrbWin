@@ -1,0 +1,625 @@
+--- a/cmd/rdd/runtime_setup_route.go
++++ b/cmd/rdd/runtime_setup_route.go
+@@ -1,6 +1,10 @@
+ package main
+ 
+-import "context"
++import (
++	"context"
++	"strconv"
++	"strings"
++)
+ 
+ type runtimeSetupRoute uint8
+ 
+@@ -19,7 +23,7 @@
+ 	if len(args) >= 2 && args[1] == "preflight" {
+ 		return runtimeSetupUnrequested
+ 	}
+-	if len(args) == 2 && args[1] == "setup" {
++	if len(args) == 3 && args[1] == "setup" && runtimeSetupParentCapsule(args[2]) {
+ 		return runtimeSetupRequested
+ 	}
+ 	return runtimeSetupRefused
+@@ -32,3 +36,23 @@
+ 	_, bounded := ctx.Deadline()
+ 	return bounded
+ }
++
++// Canonical locator syntax only. Actual original inherited objects are checked
++// by the service-owned opaque receiver; strings never grant guest permission.
++func runtimeSetupParentCapsule(s string) bool {
++	const p = "--orbwin-setup-parent=2:"
++	if !strings.HasPrefix(s, p) || len(s) > 100 {
++		return false
++	}
++	fields := strings.Split(s[len(p):], ":")
++	if len(fields) != 2 {
++		return false
++	}
++	for j, v := range fields {
++		n, e := strconv.ParseUint(v, 10, 64)
++		if e != nil || n == 0 || strconv.FormatUint(n, 10) != v || j == 0 && n >= ^uint64(0)-15 {
++			return false
++		}
++	}
++	return true
++}
+--- a/cmd/rdd/runtime_setup_route_test.go
++++ b/cmd/rdd/runtime_setup_route_test.go
+@@ -16,7 +16,8 @@
+ 	}{
+ 		{nil, runtimeSetupUnrequested}, {[]string{"service", "start"}, runtimeSetupUnrequested},
+ 		{[]string{"private-runtime-operation", "preflight"}, runtimeSetupUnrequested},
+-		{[]string{"private-runtime-operation", "setup"}, runtimeSetupRequested},
++		{[]string{"private-runtime-operation", "setup"}, runtimeSetupRefused},
++		{[]string{"private-runtime-operation", "setup", "--orbwin-setup-parent=2:24:33"}, runtimeSetupRequested},
+ 		{[]string{"private-runtime-operation"}, runtimeSetupRefused},
+ 		{[]string{"private-runtime-operation", "resume"}, runtimeSetupRefused},
+ 		{[]string{"private-runtime-operation", "setup", "--instance=other"}, runtimeSetupRefused},
+@@ -74,3 +75,14 @@
+ 		t.Fatal("instance/environment reachable before role")
+ 	}
+ }
++
++func TestRuntimeSetupParentCanonicalRefusal(t *testing.T) {
++	for _, s := range []string{"", "--orbwin-setup-parent=2:0:3", "--orbwin-setup-parent=2:24:0", "--orbwin-setup-parent=2:024:3", "--orbwin-setup-parent=2:24:99999999999999999999", "--orbwin-setup-parent=2:18446744073709551615:3", "--orbwin-setup-parent=1:24:3"} {
++		if runtimeSetupParentCapsule(s) {
++			t.Fatal(s)
++		}
++	}
++	if !runtimeSetupParentCapsule("--orbwin-setup-parent=2:24:18446744073709551615") {
++		t.Fatal("canonical generation")
++	}
++}
+--- a/cmd/rdd/runtime_setup_windows.go
++++ b/cmd/rdd/runtime_setup_windows.go
+@@ -20,16 +20,16 @@
+ 	// its lifetime; post-Begin observer EOF/deadline cannot kill healthy actors.
+ 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+ 	defer cancel()
+-	return runEarlyRuntimeSetup(ctx, input, output)
++	return runEarlyRuntimeSetupFromParent(ctx, input, output, args[2])
+ }
+ 
+-func runEarlyRuntimeSetup(ctx context.Context, input io.Reader, output io.Writer) (bool, int) {
+-	if !runtimeSetupContextKnown(ctx) || input == nil || output == nil {
++func runEarlyRuntimeSetupFromParent(ctx context.Context, input io.Reader, output io.Writer, capsule string) (bool, int) {
++	if input == nil || output == nil {
+ 		return true, 2
+ 	}
+ 	// This producer returns ONLY after original workers/owners positively settle;
+ 	// unknown is retained inside it. No caller error or EOF grants retirement.
+-	if service.RunFreshSetupOperation(ctx, input, output) != nil {
++	if service.RunFreshSetupOperationFromParent(ctx, input, output, capsule) != nil {
+ 		return true, 2
+ 	}
+ 	return true, 0
+--- a/cmd/rdd/runtime_setup_windows_test.go
++++ b/cmd/rdd/runtime_setup_windows_test.go
+@@ -14,7 +14,7 @@
+ 	cancel()
+ 	for _, ctx := range []context.Context{nil, context.Background(), ctx} {
+ 		var out bytes.Buffer
+-		if handled, code := runEarlyRuntimeSetup(ctx, bytes.NewReader(nil), &out); !handled || code != 2 || out.Len() != 0 {
++		if handled, code := runEarlyRuntimeSetupFromParent(ctx, bytes.NewReader(nil), &out, "--orbwin-setup-parent=2:24:33"); !handled || code != 2 || out.Len() != 0 {
+ 			t.Fatal("guard entered producer")
+ 		}
+ 	}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_setup_parent.go
+@@ -0,0 +1,43 @@
++package managementconfig
++
++import (
++	"errors"
++	"strconv"
++	"strings"
++)
++
++var ErrSetupParent = errors.New("private setup parent association unavailable")
++
++type setupParentData struct {
++	handle   uintptr
++	creation uint64
++}
++
++func decodeSetupParent(value string) (setupParentData, error) {
++	var d setupParentData
++	const prefix = "--orbwin-setup-parent=2:"
++	if !strings.HasPrefix(value, prefix) || len(value) > 100 {
++		return d, ErrSetupParent
++	}
++	p := strings.Split(value[len(prefix):], ":")
++	if len(p) != 2 {
++		return d, ErrSetupParent
++	}
++	h, e := strconv.ParseUint(p[0], 10, 64)
++	if e != nil || h == 0 || h >= uint64(^uintptr(0))-15 || strconv.FormatUint(h, 10) != p[0] {
++		return d, ErrSetupParent
++	}
++	c, e := strconv.ParseUint(p[1], 10, 64)
++	if e != nil || c == 0 || strconv.FormatUint(c, 10) != p[1] {
++		return d, ErrSetupParent
++	}
++	return setupParentData{uintptr(h), c}, nil
++}
++
++// QUERY_INFORMATION implies QUERY_LIMITED_INFORMATION per Windows' documented
++// access contract. No write/termination/duplicate rights are permitted.
++func setupParentRights(got uint32) bool {
++	const required = uint32(0x400 | 0x100000)
++	const allowed = required | 0x1000
++	return got&required == required && got & ^allowed == 0
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_setup_parent_test.go
+@@ -0,0 +1,113 @@
++package managementconfig
++
++import (
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"testing"
++)
++
++func TestSetupParentCanonicalLocatorOnly(t *testing.T) {
++	d, e := decodeSetupParent("--orbwin-setup-parent=2:24:18446744073709551615")
++	if e != nil || d.handle != 24 || d.creation != ^uint64(0) {
++		t.Fatal(d, e)
++	}
++	for _, s := range []string{"", "--orbwin-setup-parent=1:24:3", "--orbwin-setup-parent=2:024:3", "--orbwin-setup-parent=2:24:03", "--orbwin-setup-parent=2:24:99999999999999999999", "--orbwin-setup-parent=2:0:3", "--orbwin-setup-parent=2:24:0", "--orbwin-setup-parent=2:18446744073709551615:3", "--orbwin-setup-parent=2:24:3:4"} {
++		if _, e := decodeSetupParent(s); e == nil {
++			t.Fatal(s)
++		}
++	}
++}
++
++func TestSetupParentReducedRightsAllowsOnlyDocumentedQueryCompanion(t *testing.T) {
++	for _, v := range []uint32{0x100400, 0x101400} {
++		if !setupParentRights(v) {
++			t.Fatal(v)
++		}
++	}
++	for _, v := range []uint32{0, 0x1000, 0x100000, 0x400, 0x100401, 0x100440, 0x100420, 0x1fffff} {
++		if setupParentRights(v) {
++			t.Fatal(v)
++		}
++	}
++}
++
++// Read the actual Windows producer without importing its provider graph. A
++// complete inherited locator must have original backing before deadline gates.
++func TestSetupParentActualCandidatePrecedesDeadlineRefusal(t *testing.T) {
++	f, e := parser.ParseFile(token.NewFileSet(), "runtime_setup_parent_windows.go", nil, 0)
++	if e != nil {
++		t.Fatal(e)
++	}
++	var fn *ast.FuncDecl
++	for _, d := range f.Decls {
++		if x, ok := d.(*ast.FuncDecl); ok && x.Name.Name == "CaptureSetupParent" {
++			fn = x
++		}
++	}
++	if fn == nil {
++		t.Fatal("actual producer absent")
++	}
++	allocated, published, unknown, recovery := false, false, false, false
++	found := false
++	for _, stmt := range fn.Body.List {
++		if a, ok := stmt.(*ast.AssignStmt); ok && len(a.Lhs) == 1 && len(a.Rhs) == 1 {
++			if x, ok := a.Lhs[0].(*ast.Ident); ok && x.Name == "b" {
++				if u, ok := a.Rhs[0].(*ast.UnaryExpr); ok {
++					if c, ok := u.X.(*ast.CompositeLit); ok {
++						if n, ok := c.Type.(*ast.Ident); ok && n.Name == "SetupParentBinding" {
++							allocated = true
++						}
++					}
++				}
++			}
++			if x, ok := a.Lhs[0].(*ast.Ident); ok && x.Name == "setupParentOriginal" {
++				if v, ok := a.Rhs[0].(*ast.Ident); ok && v.Name == "b" {
++					published = allocated
++				}
++			}
++			if x, ok := a.Lhs[0].(*ast.SelectorExpr); ok && x.Sel.Name == "unknown" {
++				if n, ok := x.X.(*ast.Ident); ok && n.Name == "b" {
++					if v, ok := a.Rhs[0].(*ast.Ident); ok && v.Name == "true" {
++						unknown = published
++					}
++				}
++			}
++		}
++		if _, ok := stmt.(*ast.DeferStmt); ok && unknown {
++			recovery = true
++		}
++		hasDeadline := false
++		ast.Inspect(stmt, func(n ast.Node) bool {
++			if c, ok := n.(*ast.CallExpr); ok {
++				if x, ok := c.Fun.(*ast.Ident); ok && x.Name == "freshBoundedContext" {
++					hasDeadline = true
++				}
++			}
++			return true
++		})
++		if !hasDeadline {
++			continue
++		}
++		if !allocated || !published || !unknown || !recovery {
++			t.Fatal("deadline can discard inherited candidate")
++		}
++		gate, ok := stmt.(*ast.IfStmt)
++		if !ok || len(gate.Body.List) != 1 {
++			t.Fatal("deadline refusal shape")
++		}
++		ret, ok := gate.Body.List[0].(*ast.ReturnStmt)
++		if !ok || len(ret.Results) != 2 {
++			t.Fatal("deadline must return original candidate")
++		}
++		b, ok := ret.Results[0].(*ast.Ident)
++		if !ok || b.Name != "b" {
++			t.Fatal("empty/replacement candidate on expiry")
++		}
++		found = true
++		break
++	}
++	if !found {
++		t.Fatal("deadline gate absent")
++	}
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_setup_parent_windows.go
+@@ -0,0 +1,259 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"bytes"
++	"context"
++	"golang.org/x/sys/windows"
++	"os"
++	"runtime"
++	"sync"
++	"sync/atomic"
++	"unsafe"
++)
++
++// Association only: no storage, writer, guest, readiness or retirement authority.
++type SetupParentBinding struct {
++	restrictedBuffers [2][256]uint64
++	restrictedSizes   [2]uint32
++	restrictedCounts  [2]uint32
++
++	self                                    *SetupParentBinding
++	mu                                      sync.Mutex
++	input, output                           *os.File
++	parent                                  windows.Handle
++	tokens                                  [3]windows.Token
++	tokenEntered, tokenReturned             [3]bool
++	tokenErr                                [3]error
++	tokenClose                              [3]bool
++	tokenBuffers                            [2][256]uint64
++	tokenSizes                              [2]uint32
++	values                                  [2][3]uint32
++	valueSizes                              [2][3]uint32
++	basic                                   windows.PROCESS_BASIC_INFORMATION
++	basicSize                               uint32
++	objectBasic                             [14]uint32
++	objectSize                              uint32
++	made, ended, kernel, user               windows.Filetime
++	parentPID, selfSession                  uint32
++	pipePID                                 [2]uint32
++	flags                                   [3]uint32
++	raw                                     uintptr
++	err                                     error
++	unknown, complete, closed, closeEntered bool
++	expected                                setupParentData
++}
++
++var setupParentClaimed atomic.Bool
++var setupParentOriginal *SetupParentBinding
++var setupParentGetFlags = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetHandleInformation")
++var setupParentClose = windows.NewLazySystemDLL("kernel32.dll").NewProc("CloseHandle")
++var setupParentServer = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetNamedPipeServerProcessId")
++var setupParentWait = windows.NewLazySystemDLL("kernel32.dll").NewProc("WaitForSingleObject")
++var setupParentContextKey struct{}
++
++// Original output graph is returned even on refusal; service producer must keep
++// unknown graph alive before returning/exit. No native handle reconstructed by PID.
++func CaptureSetupParent(ctx context.Context, input, output *os.File, value string) (b *SetupParentBinding, result error) {
++	d, e := decodeSetupParent(value)
++	if e != nil || input == nil || output == nil || input != os.Stdin || output != os.Stdout || input == output || output == os.Stderr || !setupParentClaimed.CompareAndSwap(false, true) {
++		return nil, ErrSetupParent
++	}
++	b = &SetupParentBinding{input: input, output: output, parent: windows.Handle(d.handle), expected: d}
++	b.self = b
++	setupParentOriginal = b
++	// Once a caller-supplied inherited locator is consumed, any unvalidated reply
++	// retains it. A malformed locator can never be treated as an owned close slot.
++	b.unknown = true
++	defer func() {
++		if recover() != nil {
++			b.unknown = true
++			result = ErrSetupParent
++		}
++	}()
++	// Inherited custody exists before the acquisition budget can expire.
++	// Return SAME unknown candidate to the producer keeper; never close an
++	// unvalidated numeric handle or return an empty binding on cancellation.
++	if !freshBoundedContext(ctx) {
++		return b, ErrSetupParent
++	}
++	runtime.LockOSThread()
++	defer runtime.UnlockOSThread()
++	handles := [3]windows.Handle{b.parent, windows.Handle(input.Fd()), windows.Handle(output.Fd())}
++	if handles[0] == handles[1] || handles[0] == handles[2] || handles[1] == handles[2] {
++		return b, ErrSetupParent
++	}
++	for j, h := range handles {
++		b.raw, _, b.err = setupParentGetFlags.Call(uintptr(h), uintptr(unsafe.Pointer(&b.flags[j])))
++		if uint32(b.raw) == 0 || b.flags[j]&windows.HANDLE_FLAG_INHERIT == 0 {
++			return b, ErrSetupParent
++		}
++		b.err = windows.SetHandleInformation(h, windows.HANDLE_FLAG_INHERIT, 0)
++		if b.err != nil {
++			return b, ErrSetupParent
++		}
++		b.raw, _, b.err = setupParentGetFlags.Call(uintptr(h), uintptr(unsafe.Pointer(&b.flags[j])))
++		if uint32(b.raw) == 0 || b.flags[j]&windows.HANDLE_FLAG_INHERIT != 0 {
++			return b, ErrSetupParent
++		}
++	}
++	b.raw, _, b.err = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQueryObject").Call(uintptr(b.parent), 0, uintptr(unsafe.Pointer(&b.objectBasic)), unsafe.Sizeof(b.objectBasic), uintptr(unsafe.Pointer(&b.objectSize)))
++	if uint32(b.raw) != 0 || b.objectSize != uint32(unsafe.Sizeof(b.objectBasic)) || !setupParentRights(b.objectBasic[1]) {
++		return b, ErrSetupParent
++	}
++	// Process type, held generation, actual own native parent (locator only).
++	b.parentPID, b.err = windows.GetProcessId(b.parent)
++	if b.err != nil || b.parentPID == 0 || b.parentPID == windows.GetCurrentProcessId() {
++		return b, ErrSetupParent
++	}
++	b.err = windows.NtQueryInformationProcess(windows.CurrentProcess(), 0, unsafe.Pointer(&b.basic), uint32(unsafe.Sizeof(b.basic)), &b.basicSize)
++	if b.err != nil || b.basicSize != uint32(unsafe.Sizeof(b.basic)) || b.basic.InheritedFromUniqueProcessId != uintptr(b.parentPID) {
++		return b, ErrSetupParent
++	}
++	b.err = windows.GetProcessTimes(b.parent, &b.made, &b.ended, &b.kernel, &b.user)
++	if b.err != nil || uint64(b.made.HighDateTime)<<32|uint64(b.made.LowDateTime) != d.creation {
++		return b, ErrSetupParent
++	}
++	b.raw, _, b.err = setupParentWait.Call(uintptr(b.parent), 0)
++	if uint32(b.raw) != uint32(windows.WAIT_TIMEOUT) {
++		return b, ErrSetupParent
++	}
++	b.err = windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &b.selfSession)
++	if b.err != nil {
++		return b, ErrSetupParent
++	}
++	for j, f := range []*os.File{input, output} {
++		h := windows.Handle(f.Fd())
++		kind, e := windows.GetFileType(h)
++		if e != nil || kind != windows.FILE_TYPE_PIPE {
++			return b, ErrSetupParent
++		}
++		b.raw, _, b.err = setupParentServer.Call(uintptr(h), uintptr(unsafe.Pointer(&b.pipePID[j])))
++		if uint32(b.raw) == 0 || b.pipePID[j] != b.parentPID {
++			return b, ErrSetupParent
++		}
++	}
++	b.tokenEntered[0] = true
++	b.tokenErr[0] = windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &b.tokens[0])
++	b.tokenReturned[0] = true
++	if b.tokenErr[0] != windows.ERROR_NO_TOKEN || b.tokens[0] != 0 {
++		return b, ErrSetupParent
++	}
++	for j, h := range []windows.Handle{windows.CurrentProcess(), b.parent} {
++		k := j + 1
++		b.tokenEntered[k] = true
++		b.tokenErr[k] = windows.OpenProcessToken(h, windows.TOKEN_QUERY, &b.tokens[k])
++		b.tokenReturned[k] = true
++		if b.tokenErr[k] != nil || b.tokens[k] == 0 || windows.Handle(b.tokens[k]) == windows.InvalidHandle {
++			return b, ErrSetupParent
++		}
++		b.err = windows.GetTokenInformation(b.tokens[k], windows.TokenUser, (*byte)(unsafe.Pointer(&b.tokenBuffers[j][0])), uint32(unsafe.Sizeof(b.tokenBuffers[j])), &b.tokenSizes[j])
++		if b.err != nil || b.tokenSizes[j] < uint32(unsafe.Sizeof(windows.Tokenuser{})) || b.tokenSizes[j] > uint32(unsafe.Sizeof(b.tokenBuffers[j])) {
++			return b, ErrSetupParent
++		}
++		for q, class := range []uint32{windows.TokenSessionId, windows.TokenElevation, 29 /* TokenIsAppContainer */} {
++			b.err = windows.GetTokenInformation(b.tokens[k], class, (*byte)(unsafe.Pointer(&b.values[j][q])), 4, &b.valueSizes[j][q])
++			if b.err != nil || b.valueSizes[j][q] != 4 {
++				return b, ErrSetupParent
++			}
++		}
++		// IsTokenRestricted tests restricting SID list, not filtering history.
++		// Query into retained backing to distinguish true zero count from API failure.
++		b.err = windows.GetTokenInformation(b.tokens[k], windows.TokenRestrictedSids, (*byte)(unsafe.Pointer(&b.restrictedBuffers[j][0])), uint32(unsafe.Sizeof(b.restrictedBuffers[j])), &b.restrictedSizes[j])
++		if b.err != nil || b.restrictedSizes[j] < 4 || b.restrictedSizes[j] > uint32(unsafe.Sizeof(b.restrictedBuffers[j])) {
++			return b, ErrSetupParent
++		}
++		b.restrictedCounts[j] = *(*uint32)(unsafe.Pointer(&b.restrictedBuffers[j][0]))
++		if b.restrictedCounts[j] != 0 {
++			return b, ErrSetupParent
++		}
++		if b.values[j][0] != b.selfSession || b.values[j][1] != 0 || b.values[j][2] != 0 {
++			return b, ErrSetupParent
++		}
++	}
++	if !bytes.Equal(b.sid(0), b.sid(1)) || len(b.sid(0)) == 0 || !freshBoundedContext(ctx) {
++		return b, ErrSetupParent
++	}
++	b.complete = true
++	b.unknown = false
++	return b, nil
++}
++func (b *SetupParentBinding) sid(j int) []byte {
++	start := uintptr(unsafe.Pointer(&b.tokenBuffers[j][0]))
++	n := uintptr(b.tokenSizes[j])
++	u := (*windows.Tokenuser)(unsafe.Pointer(&b.tokenBuffers[j][0]))
++	sidPointer := unsafe.Pointer(u.User.Sid)
++	p := uintptr(sidPointer)
++	if p < start+unsafe.Sizeof(*u) || p > start+n || start+n-p < 8 {
++		return nil
++	}
++	head := unsafe.Slice((*byte)(sidPointer), 8)
++	length := uintptr(8 + 4*int(head[1]))
++	if head[0] != 1 || head[1] > 15 || length > start+n-p {
++		return nil
++	}
++	return unsafe.Slice((*byte)(sidPointer), int(length))
++}
++func (b *SetupParentBinding) Bind(ctx context.Context, input, output *os.File) (context.Context, error) {
++	if b == nil || b.self != b || setupParentOriginal != b || !b.complete || b.unknown || b.closed || input != b.input || output != b.output || !freshBoundedContext(ctx) {
++		return nil, ErrSetupParent
++	}
++	return context.WithValue(ctx, setupParentContextKey, b), nil
++}
++func RequireSetupParentBinding(ctx context.Context, input, output any) error {
++	if ctx == nil {
++		return ErrSetupParent
++	}
++	b, ok := ctx.Value(setupParentContextKey).(*SetupParentBinding)
++	if !ok || b == nil || b.self != b || setupParentOriginal != b || !b.complete || b.unknown || b.closed || input != b.input || output != b.output {
++		return ErrSetupParent
++	}
++	return nil
++}
++func (b *SetupParentBinding) Close() (result error) {
++	if b == nil {
++		return nil
++	}
++	b.mu.Lock()
++	defer b.mu.Unlock()
++	if b.self != b || setupParentOriginal != b || b.unknown || !b.complete {
++		return ErrSetupParent
++	}
++	if b.closed {
++		return nil
++	}
++	if b.closeEntered {
++		return ErrSetupParent
++	}
++	b.closeEntered = true
++	b.unknown = true
++	defer func() {
++		if recover() != nil {
++			result = ErrSetupParent
++		}
++		runtime.KeepAlive(b)
++	}()
++	for j := 2; j >= 0; j-- {
++		if b.tokens[j] == 0 {
++			continue
++		}
++		if b.tokenClose[j] {
++			return ErrSetupParent
++		}
++		b.tokenClose[j] = true
++		b.raw, _, b.err = setupParentClose.Call(uintptr(b.tokens[j]))
++		if uint32(b.raw) == 0 {
++			return ErrSetupParent
++		}
++		b.tokens[j] = 0
++	}
++	b.raw, _, b.err = setupParentClose.Call(uintptr(b.parent))
++	if uint32(b.raw) == 0 {
++		return ErrSetupParent
++	}
++	b.parent = 0
++	b.closed = true
++	b.unknown = false
++	return nil
++}
+--- /dev/null
++++ b/pkg/managementconfig/runtime_setup_parent_windows_test.go
+@@ -0,0 +1,24 @@
++//go:build windows
++
++package managementconfig
++
++import (
++	"context"
++	"testing"
++)
++
++// Compile-only: original/copy/nil gates cannot invoke a Windows API.
++func TestSetupParentOpaqueOriginalGuard(t *testing.T) {
++	b := &SetupParentBinding{}
++	b.self = b
++	if RequireSetupParentBinding(context.Background(), nil, nil) == nil {
++		t.Fatal("plain context")
++	}
++	copy := &SetupParentBinding{self: b}
++	if _, e := copy.Bind(context.Background(), nil, nil); e == nil {
++		t.Fatal("copy")
++	}
++	if _, e := b.Bind(context.Background(), nil, nil); e == nil {
++		t.Fatal("unregistered")
++	}
++}
+--- a/pkg/service/cmd/fresh_setup_windows.go
++++ b/pkg/service/cmd/fresh_setup_windows.go
+@@ -17,6 +17,7 @@
+ 	"os"
+ 	"runtime"
+ 	"strconv"
++	"time"
+ 
+ 	"github.com/sirupsen/logrus"
+ )
+@@ -31,7 +32,55 @@
+ 	return runFreshSetupService(startup, nil)
+ }
+ 
++// The actual early CLI producer owns this association through protocol/service
++// settlement. Unknown never escapes to main/os.Exit or depends on a global map.
++func RunFreshSetupOperationFromParent(ctx context.Context, input io.Reader, output io.Writer, capsule string) (result error) {
++	in, inOK := input.(*os.File)
++	out, outOK := output.(*os.File)
++	if !inOK || !outOK {
++		return errPrivateAuthority
++	}
++	var binding *managementconfig.SetupParentBinding
++	defer func() {
++		if recover() != nil {
++			keepSetupParentUnknown(binding)
++		}
++		defer func() {
++			if recover() != nil {
++				keepSetupParentUnknown(binding)
++			}
++		}()
++		if binding != nil && binding.Close() != nil {
++			keepSetupParentUnknown(binding)
++		}
++	}()
++	var e error
++	// Custody settlement has its own fixed budget even if caller admission was
++	// cancelled before entry. Original startup ctx still gates Bind/Run below.
++	captureContext, captureCancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer captureCancel()
++	binding, e = managementconfig.CaptureSetupParent(captureContext, in, out, capsule)
++	if e != nil {
++		return errPrivateAuthority
++	}
++	ctx, e = binding.Bind(ctx, in, out)
++	if e != nil {
++		return errPrivateAuthority
++	}
++	return RunFreshSetupOperation(ctx, input, output)
++}
++func keepSetupParentUnknown(binding *managementconfig.SetupParentBinding) {
++	for {
++		time.Sleep(time.Second)
++		runtime.KeepAlive(binding)
++	}
++}
++
+ func RunFreshSetupOperation(ctx context.Context, input io.Reader, output io.Writer) (result error) {
++	if managementconfig.RequireSetupParentBinding(ctx, input, output) != nil {
++		return errPrivateAuthority
++	}
++
+ 	if managementconfig.RequireGuestMutationBeforeOptions(ctx) != nil {
+ 		return errPrivateAuthority
+ 	}

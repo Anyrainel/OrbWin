@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "status": "isolated-source-export-reconstruction-pass-not-selected",
+  "sourceReceiptSHA256": "593d0af514b877d52c7445fbbedc353af86a661047509e76c2a1db0363dba7c0",
+  "source2FinitePeerSHA256": "77b131d9098936823a7cf53cfd089cdd0d1f62a64bcdf4fed5d179a68a9a6f71",
+  "files": [
+    {
+      "path": "desktop/repo.patch",
+      "bytes": 7791,
+      "sha256": "73b963bf5cb7330a001cc5652a361cc2e404b687e922d6fc185019dccccc75c2"
+    },
+    {
+      "path": "desktop/repo.patch.after-manifest.json",
+      "bytes": 334,
+      "sha256": "84c2446e3fa37aea64737b94c44025f6734738877603b53affbbf70e3b49af29"
+    },
+    {
+      "path": "desktop/repo.patch.before-manifest.json",
+      "bytes": 334,
+      "sha256": "a423fc95c4eb08004ea99a82d0ea70097a0d0512651832654ed5fd516ad1f1e7"
+    },
+    {
+      "path": "desktop/repo.patch.manifest.json",
+      "bytes": 2336,
+      "sha256": "c1845a3a2dd90089d809d59a0902dd3dbc4712cb85754a4eed4c6f77701aeeaa"
+    },
+    {
+      "path": "export.py",
+      "bytes": 4470,
+      "sha256": "c59ebfaafa3194f8dc6758c69dd671e8e4cee6499b4fa4b9f6b2113b2ddd35b7"
+    },
+    {
+      "path": "go/rdd.patch",
+      "bytes": 22652,
+      "sha256": "f8a16549218eb8bf6ef6153863a1a0ccabae545615f440093caea7e946919725"
+    },
+    {
+      "path": "go/rdd.patch.after-manifest.json",
+      "bytes": 212978,
+      "sha256": "202a76cd6d80d6cf59f859c194ee3e754a208e97fe5c9cb990710d191c8b18d5"
+    },
+    {
+      "path": "go/rdd.patch.before-manifest.json",
+      "bytes": 212275,
+      "sha256": "39ede98be75c6fda7b0736cff35fd3ba001ebdbf530459e52480f83e80756614"
+    },
+    {
+      "path": "go/rdd.patch.manifest.json",
+      "bytes": 5866,
+      "sha256": "f74f8bebaffa618e7c860cc0f061862fe7af6cc85d6dfe0bc77169478aafa8a7"
+    },
+    {
+      "path": "NOTES.md",
+      "bytes": 3853,
+      "sha256": "50b4c5956f0aefb7f14bc8e8cccd9a9ca2a0b1a3ecdb89cea094e8ea119dda8f"
+    },
+    {
+      "path": "review-status.json",
+      "bytes": 353,
+      "sha256": "3fdd0301e372febb9c0ea73cc91ba6127048c949fe5399e5a802db84a111f2e0"
+    },
+    {
+      "path": "seal.py",
+      "bytes": 1553,
+      "sha256": "0a198755d844a501c7e66bdad301f351b973a6ce0f442cba8526bf05bfa65b92"
+    },
+    {
+      "path": "verification.json",
+      "bytes": 708,
+      "sha256": "af2685bb26d6f7807babb37bc3e2ce4a6616bc9e1cfb1aa646104834e4d122e7"
+    }
+  ],
+  "goProjectedSourceCounts": [
+    1240,
+    1244
+  ],
+  "desktopRequiredFiles": 2,
+  "ignoredIconsSchemasRequired": false,
+  "orderedSeries": false,
+  "activeSelected": false,
+  "gitMutations": false,
+  "nativeBuildOrPERuns": false
+}

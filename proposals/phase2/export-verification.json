@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "status": "strict-source-reconstruction-pass",
+  "components": [
+    {
+      "component": "native-initial-scope3",
+      "patch": "rdd.patch",
+      "changes": 39,
+      "before": 1210,
+      "after": 1238,
+      "patchSHA256": "60d89a17136759de15fefd9310bf6968c487e550173e5dbb0ecebbc6c379b1bf"
+    },
+    {
+      "component": "guest-entry",
+      "patch": "rdd.patch",
+      "changes": 25,
+      "before": 1210,
+      "after": 1228,
+      "patchSHA256": "e67c6536f89b36eeb8223de022d4973912209438a438adcaf28435555f5d23b0"
+    },
+    {
+      "component": "guest-entry-repo-inputs",
+      "patch": "repo.patch",
+      "changes": 9,
+      "before": 8,
+      "after": 13,
+      "patchSHA256": "38671d88b8431410eaf7d8d755a087d84acfba3515c60b2a75f227dadff32d51"
+    }
+  ],
+  "sourceOnly": true,
+  "selected": false,
+  "orderedSeries": false,
+  "gitMutations": false,
+  "buildOrNativeOrTargetRuns": false
+}

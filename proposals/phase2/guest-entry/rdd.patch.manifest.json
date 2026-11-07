@@ -1,0 +1,391 @@
+{
+  "schema": 1,
+  "component": "guest-entry",
+  "selected": false,
+  "orderedSeries": false,
+  "parents": {
+    "canonical": "23",
+    "canonicalGitTree": "5300e3fff0cfa965301f261be311ba93241d2045",
+    "rawSourceManifestSHA256": "c75ca01e63934fdd3af6b33fefe2947e99c22335452482449cf447e3d5dbc9a7",
+    "canonicalExclusions": [
+      "pkg/guestagent/lima-guestagent.amd64.gz",
+      "upgrade_PROGRESS.md",
+      "upgrade_SDK_TRANSITION.md",
+      "upgrade_boot_fence_snapshot.json"
+    ],
+    "targetRawManifestSHA256": "8a351c59cfaca07e4f0740b4f0ba947da3ebe7a235304a64988c57762aa0c190",
+    "sourceReceiptSHA256": "c839ea6d5989b6c32ad3ae294a6b104823e02f1a638231a7788e5c5f8acf5ecf"
+  },
+  "projection": "LF for textual rdd source; four fixed historical exclusions omitted",
+  "excluded": [
+    "pkg/guestagent/lima-guestagent.amd64.gz",
+    "upgrade_PROGRESS.md",
+    "upgrade_SDK_TRANSITION.md",
+    "upgrade_boot_fence_snapshot.json"
+  ],
+  "beforeFiles": 1210,
+  "afterFiles": 1228,
+  "beforeManifestSHA256": "c5f21bfd7bfe561a7b257d3deb9819d83028f577c1e6d5645c71ddfafa9eae83",
+  "afterManifestSHA256": "5b843dc054d920f188247e22c72717e24182e60d483410bca7d6cd245a29d31b",
+  "patchSHA256": "e67c6536f89b36eeb8223de022d4973912209438a438adcaf28435555f5d23b0",
+  "changedFiles": 25,
+  "changes": [
+    {
+      "path": "pkg/controllers/app/app/controller.go",
+      "before": {
+        "bytes": 6732,
+        "sha256": "9991bb289d148519b7a8b13cf6d6763adf82c524989d8af2a6c698541b1b0c56"
+      },
+      "after": {
+        "bytes": 6677,
+        "sha256": "28180fd00813f9eeca4a0c80b92e07c82d8575e23aaa23e8443daa0a20d35841"
+      },
+      "rawBefore": {
+        "bytes": 6732,
+        "sha256": "9991bb289d148519b7a8b13cf6d6763adf82c524989d8af2a6c698541b1b0c56"
+      },
+      "rawAfter": {
+        "bytes": 6876,
+        "sha256": "b7e529ee281bd257fbed1e6ce5a9819c01a5e8caac3bb4d1f3c7b1ed530ee4b3"
+      }
+    },
+    {
+      "path": "pkg/controllers/app/app/lima-template-selected.yaml",
+      "before": null,
+      "after": {
+        "bytes": 9118,
+        "sha256": "d0664b656b9c057fc720ce4b32d78e07f248076cb843cd47c68babdc2bc2cdfa"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 9118,
+        "sha256": "d0664b656b9c057fc720ce4b32d78e07f248076cb843cd47c68babdc2bc2cdfa"
+      }
+    },
+    {
+      "path": "pkg/controllers/app/app/template_legacy.go",
+      "before": null,
+      "after": {
+        "bytes": 132,
+        "sha256": "1468b2c96636dc6c88856fbd3bb0e4d48761f202794e3bf3164140256f669f61"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 132,
+        "sha256": "1468b2c96636dc6c88856fbd3bb0e4d48761f202794e3bf3164140256f669f61"
+      }
+    },
+    {
+      "path": "pkg/controllers/app/app/template_selected_test.go",
+      "before": null,
+      "after": {
+        "bytes": 726,
+        "sha256": "b79a9b71c0ce359c17c2c9f436a0618142a14ac514fe9bca1261d1a691f623a5"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 726,
+        "sha256": "b79a9b71c0ce359c17c2c9f436a0618142a14ac514fe9bca1261d1a691f623a5"
+      }
+    },
+    {
+      "path": "pkg/controllers/app/app/template_selected_windows.go",
+      "before": null,
+      "after": {
+        "bytes": 212,
+        "sha256": "8be6c38ef071842f89294e390163a364b3cb061e049ff574c1c2c46e1a24d41b"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 212,
+        "sha256": "8be6c38ef071842f89294e390163a364b3cb061e049ff574c1c2c46e1a24d41b"
+      }
+    },
+    {
+      "path": "pkg/guestsession/session.go",
+      "before": {
+        "bytes": 9038,
+        "sha256": "164794db291850f7871fd617d6a923cc7c8c610317389410867fc9342a53ad53"
+      },
+      "after": {
+        "bytes": 1004,
+        "sha256": "53b2df7807e1c093e1aa12b454fa9774d50b866d4e5067bf1310f7f0f7ca40b2"
+      },
+      "rawBefore": {
+        "bytes": 9038,
+        "sha256": "164794db291850f7871fd617d6a923cc7c8c610317389410867fc9342a53ad53"
+      },
+      "rawAfter": {
+        "bytes": 1004,
+        "sha256": "53b2df7807e1c093e1aa12b454fa9774d50b866d4e5067bf1310f7f0f7ca40b2"
+      }
+    },
+    {
+      "path": "pkg/guestsession/session_test.go",
+      "before": {
+        "bytes": 9697,
+        "sha256": "e6bb2e612a8bde775f4eb50a70f181bc544d34d4639fd8d80f7cf83c437306fc"
+      },
+      "after": null,
+      "rawBefore": {
+        "bytes": 9697,
+        "sha256": "e6bb2e612a8bde775f4eb50a70f181bc544d34d4639fd8d80f7cf83c437306fc"
+      },
+      "rawAfter": null
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/credential.go",
+      "before": null,
+      "after": {
+        "bytes": 2093,
+        "sha256": "c93d1a24385a514a4999ada440204911742c05881a01aa7e132233e35f8230a3"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 2093,
+        "sha256": "c93d1a24385a514a4999ada440204911742c05881a01aa7e132233e35f8230a3"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/duplex.go",
+      "before": null,
+      "after": {
+        "bytes": 5748,
+        "sha256": "a9aa8d7ee6d41ab981462710d8db5e0fcc2e0bb437e92a3d1eb7328941cb1e87"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 5748,
+        "sha256": "a9aa8d7ee6d41ab981462710d8db5e0fcc2e0bb437e92a3d1eb7328941cb1e87"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/duplex_test.go",
+      "before": null,
+      "after": {
+        "bytes": 6609,
+        "sha256": "80794dc6cd08a01784c098a2b4e845db1e74620384132545914890b5e0ab05cc"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 6609,
+        "sha256": "80794dc6cd08a01784c098a2b4e845db1e74620384132545914890b5e0ab05cc"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/session.go",
+      "before": null,
+      "after": {
+        "bytes": 9038,
+        "sha256": "164794db291850f7871fd617d6a923cc7c8c610317389410867fc9342a53ad53"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 9038,
+        "sha256": "164794db291850f7871fd617d6a923cc7c8c610317389410867fc9342a53ad53"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/session_test.go",
+      "before": null,
+      "after": {
+        "bytes": 9697,
+        "sha256": "e6bb2e612a8bde775f4eb50a70f181bc544d34d4639fd8d80f7cf83c437306fc"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 9697,
+        "sha256": "e6bb2e612a8bde775f4eb50a70f181bc544d34d4639fd8d80f7cf83c437306fc"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/transport.go",
+      "before": null,
+      "after": {
+        "bytes": 5121,
+        "sha256": "9994e7ffeacf10ee9fa3fd3a238b78bd4e21730a70701d21a84af0dd1b7abb61"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 5121,
+        "sha256": "9994e7ffeacf10ee9fa3fd3a238b78bd4e21730a70701d21a84af0dd1b7abb61"
+      }
+    },
+    {
+      "path": "pkg/proxyguestprotocol/guestsession/transport_test.go",
+      "before": null,
+      "after": {
+        "bytes": 8738,
+        "sha256": "34a893e4005f76e58b83886e3f1d81ea1887850e4ef5c95e3b80577a2198709c"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 8738,
+        "sha256": "34a893e4005f76e58b83886e3f1d81ea1887850e4ef5c95e3b80577a2198709c"
+      }
+    },
+    {
+      "path": "src/rdd-guest/main.go",
+      "before": {
+        "bytes": 5692,
+        "sha256": "7f3b7cf28eb33924a06ddc1ecbb98003d2a301b9fb553545a39724aee0c4ce66"
+      },
+      "after": {
+        "bytes": 5727,
+        "sha256": "7b94c31c15c34c055fa909ec6fed3a4cac6efaec72bbf8a9700227335ec1a857"
+      },
+      "rawBefore": {
+        "bytes": 5692,
+        "sha256": "7f3b7cf28eb33924a06ddc1ecbb98003d2a301b9fb553545a39724aee0c4ce66"
+      },
+      "rawAfter": {
+        "bytes": 5727,
+        "sha256": "7b94c31c15c34c055fa909ec6fed3a4cac6efaec72bbf8a9700227335ec1a857"
+      }
+    },
+    {
+      "path": "src/rdd-guest/main_selected_linux.go",
+      "before": null,
+      "after": {
+        "bytes": 609,
+        "sha256": "a35dd6885bd81b3fdcf3672a57746bb8d010fd9ba89dbd737cbdf709357ce152"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 609,
+        "sha256": "a35dd6885bd81b3fdcf3672a57746bb8d010fd9ba89dbd737cbdf709357ce152"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_entry.go",
+      "before": null,
+      "after": {
+        "bytes": 617,
+        "sha256": "edfc5f8550e941298be82fa49c2e3b061a4e638bf9adeb352908160c60d0f5f5"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 617,
+        "sha256": "edfc5f8550e941298be82fa49c2e3b061a4e638bf9adeb352908160c60d0f5f5"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_entry_test.go",
+      "before": null,
+      "after": {
+        "bytes": 951,
+        "sha256": "d2bda5a03655372df0fec260ec411618599f24d0ab3ce1f5495f9b1cfd158fb5"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 951,
+        "sha256": "d2bda5a03655372df0fec260ec411618599f24d0ab3ce1f5495f9b1cfd158fb5"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_session_keeper.go",
+      "before": null,
+      "after": {
+        "bytes": 304,
+        "sha256": "dd4eb678a1fcb167edcf0f23b3015a08d8dbe2e92f9be5f530b78619aa5811ea"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 304,
+        "sha256": "dd4eb678a1fcb167edcf0f23b3015a08d8dbe2e92f9be5f530b78619aa5811ea"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_session_keeper_test.go",
+      "before": null,
+      "after": {
+        "bytes": 2916,
+        "sha256": "71ffad16c5b2763622d4ab6591f0fbcfaac3b9120638ea8a74a6fc2a3fcd9de7"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 2916,
+        "sha256": "71ffad16c5b2763622d4ab6591f0fbcfaac3b9120638ea8a74a6fc2a3fcd9de7"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_session_linux.go",
+      "before": null,
+      "after": {
+        "bytes": 7315,
+        "sha256": "9ebf79305eae794068746d84d23ba5443bc961cc9d8d879dfbed0c068a6cc524"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 7315,
+        "sha256": "9ebf79305eae794068746d84d23ba5443bc961cc9d8d879dfbed0c068a6cc524"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_session_workers.go",
+      "before": null,
+      "after": {
+        "bytes": 2299,
+        "sha256": "9d7baffe7fdf703ea273d14cf4d1ced1b60450974975a405a320c66e4b58e0ce"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 2299,
+        "sha256": "9d7baffe7fdf703ea273d14cf4d1ced1b60450974975a405a320c66e4b58e0ce"
+      }
+    },
+    {
+      "path": "src/rdd-guest/selected_session_workers_test.go",
+      "before": null,
+      "after": {
+        "bytes": 4935,
+        "sha256": "9778ef59dcbd80590720bcd4406fe7d9251a8e9a2dfe6d6a82920691098e706a"
+      },
+      "rawBefore": null,
+      "rawAfter": {
+        "bytes": 4935,
+        "sha256": "9778ef59dcbd80590720bcd4406fe7d9251a8e9a2dfe6d6a82920691098e706a"
+      }
+    },
+    {
+      "path": "src/rdd-guest/wsl_client.go",
+      "before": {
+        "bytes": 4173,
+        "sha256": "cdc52b3742d351d57d5fb635545c7040a38e41e704a4bd254dbeb52fb2ee4713"
+      },
+      "after": {
+        "bytes": 4208,
+        "sha256": "cd485df6ec8f7fdf6f0e1346f28459fb2e12691582485bbf007b7b2678d774d4"
+      },
+      "rawBefore": {
+        "bytes": 4173,
+        "sha256": "cdc52b3742d351d57d5fb635545c7040a38e41e704a4bd254dbeb52fb2ee4713"
+      },
+      "rawAfter": {
+        "bytes": 4208,
+        "sha256": "cd485df6ec8f7fdf6f0e1346f28459fb2e12691582485bbf007b7b2678d774d4"
+      }
+    },
+    {
+      "path": "src/rdd-guest/wsl_client_test.go",
+      "before": {
+        "bytes": 5323,
+        "sha256": "d4b0f3568ed23d13ac097423031f7cc705110b63cc3bf100ba3ae34ae86a6d19"
+      },
+      "after": {
+        "bytes": 5358,
+        "sha256": "73a99405760d2544cd33148e248593e78d9a5ea3faf6ce36a31917cfa98d8972"
+      },
+      "rawBefore": {
+        "bytes": 5323,
+        "sha256": "d4b0f3568ed23d13ac097423031f7cc705110b63cc3bf100ba3ae34ae86a6d19"
+      },
+      "rawAfter": {
+        "bytes": 5358,
+        "sha256": "73a99405760d2544cd33148e248593e78d9a5ea3faf6ce36a31917cfa98d8972"
+      }
+    }
+  ],
+  "strictPatchReplay": true,
+  "freshFilesystemExactTarget": true
+}

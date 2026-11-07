@@ -4,3 +4,5 @@
 *.ico binary
 *.patch -whitespace
 docs/third-party/rancher-desktop-LICENSE.txt -whitespace
+# Source proposal capsules preserve exact byte-pinned payloads and receipts.
+proposals/phase2/** -text

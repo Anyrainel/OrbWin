@@ -1,0 +1,3760 @@
+--- a/pkg/controllers/app/app/controller.go
++++ b/pkg/controllers/app/app/controller.go
+@@ -36,9 +36,6 @@
+ 
+ //go:embed lima-images-wsl2.yaml
+ var limaImagesWSL2 string
+-
+-//go:embed lima-template.yaml
+-var limaTemplate string
+ 
+ func limaTemplateData() string {
+ 	images := limaImagesUnix
+--- /dev/null
++++ b/pkg/controllers/app/app/lima-template-selected.yaml
+@@ -0,0 +1,201 @@
++mounts:
++- location: "~"
++  writable: true
++ssh:
++  loadDotSSHPubKeys: false
++firmware:
++  legacyBIOS: false
++containerd:
++  system: false
++  user: false
++portForwards:
++- guestPort: 6443
++  hostIP: 127.0.0.1
++  hostPort: 6443
++- guestIPMustBeZero: true
++  guestPortRange:
++  - 1
++  - 65535
++  hostIP: 0.0.0.0
++  hostPortRange:
++  - 0
++  - 0
++provision:
++# Selected native/private bootstrap owns role code and credentials.
++# Write runtime parameters as a systemd EnvironmentFile. Using mode:data lets
++# Lima's Go template engine handle quoting via printf "%q", which produces
++# double-quoted strings compatible with systemd's EnvironmentFile parser.
++# Lima's boot script creates parent directories automatically.
++- mode: data
++  path: /etc/sysconfig/rancher-desktop
++  content: |
++    CONTAINER_ENGINE={{printf "%q" .Param.CONTAINER_ENGINE}}
++    HOST_DOCKER_SOCKET={{printf "%q" .Param.HOST_DOCKER_SOCKET}}
++    HOST_HOME_GUEST={{printf "%q" .Param.HOST_HOME_GUEST}}
++    KUBERNETES_ENABLED={{.Param.KUBERNETES_ENABLED}}
++    KUBERNETES_VERSION={{.Param.KUBERNETES_VERSION}}
++    KUBERNETES_PORT={{.Param.KUBERNETES_PORT}}
++    VM_SWITCH_LOG={{printf "%q" .Param.VM_SWITCH_LOG}}
++    NETWORK_SETUP_EXTRA_ARGS={{printf "%q" .Param.NETWORK_SETUP_EXTRA_ARGS}}
++# Stream guest journals and lima-init.log (which die with the VM) to the host
++# log dir so CI artifacts carry them. Empty GUEST_LOG_DIR (no RDD_KEEP_LOGS)
++# makes this a no-op. The capture units are transient, restarted each boot.
++- mode: system
++  script: |
++    #!/bin/bash
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
++
++    if [[ -z $PARAM_GUEST_LOG_DIR ]]; then
++        exit 0
++    fi
++
++    if ! systemctl is-active --quiet rdd-journal-capture.service; then
++        systemd-run --collect --unit=rdd-journal-capture /bin/sh -c \
++            "journalctl --follow --no-tail --output=short-iso --unit=lima-init.service --unit=network-setup.service --unit=rancher-desktop-guest-agent.service --unit=rdd-guest.service --unit=wsl-proxy.service >> \"$PARAM_GUEST_LOG_DIR/guest-journal.log\""
++    fi
++    if ! systemctl is-active --quiet rdd-lima-init-capture.service; then
++        systemd-run --collect --unit=rdd-lima-init-capture /bin/sh -c \
++            "tail -c +0 -F /var/log/lima-init.log >> \"$PARAM_GUEST_LOG_DIR/lima-init.log\""
++    fi
++- mode: system
++  script: |
++    #!/bin/bash
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++    # ORBWIN_PROVISION_CONTEXT
++
++    # Restart rancher-desktop.target on exit, even if a step below fails. The
++    # container engine belongs to this target but does not depend on
++    # Kubernetes, so a failed k3s install must not leave it stopped. --no-block
++    # returns immediately; the kubeconfig probe below absorbs k3s startup time.
++    trap 'systemctl start --no-block rancher-desktop.target' EXIT
++
++    systemctl stop rancher-desktop.target
++
++    # Enable the requested container engine and disable the other.
++    # containerd.service has a Conflicts=docker, so we must not start both.
++    CONTAINERD_ACTION=$([[ $PARAM_CONTAINER_ENGINE = containerd ]] && echo enable || echo disable)
++    DOCKER_ACTION=$([[ $PARAM_CONTAINER_ENGINE = moby ]] && echo enable || echo disable)
++    systemctl "$CONTAINERD_ACTION" containerd.service buildkitd.service
++    systemctl "$DOCKER_ACTION" docker.service
++    case "$PARAM_HOST_DOCKER_SOCKET" in
++      *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++        # Unit dependency lists cannot be cleared in a drop-in. Mask the
++        # inherited weak socket dependency so Docker cannot reclaim the relay.
++        systemctl mask --now docker.socket ;;
++      *) systemctl "$DOCKER_ACTION" docker.socket ;;
++    esac
++
++    if [[ $PARAM_KUBERNETES_ENABLED == "true" ]]; then
++        case "$PARAM_HOST_DOCKER_SOCKET" in
++          *docker-rancher-desktop-orbwin|*docker-rancher-desktop-orbwin-proof)
++            # cri-dockerd invokes socat for Kubernetes port forwarding. Verify
++            # the bundled distribution packages; never depend on guest DNS.
++            test -n "$PARAM_ORBWIN_SOCAT_RPM"
++            test -n "$PARAM_ORBWIN_LIBWRAP_RPM"
++            test "$(sha256sum "$PARAM_ORBWIN_SOCAT_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_SOCAT_RPM_SHA256"
++            test "$(sha256sum "$PARAM_ORBWIN_LIBWRAP_RPM" | cut -d ' ' -f1)" = "$PARAM_ORBWIN_LIBWRAP_RPM_SHA256"
++            rpm --checksig "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_LIBWRAP_RPM")" = libwrap0
++            test "$(rpm -qp --qf '%{NAME}' "$PARAM_ORBWIN_SOCAT_RPM")" = socat
++            orbwin_expected_packages=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM")
++            orbwin_installed_packages=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}\n' libwrap0 socat 2>/dev/null || true)
++            if [[ "$orbwin_installed_packages" != "$orbwin_expected_packages" ]]; then
++                rpm -Uvh "$PARAM_ORBWIN_LIBWRAP_RPM" "$PARAM_ORBWIN_SOCAT_RPM"
++            fi
++            rpm -V libwrap0 socat
++            socat -V >/dev/null
++            ;;
++        esac
++        export INSTALL_K3S_VERSION="$PARAM_KUBERNETES_RELEASE"
++        INSTALLED_VERSION=""
++        # awk must read to EOF; `{print; exit}` closes the pipe while k3s
++        # is still writing, and the SIGPIPE propagates via pipefail + errexit.
++        [[ -x /usr/local/bin/k3s ]] && INSTALLED_VERSION=$(/usr/local/bin/k3s --version | awk 'NR==1{print $3}')
++        if [[ $INSTALL_K3S_VERSION != "${INSTALLED_VERSION}" ]]; then
++            # Don't enable k3s at install time; add it as a want of rancher-desktop.target instead.
++            export INSTALL_K3S_SKIP_ENABLE=true
++            # Before reinstalling, remove any existing k3s want; otherwise a
++            # failed upgrade leaves rancher-desktop.target still wanting the
++            # previous k3s version. daemon-reload rebuilds systemd's in-memory
++            # dependency tree from disk so the EXIT trap's restart honors the
++            # removal even on the failure path, where add-wants below (the only
++            # other reload) never runs. The want is re-added on success below.
++            rm -f /etc/systemd/system/rancher-desktop.target.wants/k3s.service
++            systemctl daemon-reload
++            (
++                export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/sbin:/bin
++                # The interface can have an address before the host-switch
++                # network is routable, so the install can fail right after a
++                # restart. Retry the whole download-and-install until it
++                # succeeds; the curl timeouts bound the installer-script fetch
++                # so a black-holed network fails fast instead of hanging that
++                # step. --show-error surfaces the error without --silent's
++                # progress meter spamming the log.
++                attempt=0
++                until curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 https://get.k3s.io | sh -; do
++                    attempt=$((attempt + 1))
++                    if (( attempt >= 30 )); then
++                        echo "k3s install failed after ${attempt} attempts" >&2
++                        # Fail provisioning so Lima records the error; the EXIT
++                        # trap still restarts the engine, which does not need k3s.
++                        exit 1
++                    fi
++                    sleep 2
++                done
++            )
++            systemctl add-wants rancher-desktop.target k3s.service
++        fi
++
++        if [[ $PARAM_CONTAINER_ENGINE == "containerd" ]]; then
++            echo "K3S_CONTAINER_ENGINE_OPTIONS=--container-runtime-endpoint /run/k3s/containerd/containerd.sock" \
++                >/etc/systemd/system/k3s.service.env
++        else
++            echo "K3S_CONTAINER_ENGINE_OPTIONS=--docker" >/etc/systemd/system/k3s.service.env
++        fi
++
++        # Remove stale kubeconfig so k3s regenerates it on start.
++        rm -f /etc/rancher/k3s/k3s.yaml
++    fi
++
++    # rancher-desktop.target is restarted by the EXIT trap above.
++
++probes:
++- description: Write k3s kubeconfig to instance config path
++  script: |
++    #!/bin/bash
++
++    # This script runs in USER mode.
++
++    set -o errexit -o nounset -o pipefail -o xtrace
++
++    if [[ $PARAM_KUBERNETES_ENABLED != "true" ]]; then
++        exit 0
++    fi
++
++    K3S_YAML=/etc/rancher/k3s/k3s.yaml
++    for _ in $(seq 300); do
++        if [[ -e $K3S_YAML ]]; then
++            sleep 1
++            # Copy the raw k3s kubeconfig to the host instance config path.
++            # The kubernetes controller on the host reads this file to probe
++            # the API server and manage the user's ~/.kube/config context.
++            mkdir -p "$(dirname "$PARAM_HOST_INSTANCE_CONFIG")"
++            sudo cp "$K3S_YAML" "$PARAM_HOST_INSTANCE_CONFIG"
++            exit 0
++        fi
++        sleep 1
++    done
++    exit 1
++hostResolver:
++  hosts:
++    host.docker.internal: host.lima.internal
++    host.rancher-desktop.internal: host.lima.internal
++    lima-rancher-desktop: lima-0
++vmOpts:
++  vz:
++    rosetta:
++      enabled: false
++      binfmt: false
+--- /dev/null
++++ b/pkg/controllers/app/app/template_legacy.go
+@@ -0,0 +1,8 @@
++//go:build !orbwin_selected_guest || !windows
++
++package app
++
++import _ "embed"
++
++//go:embed lima-template.yaml
++var limaTemplate string
+--- /dev/null
++++ b/pkg/controllers/app/app/template_selected_test.go
+@@ -0,0 +1,21 @@
++//go:build windows && orbwin_selected_guest
++
++package app
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestSelectedEmbeddedTemplateClosesLegacyRoutes(t *testing.T) {
++	for _, forbidden := range []string{"rdd-guest wsl-client", "orbwin-wsl-client.service", "ORBWIN_WSL_TLS_DIR", "PARAM_ORBWIN_GUEST_BRIDGE", "guestSocket: /var/run/docker.sock", "guestSocket: /run/k3s/containerd/containerd.sock"} {
++		if strings.Contains(limaTemplate, forbidden) {
++			t.Fatal("selected template restored legacy route", forbidden)
++		}
++	}
++	for _, required := range []string{"KUBERNETES_ENABLED", "CONTAINER_ENGINE", "network-setup.service"} {
++		if !strings.Contains(limaTemplate, required) {
++			t.Fatal("upstream configuration lost", required)
++		}
++	}
++}
+--- /dev/null
++++ b/pkg/controllers/app/app/template_selected_windows.go
+@@ -0,0 +1,9 @@
++//go:build windows && orbwin_selected_guest
++
++package app
++
++import _ "embed"
++
++// Selected product template cannot reinstall the removed legacy routes.
++//go:embed lima-template-selected.yaml
++var limaTemplate string
+--- a/pkg/guestsession/session.go
++++ b/pkg/guestsession/session.go
+@@ -1,359 +1,29 @@
+-// Package guestsession models authentication DATA, never native authority.
++// Package guestsession preserves the original host API through the shared codec.
++// Accepted directional implementation now lives in the existing tiny shared module.
+ package guestsession
+ 
+-import (
+-	"crypto/hmac"
+-	"crypto/sha256"
+-	"encoding/binary"
+-	"errors"
+-	"fmt"
+-	"sync"
++import shared "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/proxyguestprotocol/guestsession"
++
++type Role = shared.Role
++type Session = shared.Session
++type RoleKey = shared.RoleKey
++type Connection = shared.Connection
++
++const (
++	Bootstrap      = shared.Bootstrap
++	NetworkControl = shared.NetworkControl
++	NetworkData    = shared.NetworkData
++	Docker         = shared.Docker
++	Containerd     = shared.Containerd
++	Guestagent     = shared.Guestagent
++	SSHBinding     = shared.SSHBinding
++	MessageSize    = shared.MessageSize
+ )
+ 
+-var ErrProtocol = errors.New("guest session protocol refused")
+-var ErrSecretJSON = errors.New("guest session secret cannot be JSON encoded")
++var ErrProtocol = shared.ErrProtocol
++var ErrSecretJSON = shared.ErrSecretJSON
+ 
+-type Role byte
+-
+-const (
+-	Bootstrap Role = iota + 1
+-	NetworkControl
+-	NetworkData
+-	Docker
+-	Containerd
+-	Guestagent
+-	SSHBinding
+-)
+-
+-func valid(r Role) bool { return r >= Bootstrap && r <= SSHBinding }
+-
+-type secret [32]byte
+-
+-func (secret) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED]")) }
+-func (secret) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
+-
+-type Session struct{ state *sessionState }
+-type sessionState struct {
+-	mu               sync.Mutex
+-	master           secret
+-	id               [16]byte
+-	digest           [32]byte
+-	closed, draining bool
+-	next             uint64
+-	live             uint16
+-	startup, drain   uint64
+-	ready            [8]bool
+-	provisioned      bool
++func New(master [32]byte, id [16]byte, record []byte) (*Session, error) {
++	return shared.New(master, id, record)
+ }
+-
+-func (Session) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest session]")) }
+-func (Session) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
+-func New(master [32]byte, id [16]byte, record []byte) (*Session, error) {
+-	if master == ([32]byte{}) || id == ([16]byte{}) || len(record) == 0 || len(record) > 4096 {
+-		return nil, ErrProtocol
+-	}
+-	return &Session{state: &sessionState{master: secret(master), id: id, digest: sha256.Sum256(record)}}, nil
+-}
+-func (s *Session) Close() {
+-	if s == nil || s.state == nil {
+-		return
+-	}
+-	o := s.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	o.closed = true
+-	o.master = secret{}
+-}
+-func (s *Session) Ordered(role Role, seq uint64, drain bool) error {
+-	if s == nil || s.state == nil {
+-		return ErrProtocol
+-	}
+-	o := s.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed || !valid(role) {
+-		return ErrProtocol
+-	}
+-	if drain {
+-		if seq != o.drain || o.drain >= 8 {
+-			return ErrProtocol
+-		}
+-		o.draining = true
+-		o.drain++
+-		return nil
+-	}
+-	if o.draining || seq != o.startup || o.startup >= 16 {
+-		return ErrProtocol
+-	}
+-	o.startup++
+-	return nil
+-}
+-
+-// RoleKey holds ONLY a derived role key. Independent peer delivery is future IO.
+-type RoleKey struct{ state *roleState }
+-type roleState struct {
+-	mu     sync.Mutex
+-	key    secret
+-	id     [16]byte
+-	digest [32]byte
+-	role   Role
+-	closed bool
+-	live   uint16
+-}
+-
+-func (RoleKey) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED role key]")) }
+-func (RoleKey) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
+-func derive(master secret, id [16]byte, r Role) secret {
+-	m := hmac.New(sha256.New, master[:])
+-	m.Write([]byte("orbwin-selected-guest-session-v2\x00"))
+-	m.Write([]byte{byte(r)})
+-	m.Write(id[:])
+-	var out secret
+-	m.Sum(out[:0])
+-	return out
+-}
+-func (s *Session) DeriveRole(r Role) (RoleKey, error) {
+-	if s == nil || s.state == nil {
+-		return RoleKey{}, ErrProtocol
+-	}
+-	o := s.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed || o.draining || !valid(r) {
+-		return RoleKey{}, ErrProtocol
+-	}
+-	return RoleKey{state: &roleState{key: derive(o.master, o.id, r), id: o.id, digest: o.digest, role: r}}, nil
+-}
+-func (k RoleKey) Close() {
+-	if k.state == nil {
+-		return
+-	}
+-	o := k.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	o.closed = true
+-	o.key = secret{}
+-}
+-
+-type Connection struct{ state *connectionState }
+-type connectionState struct {
+-	mu             sync.Mutex
+-	host           *sessionState
+-	peer           *roleState
+-	role           Role
+-	sid            [16]byte
+-	digest         [32]byte
+-	hn, gn         [32]byte
+-	id             uint64
+-	phase          byte
+-	failed, closed bool
+-}
+-
+-func (Connection) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest connection]")) }
+-func (Connection) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
+-func (s *Session) Host(r Role, nonce [32]byte) (*Connection, error) {
+-	if s == nil || s.state == nil {
+-		return nil, ErrProtocol
+-	}
+-	o := s.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed || o.draining || !valid(r) || nonce == ([32]byte{}) || o.next == ^uint64(0) || o.live >= 256 {
+-		return nil, ErrProtocol
+-	}
+-	o.next++
+-	o.live++
+-	return &Connection{state: &connectionState{host: o, role: r, sid: o.id, digest: o.digest, hn: nonce, id: o.next}}, nil
+-}
+-func NewPeer(k RoleKey, nonce [32]byte) (*Connection, error) {
+-	if k.state == nil {
+-		return nil, ErrProtocol
+-	}
+-	o := k.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed || nonce == ([32]byte{}) || o.live >= 256 {
+-		return nil, ErrProtocol
+-	}
+-	o.live++
+-	return &Connection{state: &connectionState{peer: o, role: o.role, sid: o.id, digest: o.digest, gn: nonce}}, nil
+-}
+-
+-const MessageSize = 155
+-
+-var tags = [4]string{"host-hello", "guest-challenge", "host-finish", "guest-accepted"}
+-
+-// lockOwner is called only with original connection.mu held. No owner operation
+-// locks a connection except readiness, which follows the same connection→owner order.
+-func (c *connectionState) lockOwner() (secret, bool, func()) {
+-	if c.host != nil {
+-		o := c.host
+-		o.mu.Lock()
+-		return derive(o.master, o.id, c.role), !o.closed && !o.draining, o.mu.Unlock
+-	}
+-	o := c.peer
+-	o.mu.Lock()
+-	return o.key, !o.closed, o.mu.Unlock
+-}
+-func wire(c *connectionState, phase byte, hn, gn [32]byte, id uint64, key secret) []byte {
+-	b := make([]byte, MessageSize)
+-	b[0] = 2
+-	b[1] = phase
+-	b[2] = byte(c.role)
+-	copy(b[3:19], c.sid[:])
+-	copy(b[19:51], c.digest[:])
+-	copy(b[51:83], hn[:])
+-	copy(b[83:115], gn[:])
+-	binary.LittleEndian.PutUint64(b[115:123], id)
+-	m := hmac.New(sha256.New, key[:])
+-	m.Write([]byte(tags[phase]))
+-	m.Write([]byte{0})
+-	m.Write(b[:123])
+-	copy(b[123:], m.Sum(nil))
+-	return b
+-}
+-func (c *Connection) EncodeNext() ([]byte, error) {
+-	if c == nil || c.state == nil {
+-		return nil, ErrProtocol
+-	}
+-	o := c.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	key, known, unlock := o.lockOwner()
+-	defer unlock()
+-	defer clear(key[:])
+-	allowed := o.host != nil && (o.phase == 0 || o.phase == 2) || o.peer != nil && (o.phase == 1 || o.phase == 3)
+-	if o.closed || o.failed || !known || !allowed {
+-		o.failed = true
+-		return nil, ErrProtocol
+-	}
+-	gn := o.gn
+-	if o.phase == 0 {
+-		gn = [32]byte{}
+-	}
+-	b := wire(o, o.phase, o.hn, gn, o.id, key)
+-	o.phase++
+-	return b, nil
+-}
+-func (c *Connection) Accept(b []byte) error {
+-	if c == nil || c.state == nil {
+-		return ErrProtocol
+-	}
+-	o := c.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	key, known, unlock := o.lockOwner()
+-	defer unlock()
+-	defer clear(key[:])
+-	allowed := o.host != nil && (o.phase == 1 || o.phase == 3) || o.peer != nil && (o.phase == 0 || o.phase == 2)
+-	if o.closed || o.failed || !known || !allowed || len(b) != MessageSize {
+-		o.failed = true
+-		return ErrProtocol
+-	}
+-	hn, gn, id := o.hn, o.gn, o.id
+-	if o.phase == 0 {
+-		copy(hn[:], b[51:83])
+-		id = binary.LittleEndian.Uint64(b[115:123])
+-		gn = [32]byte{}
+-		if hn == ([32]byte{}) || id == 0 {
+-			o.failed = true
+-			return ErrProtocol
+-		}
+-	}
+-	if o.phase == 1 {
+-		copy(gn[:], b[83:115])
+-		if gn == ([32]byte{}) {
+-			o.failed = true
+-			return ErrProtocol
+-		}
+-	}
+-	if !hmac.Equal(b, wire(o, o.phase, hn, gn, id, key)) {
+-		o.failed = true
+-		return ErrProtocol
+-	}
+-	// Publish peer nonce/source fields ONLY after authenticating the full message.
+-	if o.phase == 0 {
+-		o.hn = hn
+-		o.id = id
+-	}
+-	if o.phase == 1 {
+-		o.gn = gn
+-	}
+-	o.phase++
+-	return nil
+-}
+-
+-// Complete means host has accepted an authentic peer ACK, not IO/native readiness.
+-func (c *Connection) Complete() bool {
+-	if c == nil || c.state == nil {
+-		return false
+-	}
+-	o := c.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	key, known, unlock := o.lockOwner()
+-	defer unlock()
+-	clear(key[:])
+-	return o.host != nil && !o.closed && !o.failed && known && o.phase == 4
+-}
+-
+-// Close disposes only a pure parser slot, never an actual native resource.
+-func (c *Connection) Close() {
+-	if c == nil || c.state == nil {
+-		return
+-	}
+-	o := c.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed {
+-		return
+-	}
+-	o.closed = true
+-	if o.host != nil {
+-		o.host.mu.Lock()
+-		o.host.live--
+-		o.host.mu.Unlock()
+-	} else {
+-		o.peer.mu.Lock()
+-		o.peer.live--
+-		o.peer.mu.Unlock()
+-	}
+-}
+-func (s *Session) ObserveReady(c *Connection) error {
+-	if s == nil || s.state == nil || c == nil || c.state == nil {
+-		return ErrProtocol
+-	}
+-	o := c.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	a := s.state
+-	a.mu.Lock()
+-	defer a.mu.Unlock()
+-	if o.host != a || o.failed || o.closed || o.phase != 4 || a.closed || a.draining || a.ready[o.role] {
+-		return ErrProtocol
+-	}
+-	r := o.role
+-	if r == SSHBinding && (!a.ready[NetworkControl] || !a.ready[NetworkData]) {
+-		return ErrProtocol
+-	}
+-	if (r == Docker || r == Containerd || r == Guestagent) && !a.provisioned {
+-		return ErrProtocol
+-	}
+-	a.ready[r] = true
+-	return nil
+-}
+-
+-// ObserveProvisionJoin is only a DATA transition; no actual process join is issued.
+-func (s *Session) ObserveProvisionJoin() error {
+-	if s == nil || s.state == nil {
+-		return ErrProtocol
+-	}
+-	o := s.state
+-	o.mu.Lock()
+-	defer o.mu.Unlock()
+-	if o.closed || o.draining || o.provisioned || !o.ready[SSHBinding] {
+-		return ErrProtocol
+-	}
+-	o.provisioned = true
+-	return nil
+-}
++func NewPeer(k RoleKey, nonce [32]byte) (*Connection, error) { return shared.NewPeer(k, nonce) }
+--- a/pkg/guestsession/session_test.go
++++ /dev/null
+@@ -1,412 +0,0 @@
+-package guestsession
+-
+-import (
+-	"bytes"
+-	"crypto/hmac"
+-	"crypto/sha256"
+-	"encoding/binary"
+-	"encoding/json"
+-	"fmt"
+-	"sync"
+-	"testing"
+-)
+-
+-func session(t *testing.T, n byte) *Session {
+-	t.Helper()
+-	s, e := New([32]byte{n}, [16]byte{n}, []byte("canonical profile"))
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	return s
+-}
+-func pair(t *testing.T, s *Session, r Role, n byte) (*Connection, *Connection, RoleKey) {
+-	t.Helper()
+-	h, e := s.Host(r, [32]byte{n})
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	k, e := s.DeriveRole(r)
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	p, e := NewPeer(k, [32]byte{n, 1})
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	return h, p, k
+-}
+-func send(t *testing.T, from, to *Connection) []byte {
+-	t.Helper()
+-	b, e := from.EncodeNext()
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	if len(b) != 155 {
+-		t.Fatal("wire bound")
+-	}
+-	if e = to.Accept(b); e != nil {
+-		t.Fatal(e)
+-	}
+-	return b
+-}
+-func exchange(t *testing.T, h, p *Connection) {
+-	t.Helper()
+-	send(t, h, p)
+-	send(t, p, h)
+-	send(t, h, p)
+-	if h.Complete() {
+-		t.Fatal("early ACK")
+-	}
+-	send(t, p, h)
+-	if !h.Complete() || p.Complete() {
+-		t.Fatal("directional completion")
+-	}
+-}
+-func dispose(h, p *Connection, k RoleKey) { h.Close(); p.Close(); k.Close() }
+-func TestIndependentOwnersAndWire(t *testing.T) {
+-	s := session(t, 1)
+-	h, p, k := pair(t, s, Docker, 7)
+-	defer dispose(h, p, k)
+-	hello, e := h.EncodeNext()
+-	if e != nil {
+-		t.Fatal(e)
+-	}
+-	want := make([]byte, 155)
+-	want[0] = 2
+-	want[2] = byte(Docker)
+-	want[3] = 1
+-	d := sha256.Sum256([]byte("canonical profile"))
+-	copy(want[19:51], d[:])
+-	want[51] = 7
+-	binary.LittleEndian.PutUint64(want[115:123], 1)
+-	master := make([]byte, 32)
+-	master[0] = 1
+-	deriveMAC := hmac.New(sha256.New, master)
+-	deriveMAC.Write([]byte("orbwin-selected-guest-session-v2\x00"))
+-	deriveMAC.Write([]byte{byte(Docker)})
+-	deriveMAC.Write(want[3:19])
+-	mac := hmac.New(sha256.New, deriveMAC.Sum(nil))
+-	mac.Write([]byte("host-hello\x00"))
+-	mac.Write(want[:123])
+-	copy(want[123:], mac.Sum(nil))
+-	if !bytes.Equal(hello, want) {
+-		t.Fatal("independent wire/MAC")
+-	}
+-	if h.state.gn != ([32]byte{}) || p.state.id != 0 {
+-		t.Fatal("pre-adopted context")
+-	}
+-	if p.Accept(hello) != nil || p.state.id != h.state.id {
+-		t.Fatal("peer ID adoption")
+-	}
+-	send(t, p, h)
+-	send(t, h, p)
+-	if h.Complete() {
+-		t.Fatal("before ack")
+-	}
+-	send(t, p, h)
+-	if !h.Complete() || p.Complete() {
+-		t.Fatal("direction")
+-	}
+-}
+-func TestDirectionReplayAndMACBeforePublish(t *testing.T) {
+-	s := session(t, 1)
+-	h, p, k := pair(t, s, Docker, 1)
+-	hello, _ := h.EncodeNext()
+-	if h.Accept(hello) == nil || h.Complete() {
+-		t.Fatal("host self-feed")
+-	}
+-	dispose(h, p, k)
+-	h, p, k = pair(t, s, Docker, 2)
+-	if _, e := p.EncodeNext(); e == nil {
+-		t.Fatal("peer originates hello")
+-	}
+-	dispose(h, p, k)
+-	h, p, k = pair(t, s, Docker, 3)
+-	send(t, h, p)
+-	challenge, _ := p.EncodeNext()
+-	challenge[154] ^= 1
+-	if h.Accept(challenge) == nil || h.state.gn != ([32]byte{}) {
+-		t.Fatal("unauth nonce published")
+-	}
+-	dispose(h, p, k)
+-	h, p, k = pair(t, s, Docker, 4)
+-	hello, _ = h.EncodeNext()
+-	hello[154] ^= 1
+-	if p.Accept(hello) == nil || p.state.id != 0 || p.state.hn != ([32]byte{}) {
+-		t.Fatal("unauth peer context")
+-	}
+-	dispose(h, p, k)
+-	h, p, k = pair(t, s, Docker, 5)
+-	old := send(t, h, p)
+-	if p.Accept(old) == nil {
+-		t.Fatal("duplicate hello")
+-	}
+-	dispose(h, p, k)
+-	oldH, oldP, oldK := pair(t, s, Docker, 6)
+-	send(t, oldH, oldP)
+-	oldChallenge, _ := oldP.EncodeNext()
+-	dispose(oldH, oldP, oldK)
+-	h, p, k = pair(t, s, Docker, 6)
+-	h.EncodeNext()
+-	if h.Accept(oldChallenge) == nil {
+-		t.Fatal("attempt ID replay")
+-	}
+-	dispose(h, p, k)
+-}
+-func TestWrongContextAndPartialACKLocalOnly(t *testing.T) {
+-	for _, what := range []string{"key", "role", "session", "profile", "direction"} {
+-		t.Run(what, func(t *testing.T) {
+-			s := session(t, 1)
+-			h, e := s.Host(Docker, [32]byte{1})
+-			if e != nil {
+-				t.Fatal(e)
+-			}
+-			other := session(t, 1)
+-			r := Docker
+-			switch what {
+-			case "key":
+-				other.state.master[1] = 2
+-			case "role":
+-				r = Containerd
+-			case "session":
+-				other.state.id[1] = 2
+-			case "profile":
+-				other.state.digest[1] = 2
+-			}
+-			k, _ := other.DeriveRole(r)
+-			p, _ := NewPeer(k, [32]byte{2})
+-			b, _ := h.EncodeNext()
+-			if what == "direction" {
+-				b[1] = 2
+-			}
+-			if p.Accept(b) == nil {
+-				t.Fatal("foreign input")
+-			}
+-			dispose(h, p, k)
+-			a, bp, bk := pair(t, s, Docker, 3)
+-			exchange(t, a, bp)
+-			dispose(a, bp, bk)
+-		})
+-	}
+-	for _, cut := range []int{0, 1, 122, 123, 154, 155} {
+-		t.Run(fmt.Sprint(cut), func(t *testing.T) {
+-			s := session(t, 1)
+-			h, p, k := pair(t, s, Docker, 1)
+-			send(t, h, p)
+-			send(t, p, h)
+-			send(t, h, p)
+-			ack, _ := p.EncodeNext()
+-			bad := append([]byte(nil), ack...)
+-			if cut == 155 {
+-				bad[154] ^= 1
+-			} else {
+-				bad = bad[:cut]
+-			}
+-			if h.Accept(bad) == nil || h.Complete() || h.Accept(ack) == nil {
+-				t.Fatal("ACK retry/forgery")
+-			}
+-			dispose(h, p, k)
+-		})
+-	}
+-}
+-func TestWrapperRebindZeroAndAliasAccounting(t *testing.T) {
+-	original := session(t, 1)
+-	alias := *original
+-	other := session(t, 2)
+-	h, p, k := pair(t, original, Docker, 1)
+-	*original = *other
+-	exchange(t, h, p)
+-	if original.ObserveReady(h) == nil {
+-		t.Fatal("wrong original ready")
+-	}
+-	if alias.ObserveReady(h) != ErrProtocol {
+-		t.Fatal("Docker before provision")
+-	}
+-	h.Close()
+-	if alias.state.live != 0 || other.state.live != 0 {
+-		t.Fatal("wrong close accounting")
+-	}
+-	p.Close()
+-	k.Close()
+-	h, p, k = pair(t, &alias, Docker, 2)
+-	*original = Session{}
+-	exchange(t, h, p)
+-	dispose(h, p, k)
+-	h, p, k = pair(t, &alias, NetworkControl, 3)
+-	exchange(t, h, p)
+-	copyAlias := alias
+-	if copyAlias.ObserveReady(h) != nil {
+-		t.Fatal("same original alias ready")
+-	}
+-	alias.Close()
+-	*original = *other
+-	if h.Complete() {
+-		t.Fatal("revived after wrapper overwrite")
+-	}
+-	if _, e := h.EncodeNext(); e == nil {
+-		t.Fatal("revived encode")
+-	}
+-	dispose(h, p, k)
+-	s := session(t, 4)
+-	h, p, k = pair(t, s, Docker, 1)
+-	send(t, h, p)
+-	old := k
+-	replacement, _ := other.DeriveRole(Docker)
+-	k = replacement
+-	old.Close()
+-	if _, e := p.EncodeNext(); e == nil {
+-		t.Fatal("retargeted peer key")
+-	}
+-	h.Close()
+-	p.Close()
+-	k.Close()
+-	var zero Session
+-	var conn Connection
+-	if zero.ObserveReady(&conn) == nil || conn.Accept(nil) == nil || conn.Complete() {
+-		t.Fatal("zero values")
+-	}
+-	zero.Close()
+-	conn.Close()
+-}
+-func TestParallelOutOfOrderTwoEnginesAndLiveBudgets(t *testing.T) {
+-	a, b := session(t, 1), session(t, 2)
+-	var wg sync.WaitGroup
+-	for _, s := range []*Session{a, b} {
+-		hs := make([]*Connection, 128)
+-		ps := make([]*Connection, 128)
+-		ks := make([]RoleKey, 128)
+-		for i := range hs {
+-			hs[i], ps[i], ks[i] = pair(t, s, Docker, byte(i+1))
+-		}
+-		for i := 127; i >= 0; i-- {
+-			h, p, k := hs[i], ps[i], ks[i]
+-			wg.Add(1)
+-			go func() { defer wg.Done(); exchange(t, h, p); dispose(h, p, k) }()
+-		}
+-	}
+-	wg.Wait()
+-	for i := 0; i < 5000; i++ {
+-		h, p, k := pair(t, a, Docker, 1)
+-		exchange(t, h, p)
+-		dispose(h, p, k)
+-	}
+-	if a.state.live != 0 {
+-		t.Fatal("lifetime exhaustion/leak")
+-	}
+-	a.state.next = ^uint64(0)
+-	if _, e := a.Host(Docker, [32]byte{1}); e == nil {
+-		t.Fatal("overflow")
+-	}
+-	s := session(t, 3)
+-	var hs []*Connection
+-	for i := 0; i < 256; i++ {
+-		h, _ := s.Host(Docker, [32]byte{1})
+-		hs = append(hs, h)
+-	}
+-	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
+-		t.Fatal("host live bound")
+-	}
+-	hs[0].Close()
+-	hs[0].Close()
+-	h, e := s.Host(Docker, [32]byte{1})
+-	if e != nil {
+-		t.Fatal("live slot reuse")
+-	}
+-	h.Close()
+-	k, _ := s.DeriveRole(Docker)
+-	for i := 0; i < 256; i++ {
+-		p, e := NewPeer(k, [32]byte{1})
+-		if e != nil {
+-			t.Fatal(e)
+-		}
+-		defer p.Close()
+-	}
+-	if _, e := NewPeer(k, [32]byte{1}); e == nil {
+-		t.Fatal("peer live bound")
+-	}
+-}
+-func TestProvisionOrderAndStreamBudgets(t *testing.T) {
+-	s := session(t, 1)
+-	ready := func(r Role) error {
+-		h, p, k := pair(t, s, r, 1)
+-		exchange(t, h, p)
+-		defer dispose(h, p, k)
+-		return s.ObserveReady(h)
+-	}
+-	if ready(SSHBinding) == nil || ready(Docker) == nil || s.ObserveProvisionJoin() == nil {
+-		t.Fatal("early gates")
+-	}
+-	for _, r := range []Role{NetworkControl, NetworkData, SSHBinding} {
+-		if ready(r) != nil {
+-			t.Fatal("SSH cycle")
+-		}
+-	}
+-	if s.ObserveProvisionJoin() != nil {
+-		t.Fatal("provision")
+-	}
+-	for _, r := range []Role{Docker, Containerd, Guestagent} {
+-		if ready(r) != nil {
+-			t.Fatal("final role")
+-		}
+-	}
+-	if s.Ordered(Bootstrap, 1, false) == nil {
+-		t.Fatal("gap")
+-	}
+-	for i := uint64(0); i < 16; i++ {
+-		if s.Ordered(Bootstrap, i, false) != nil {
+-			t.Fatal("startup")
+-		}
+-	}
+-	if s.Ordered(Bootstrap, 16, false) == nil {
+-		t.Fatal("startup bound")
+-	}
+-	for i := uint64(0); i < 8; i++ {
+-		if s.Ordered(Bootstrap, i, true) != nil {
+-			t.Fatal("drain")
+-		}
+-	}
+-	if s.Ordered(Bootstrap, 8, true) == nil {
+-		t.Fatal("drain bound")
+-	}
+-	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
+-		t.Fatal("drain new host")
+-	}
+-}
+-func TestSecretRedactionAndClose(t *testing.T) {
+-	s := session(t, 77)
+-	h, p, k := pair(t, s, Docker, 1)
+-	for _, obj := range []any{s, *s, h, *h, k, secret{77}} {
+-		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
+-			if !bytes.Contains([]byte(fmt.Sprintf(verb, obj)), []byte("REDACTED")) {
+-				t.Fatal("secret format", verb)
+-			}
+-		}
+-		if _, e := json.Marshal(obj); e == nil {
+-			t.Fatal("secret JSON")
+-		}
+-	}
+-	hello, _ := h.EncodeNext()
+-	s.Close()
+-	if p.Accept(hello) != nil {
+-		t.Fatal("derived peer depends on master owner")
+-	}
+-	challenge, e := p.EncodeNext()
+-	if e != nil || h.Accept(challenge) == nil {
+-		t.Fatal("independent peer/master lifetime")
+-	}
+-	if s.state.master != (secret{}) {
+-		t.Fatal("master erasure")
+-	}
+-	if _, e := h.EncodeNext(); e == nil {
+-		t.Fatal("closed master host")
+-	}
+-	k.Close()
+-	if k.state.key != (secret{}) {
+-		t.Fatal("role erasure")
+-	}
+-	if p.Accept(nil) == nil {
+-		t.Fatal("closed peer")
+-	}
+-	h.Close()
+-	p.Close()
+-}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/credential.go
+@@ -0,0 +1,74 @@
++package guestsession
++
++import (
++	"bytes"
++	"io"
++)
++
++// CredentialSize is a single derived role key, never a master credential.
++const CredentialSize = 92
++
++var credentialMagic = [8]byte{'O', 'R', 'B', 'R', 'O', 'L', 'E', '2'}
++
++// ReadRoleCredential parses DATA only. The actual selected guest caller must use
++// its private original stdin and close the host write end after the fixed frame.
++// No descriptor/path/argv/environment lookup or native admission occurs here.
++func ReadRoleCredential(r io.Reader, expected Role) (RoleKey, error) {
++	var b [CredentialSize]byte
++	defer clear(b[:])
++	if r == nil || !valid(expected) {
++		return RoleKey{}, ErrProtocol
++	}
++	if _, err := io.ReadFull(r, b[:]); err != nil {
++		return RoleKey{}, ErrProtocol
++	}
++	var tail [1]byte
++	if n, err := r.Read(tail[:]); n != 0 || err != io.EOF {
++		return RoleKey{}, ErrProtocol
++	}
++	if !bytes.Equal(b[:8], credentialMagic[:]) || b[8] != 2 || Role(b[9]) != expected || b[10] != 0 || b[11] != 0 {
++		return RoleKey{}, ErrProtocol
++	}
++	o := &roleState{role: expected}
++	copy(o.id[:], b[12:28])
++	copy(o.digest[:], b[28:60])
++	copy(o.key[:], b[60:92])
++	if o.id == ([16]byte{}) || o.digest == ([32]byte{}) || o.key == (secret{}) {
++		clear(o.key[:])
++		return RoleKey{}, ErrProtocol
++	}
++	return RoleKey{state: o}, nil
++}
++
++// WriteCredential emits only this already-derived role's fixed envelope. It is a
++// wire operation, not Windows secret-delivery authority or actor readiness.
++func (k RoleKey) WriteCredential(w io.Writer) error {
++	if k.state == nil || w == nil {
++		return ErrProtocol
++	}
++	var b [CredentialSize]byte
++	defer clear(b[:])
++	o := k.state
++	o.mu.Lock()
++	if o.closed || !valid(o.role) {
++		o.mu.Unlock()
++		return ErrProtocol
++	}
++	copy(b[:8], credentialMagic[:])
++	b[8] = 2
++	b[9] = byte(o.role)
++	copy(b[12:28], o.id[:])
++	copy(b[28:60], o.digest[:])
++	copy(b[60:], o.key[:])
++	o.mu.Unlock()
++	return writeExact(w, b[:])
++}
++
++func writeExact(w io.Writer, b []byte) error {
++	// A partial/failed write is not retried, and never treated as acceptance.
++	n, err := w.Write(b)
++	if err != nil || n != len(b) {
++		return ErrProtocol
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/duplex.go
+@@ -0,0 +1,254 @@
++package guestsession
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"sync"
++	"sync/atomic"
++	"time"
++)
++
++// HalfConn preserves independent EOF; these values carry no native authority.
++type HalfConn interface {
++	net.Conn
++	CloseWrite() error
++}
++type Duplex struct{ state *duplexState }
++type copyDirection struct {
++	src, dst                  HalfConn
++	buffer                    [32768]byte
++	readN, writeN             int
++	readErr, writeErr, error  error
++	halfEntered, halfReturned bool
++	halfErr                   error
++}
++type managedClose struct {
++	conn              HalfConn
++	entered, returned bool
++	err               error
++}
++type duplexState struct {
++	mu                                sync.Mutex
++	a, b                              HalfConn
++	directions                        [2]copyDirection
++	closes                            [2]managedClose
++	seal                              <-chan struct{}
++	unknown                           chan struct{}
++	unknownOnce                       sync.Once
++	interruptOnce                     sync.Once
++	deadlineEntered, deadlineReturned [2]bool
++	deadlineErr                       [2]error
++	done                              chan int
++	callbackDone                      chan struct{}
++	callbackStop                      func() bool
++	attempted                         bool
++	result                            error
++	settled                           atomic.Bool
++}
++
++func (Duplex) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest duplex]")) }
++func (Duplex) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++
++func NewDuplex(a, b HalfConn) *Duplex {
++	o := &duplexState{a: a, b: b, unknown: make(chan struct{}), done: make(chan int, 2)}
++	o.directions[0].src = a
++	o.directions[0].dst = b
++	o.directions[1].src = b
++	o.directions[1].dst = a
++	o.closes[0].conn = b
++	o.closes[1].conn = a
++	return &Duplex{state: o}
++}
++func (d *Duplex) Settled() bool { return d != nil && d.state != nil && d.state.settled.Load() }
++func (o *duplexState) fenced() bool {
++	if negativeSeal(o.seal) {
++		return true
++	}
++	select {
++	case <-o.unknown:
++		return true
++	default:
++		return false
++	}
++}
++func (o *duplexState) fence() { o.unknownOnce.Do(func() { close(o.unknown) }) }
++func (o *duplexState) interrupt() {
++	o.interruptOnce.Do(func() {
++		defer func() {
++			if recover() != nil {
++				o.fence()
++			}
++		}()
++		for i, c := range []HalfConn{o.a, o.b} {
++			if o.fenced() {
++				o.fence()
++				return
++			}
++			o.deadlineEntered[i] = true
++			o.deadlineErr[i] = ErrTransportUnknown
++			o.deadlineErr[i] = c.SetDeadline(time.Now())
++			o.deadlineReturned[i] = true
++			if o.deadlineErr[i] != nil {
++				o.fence()
++				return
++			}
++		}
++	})
++}
++func (o *duplexState) copy(i int) {
++	d := &o.directions[i]
++	defer func() {
++		if recover() != nil {
++			d.error = ErrTransportUnknown
++			o.fence()
++		}
++		o.done <- i
++	}()
++	empty := 0
++	for {
++		if o.fenced() {
++			d.error = ErrTransportUnknown
++			o.fence()
++			return
++		}
++		d.readN, d.readErr = d.src.Read(d.buffer[:])
++		if d.readN < 0 || d.readN > len(d.buffer) {
++			d.error = ErrTransportUnknown
++			o.fence()
++			return
++		}
++		if d.readN == 0 && d.readErr == nil {
++			empty++
++			if empty >= 100 {
++				d.error = io.ErrNoProgress
++				return
++			}
++			continue
++		}
++		empty = 0
++		for sent := 0; sent < d.readN; {
++			if o.fenced() {
++				d.error = ErrTransportUnknown
++				o.fence()
++				return
++			}
++			d.writeN, d.writeErr = d.dst.Write(d.buffer[sent:d.readN])
++			if d.writeN < 0 || d.writeN > d.readN-sent {
++				d.error = ErrTransportUnknown
++				o.fence()
++				return
++			}
++			sent += d.writeN
++			if d.writeErr != nil {
++				d.error = d.writeErr
++				return
++			}
++			if d.writeN == 0 {
++				d.error = io.ErrShortWrite
++				return
++			}
++		}
++		if d.readErr != nil {
++			if !errors.Is(d.readErr, io.EOF) {
++				d.error = d.readErr
++				return
++			}
++			if o.fenced() {
++				d.error = ErrTransportUnknown
++				o.fence()
++				return
++			}
++			d.halfEntered = true
++			d.halfErr = ErrTransportUnknown
++			d.halfErr = d.dst.CloseWrite()
++			d.halfReturned = true
++			d.error = d.halfErr
++			return
++		}
++	}
++}
++func (d *Duplex) Run(ctx context.Context, seal <-chan struct{}) (result error) {
++	if d == nil || d.state == nil {
++		return ErrProtocol
++	}
++	o := d.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.attempted {
++		return o.result
++	}
++	o.attempted = true
++	o.result = ErrTransportUnknown
++	o.seal = seal
++	defer func() {
++		if recover() != nil {
++			result = ErrTransportUnknown
++			o.fence()
++		}
++		o.result = result
++	}()
++	if ctx == nil || o.a == nil || o.b == nil {
++		o.fence()
++		return ErrTransportUnknown
++	}
++	if o.fenced() {
++		o.fence()
++		return ErrTransportUnknown
++	}
++	var copyErrors [2]error
++	if ctx.Err() == nil {
++		go o.copy(0)
++		go o.copy(1)
++		o.callbackDone = make(chan struct{})
++		o.callbackStop = context.AfterFunc(ctx, func() { defer close(o.callbackDone); o.interrupt() })
++		received := 0
++		for received < 2 {
++			select {
++			case <-o.unknown:
++				o.callbackStop()
++				return ErrTransportUnknown
++			case <-seal:
++				o.fence()
++				o.callbackStop()
++				return ErrTransportUnknown
++			case i := <-o.done:
++				received++
++				copyErrors[i] = o.directions[i].error
++				if copyErrors[i] != nil {
++					o.interrupt()
++				}
++			}
++		}
++		if !o.callbackStop() {
++			<-o.callbackDone
++		}
++		if o.fenced() {
++			o.fence()
++			return ErrTransportUnknown
++		}
++	}
++	// All actual copy workers and the original cancel callback are joined here.
++	for i := range o.closes {
++		if o.fenced() {
++			o.fence()
++			return ErrTransportUnknown
++		}
++		c := &o.closes[i]
++		c.entered = true
++		c.err = ErrTransportUnknown
++		c.err = c.conn.Close()
++		c.returned = true
++		if c.err != nil {
++			o.fence()
++			return ErrTransportUnknown
++		}
++	}
++	for i := range o.directions {
++		clear(o.directions[i].buffer[:])
++	}
++	o.settled.Store(true)
++	return errors.Join(copyErrors[0], copyErrors[1], ctx.Err())
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/duplex_test.go
+@@ -0,0 +1,217 @@
++package guestsession
++
++import (
++	"bytes"
++	"context"
++	"errors"
++	"io"
++	"net"
++	"os"
++	"sync/atomic"
++	"testing"
++	"time"
++)
++
++// This in-memory half-close transport exists only in tests. No socket, listener,
++// server process or native handle is constructed. It preserves both directions.
++type memoryHalf struct {
++	r                          *io.PipeReader
++	w                          *io.PipeWriter
++	halves, closes, deadlines  atomic.Int32
++	halfErr, closeErr, readErr error
++	panicRead, panicClose      bool
++}
++type memoryAddr struct{}
++
++func (memoryAddr) Network() string { return "in-memory" }
++func (memoryAddr) String() string  { return "in-memory" }
++func (c *memoryHalf) Read(b []byte) (int, error) {
++	if c.panicRead {
++		panic("controlled read")
++	}
++	if c.readErr != nil {
++		return 0, c.readErr
++	}
++	return c.r.Read(b)
++}
++func (c *memoryHalf) Write(b []byte) (int, error) { return c.w.Write(b) }
++func (c *memoryHalf) CloseWrite() error {
++	c.halves.Add(1)
++	if c.halfErr != nil {
++		return c.halfErr
++	}
++	return c.w.Close()
++}
++func (c *memoryHalf) Close() error {
++	c.closes.Add(1)
++	if c.panicClose {
++		panic("controlled close")
++	}
++	if c.closeErr != nil {
++		return c.closeErr
++	}
++	return errors.Join(c.r.Close(), c.w.Close())
++}
++func (c *memoryHalf) LocalAddr() net.Addr                { return memoryAddr{} }
++func (c *memoryHalf) RemoteAddr() net.Addr               { return memoryAddr{} }
++func (c *memoryHalf) SetReadDeadline(t time.Time) error  { return c.SetDeadline(t) }
++func (c *memoryHalf) SetWriteDeadline(t time.Time) error { return c.SetDeadline(t) }
++func (c *memoryHalf) SetDeadline(t time.Time) error {
++	c.deadlines.Add(1)
++	if !t.IsZero() {
++		return errors.Join(c.r.CloseWithError(os.ErrDeadlineExceeded), c.w.CloseWithError(os.ErrDeadlineExceeded))
++	}
++	return nil
++}
++func memoryPair(t *testing.T) (*memoryHalf, *memoryHalf) {
++	t.Helper()
++	ar, bw := io.Pipe()
++	br, aw := io.Pipe()
++	a, b := &memoryHalf{r: ar, w: aw}, &memoryHalf{r: br, w: bw}
++	// Cleanup concerns only this test-owned DATA transport, never uncertain OS IO.
++	t.Cleanup(func() { ar.Close(); br.Close(); aw.Close(); bw.Close() })
++	return a, b
++}
++func duplexFixture(t *testing.T) (*Duplex, *memoryHalf, *memoryHalf, *memoryHalf, *memoryHalf) {
++	client, a := memoryPair(t)
++	b, server := memoryPair(t)
++	return NewDuplex(a, b), client, a, b, server
++}
++func awaitDuplex(t *testing.T, done <-chan error) error {
++	t.Helper()
++	select {
++	case e := <-done:
++		return e
++	case <-time.After(3 * time.Second):
++		t.Fatal("duplex did not settle")
++		return nil
++	}
++}
++func TestDuplexHalfClosePreservesReverseBuildkitBytes(t *testing.T) {
++	d, client, a, b, server := duplexFixture(t)
++	done := make(chan error, 1)
++	go func() { done <- d.Run(context.Background(), nil) }()
++	upload := bytes.Repeat([]byte("build context"), 5000)
++	reply := []byte("reverse response after request EOF")
++	clientDone := make(chan error, 1)
++	go func() {
++		if _, e := client.Write(upload); e != nil {
++			clientDone <- e
++			return
++		}
++		if e := client.CloseWrite(); e != nil {
++			clientDone <- e
++			return
++		}
++		got, e := io.ReadAll(client)
++		if e == nil && !bytes.Equal(got, reply) {
++			e = ErrProtocol
++		}
++		clientDone <- e
++	}()
++	got, e := io.ReadAll(server)
++	if e != nil || !bytes.Equal(got, upload) {
++		t.Fatal("request", e)
++	}
++	if _, e = server.Write(reply); e != nil {
++		t.Fatal(e)
++	}
++	if e = server.CloseWrite(); e != nil {
++		t.Fatal(e)
++	}
++	if e = awaitDuplex(t, clientDone); e != nil {
++		t.Fatal("reverse", e)
++	}
++	if e = awaitDuplex(t, done); e != nil || !d.Settled() {
++		t.Fatal("settlement", e)
++	}
++	if a.halves.Load() != 1 || b.halves.Load() != 1 || a.closes.Load() != 1 || b.closes.Load() != 1 {
++		t.Fatal("original half/full close counts")
++	}
++	if d.Run(context.Background(), nil) != nil || a.closes.Load() != 1 || b.closes.Load() != 1 {
++		t.Fatal("replay closed again")
++	}
++}
++func TestDuplexKnownCopyAndHalfCloseErrorsAreReturnedAfterJoin(t *testing.T) {
++	for _, half := range []bool{false, true} {
++		d, client, a, b, _ := duplexFixture(t)
++		boom := errors.New("original copy/halfclose refusal")
++		if half {
++			b.halfErr = boom
++		} else {
++			a.readErr = boom
++		}
++		done := make(chan error, 1)
++		go func() { done <- d.Run(context.Background(), nil) }()
++		if half {
++			if e := client.CloseWrite(); e != nil {
++				t.Fatal(e)
++			}
++		}
++		e := awaitDuplex(t, done)
++		if !errors.Is(e, boom) || !d.Settled() {
++			t.Fatal("known error lost or unjoined", e)
++		}
++		if a.closes.Load() != 1 || b.closes.Load() != 1 {
++			t.Fatal("original closes missing")
++		}
++	}
++}
++func TestDuplexCancellationJoinsBeforeCheckedClose(t *testing.T) {
++	d, _, a, b, _ := duplexFixture(t)
++	ctx, cancel := context.WithCancel(context.Background())
++	done := make(chan error, 1)
++	go func() { done <- d.Run(ctx, nil) }()
++	cancel()
++	if e := awaitDuplex(t, done); !errors.Is(e, context.Canceled) || !d.Settled() {
++		t.Fatal(e)
++	}
++	if a.closes.Load() != 1 || b.closes.Load() != 1 {
++		t.Fatal("cancel original closure")
++	}
++}
++func TestDuplexUnknownCloseStopsBeforeSecondCloseAndCaches(t *testing.T) {
++	for _, panicClose := range []bool{false, true} {
++		d, client, a, b, server := duplexFixture(t)
++		b.closeErr = errors.New("original close uncertain")
++		b.panicClose = panicClose
++		done := make(chan error, 1)
++		go func() { done <- d.Run(context.Background(), nil) }()
++		client.CloseWrite()
++		server.CloseWrite()
++		if e := awaitDuplex(t, done); e != ErrTransportUnknown || d.Settled() {
++			t.Fatal("close uncertainty lost", e)
++		}
++		if b.closes.Load() != 1 || a.closes.Load() != 0 || d.state.closes[0].conn != b {
++			t.Fatal("suffix/lost original")
++		}
++		if d.Run(context.Background(), nil) != ErrTransportUnknown || b.closes.Load() != 1 {
++			t.Fatal("unknown retried")
++		}
++	}
++}
++func TestDuplexNegativeSealRetainsUnjoinedOriginalsWithoutSuffix(t *testing.T) {
++	d, _, a, b, _ := duplexFixture(t)
++	seal := make(chan struct{})
++	done := make(chan error, 1)
++	go func() { done <- d.Run(context.Background(), seal) }()
++	close(seal)
++	if e := awaitDuplex(t, done); e != ErrTransportUnknown || d.Settled() {
++		t.Fatal(e)
++	}
++	if a.closes.Load() != 0 || b.closes.Load() != 0 || a.deadlines.Load() != 0 || b.deadlines.Load() != 0 || d.state.a != a || d.state.b != b {
++		t.Fatal("sealed graph changed")
++	}
++}
++func TestDuplexWorkerPanicKeepsOriginalBuffersAndNoClose(t *testing.T) {
++	d, _, a, b, _ := duplexFixture(t)
++	a.panicRead = true
++	done := make(chan error, 1)
++	go func() { done <- d.Run(context.Background(), nil) }()
++	if e := awaitDuplex(t, done); e != ErrTransportUnknown || d.Settled() {
++		t.Fatal(e)
++	}
++	if a.closes.Load() != 0 || b.closes.Load() != 0 || d.state.directions[0].src != a {
++		t.Fatal("panic lost original or closed suffix")
++	}
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/session.go
+@@ -0,0 +1,359 @@
++// Package guestsession models authentication DATA, never native authority.
++package guestsession
++
++import (
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"sync"
++)
++
++var ErrProtocol = errors.New("guest session protocol refused")
++var ErrSecretJSON = errors.New("guest session secret cannot be JSON encoded")
++
++type Role byte
++
++const (
++	Bootstrap Role = iota + 1
++	NetworkControl
++	NetworkData
++	Docker
++	Containerd
++	Guestagent
++	SSHBinding
++)
++
++func valid(r Role) bool { return r >= Bootstrap && r <= SSHBinding }
++
++type secret [32]byte
++
++func (secret) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED]")) }
++func (secret) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++
++type Session struct{ state *sessionState }
++type sessionState struct {
++	mu               sync.Mutex
++	master           secret
++	id               [16]byte
++	digest           [32]byte
++	closed, draining bool
++	next             uint64
++	live             uint16
++	startup, drain   uint64
++	ready            [8]bool
++	provisioned      bool
++}
++
++func (Session) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest session]")) }
++func (Session) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func New(master [32]byte, id [16]byte, record []byte) (*Session, error) {
++	if master == ([32]byte{}) || id == ([16]byte{}) || len(record) == 0 || len(record) > 4096 {
++		return nil, ErrProtocol
++	}
++	return &Session{state: &sessionState{master: secret(master), id: id, digest: sha256.Sum256(record)}}, nil
++}
++func (s *Session) Close() {
++	if s == nil || s.state == nil {
++		return
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.closed = true
++	o.master = secret{}
++}
++func (s *Session) Ordered(role Role, seq uint64, drain bool) error {
++	if s == nil || s.state == nil {
++		return ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || !valid(role) {
++		return ErrProtocol
++	}
++	if drain {
++		if seq != o.drain || o.drain >= 8 {
++			return ErrProtocol
++		}
++		o.draining = true
++		o.drain++
++		return nil
++	}
++	if o.draining || seq != o.startup || o.startup >= 16 {
++		return ErrProtocol
++	}
++	o.startup++
++	return nil
++}
++
++// RoleKey holds ONLY a derived role key. Independent peer delivery is future IO.
++type RoleKey struct{ state *roleState }
++type roleState struct {
++	mu     sync.Mutex
++	key    secret
++	id     [16]byte
++	digest [32]byte
++	role   Role
++	closed bool
++	live   uint16
++}
++
++func (RoleKey) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED role key]")) }
++func (RoleKey) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func derive(master secret, id [16]byte, r Role) secret {
++	m := hmac.New(sha256.New, master[:])
++	m.Write([]byte("orbwin-selected-guest-session-v2\x00"))
++	m.Write([]byte{byte(r)})
++	m.Write(id[:])
++	var out secret
++	m.Sum(out[:0])
++	return out
++}
++func (s *Session) DeriveRole(r Role) (RoleKey, error) {
++	if s == nil || s.state == nil {
++		return RoleKey{}, ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || !valid(r) {
++		return RoleKey{}, ErrProtocol
++	}
++	return RoleKey{state: &roleState{key: derive(o.master, o.id, r), id: o.id, digest: o.digest, role: r}}, nil
++}
++func (k RoleKey) Close() {
++	if k.state == nil {
++		return
++	}
++	o := k.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	o.closed = true
++	o.key = secret{}
++}
++
++type Connection struct{ state *connectionState }
++type connectionState struct {
++	mu             sync.Mutex
++	host           *sessionState
++	peer           *roleState
++	role           Role
++	sid            [16]byte
++	digest         [32]byte
++	hn, gn         [32]byte
++	id             uint64
++	phase          byte
++	failed, closed bool
++}
++
++func (Connection) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest connection]")) }
++func (Connection) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++func (s *Session) Host(r Role, nonce [32]byte) (*Connection, error) {
++	if s == nil || s.state == nil {
++		return nil, ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || !valid(r) || nonce == ([32]byte{}) || o.next == ^uint64(0) || o.live >= 256 {
++		return nil, ErrProtocol
++	}
++	o.next++
++	o.live++
++	return &Connection{state: &connectionState{host: o, role: r, sid: o.id, digest: o.digest, hn: nonce, id: o.next}}, nil
++}
++func NewPeer(k RoleKey, nonce [32]byte) (*Connection, error) {
++	if k.state == nil {
++		return nil, ErrProtocol
++	}
++	o := k.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || nonce == ([32]byte{}) || o.live >= 256 {
++		return nil, ErrProtocol
++	}
++	o.live++
++	return &Connection{state: &connectionState{peer: o, role: o.role, sid: o.id, digest: o.digest, gn: nonce}}, nil
++}
++
++const MessageSize = 155
++
++var tags = [4]string{"host-hello", "guest-challenge", "host-finish", "guest-accepted"}
++
++// lockOwner is called only with original connection.mu held. No owner operation
++// locks a connection except readiness, which follows the same connection→owner order.
++func (c *connectionState) lockOwner() (secret, bool, func()) {
++	if c.host != nil {
++		o := c.host
++		o.mu.Lock()
++		return derive(o.master, o.id, c.role), !o.closed && !o.draining, o.mu.Unlock
++	}
++	o := c.peer
++	o.mu.Lock()
++	return o.key, !o.closed, o.mu.Unlock
++}
++func wire(c *connectionState, phase byte, hn, gn [32]byte, id uint64, key secret) []byte {
++	b := make([]byte, MessageSize)
++	b[0] = 2
++	b[1] = phase
++	b[2] = byte(c.role)
++	copy(b[3:19], c.sid[:])
++	copy(b[19:51], c.digest[:])
++	copy(b[51:83], hn[:])
++	copy(b[83:115], gn[:])
++	binary.LittleEndian.PutUint64(b[115:123], id)
++	m := hmac.New(sha256.New, key[:])
++	m.Write([]byte(tags[phase]))
++	m.Write([]byte{0})
++	m.Write(b[:123])
++	copy(b[123:], m.Sum(nil))
++	return b
++}
++func (c *Connection) EncodeNext() ([]byte, error) {
++	if c == nil || c.state == nil {
++		return nil, ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	defer clear(key[:])
++	allowed := o.host != nil && (o.phase == 0 || o.phase == 2) || o.peer != nil && (o.phase == 1 || o.phase == 3)
++	if o.closed || o.failed || !known || !allowed {
++		o.failed = true
++		return nil, ErrProtocol
++	}
++	gn := o.gn
++	if o.phase == 0 {
++		gn = [32]byte{}
++	}
++	b := wire(o, o.phase, o.hn, gn, o.id, key)
++	o.phase++
++	return b, nil
++}
++func (c *Connection) Accept(b []byte) error {
++	if c == nil || c.state == nil {
++		return ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	defer clear(key[:])
++	allowed := o.host != nil && (o.phase == 1 || o.phase == 3) || o.peer != nil && (o.phase == 0 || o.phase == 2)
++	if o.closed || o.failed || !known || !allowed || len(b) != MessageSize {
++		o.failed = true
++		return ErrProtocol
++	}
++	hn, gn, id := o.hn, o.gn, o.id
++	if o.phase == 0 {
++		copy(hn[:], b[51:83])
++		id = binary.LittleEndian.Uint64(b[115:123])
++		gn = [32]byte{}
++		if hn == ([32]byte{}) || id == 0 {
++			o.failed = true
++			return ErrProtocol
++		}
++	}
++	if o.phase == 1 {
++		copy(gn[:], b[83:115])
++		if gn == ([32]byte{}) {
++			o.failed = true
++			return ErrProtocol
++		}
++	}
++	if !hmac.Equal(b, wire(o, o.phase, hn, gn, id, key)) {
++		o.failed = true
++		return ErrProtocol
++	}
++	// Publish peer nonce/source fields ONLY after authenticating the full message.
++	if o.phase == 0 {
++		o.hn = hn
++		o.id = id
++	}
++	if o.phase == 1 {
++		o.gn = gn
++	}
++	o.phase++
++	return nil
++}
++
++// Complete means host has accepted an authentic peer ACK, not IO/native readiness.
++func (c *Connection) Complete() bool {
++	if c == nil || c.state == nil {
++		return false
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	key, known, unlock := o.lockOwner()
++	defer unlock()
++	clear(key[:])
++	return o.host != nil && !o.closed && !o.failed && known && o.phase == 4
++}
++
++// Close disposes only a pure parser slot, never an actual native resource.
++func (c *Connection) Close() {
++	if c == nil || c.state == nil {
++		return
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed {
++		return
++	}
++	o.closed = true
++	if o.host != nil {
++		o.host.mu.Lock()
++		o.host.live--
++		o.host.mu.Unlock()
++	} else {
++		o.peer.mu.Lock()
++		o.peer.live--
++		o.peer.mu.Unlock()
++	}
++}
++func (s *Session) ObserveReady(c *Connection) error {
++	if s == nil || s.state == nil || c == nil || c.state == nil {
++		return ErrProtocol
++	}
++	o := c.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	a := s.state
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	if o.host != a || o.failed || o.closed || o.phase != 4 || a.closed || a.draining || a.ready[o.role] {
++		return ErrProtocol
++	}
++	r := o.role
++	if r == SSHBinding && (!a.ready[NetworkControl] || !a.ready[NetworkData]) {
++		return ErrProtocol
++	}
++	if (r == Docker || r == Containerd || r == Guestagent) && !a.provisioned {
++		return ErrProtocol
++	}
++	a.ready[r] = true
++	return nil
++}
++
++// ObserveProvisionJoin is only a DATA transition; no actual process join is issued.
++func (s *Session) ObserveProvisionJoin() error {
++	if s == nil || s.state == nil {
++		return ErrProtocol
++	}
++	o := s.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.closed || o.draining || o.provisioned || !o.ready[SSHBinding] {
++		return ErrProtocol
++	}
++	o.provisioned = true
++	return nil
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/session_test.go
+@@ -0,0 +1,412 @@
++package guestsession
++
++import (
++	"bytes"
++	"crypto/hmac"
++	"crypto/sha256"
++	"encoding/binary"
++	"encoding/json"
++	"fmt"
++	"sync"
++	"testing"
++)
++
++func session(t *testing.T, n byte) *Session {
++	t.Helper()
++	s, e := New([32]byte{n}, [16]byte{n}, []byte("canonical profile"))
++	if e != nil {
++		t.Fatal(e)
++	}
++	return s
++}
++func pair(t *testing.T, s *Session, r Role, n byte) (*Connection, *Connection, RoleKey) {
++	t.Helper()
++	h, e := s.Host(r, [32]byte{n})
++	if e != nil {
++		t.Fatal(e)
++	}
++	k, e := s.DeriveRole(r)
++	if e != nil {
++		t.Fatal(e)
++	}
++	p, e := NewPeer(k, [32]byte{n, 1})
++	if e != nil {
++		t.Fatal(e)
++	}
++	return h, p, k
++}
++func send(t *testing.T, from, to *Connection) []byte {
++	t.Helper()
++	b, e := from.EncodeNext()
++	if e != nil {
++		t.Fatal(e)
++	}
++	if len(b) != 155 {
++		t.Fatal("wire bound")
++	}
++	if e = to.Accept(b); e != nil {
++		t.Fatal(e)
++	}
++	return b
++}
++func exchange(t *testing.T, h, p *Connection) {
++	t.Helper()
++	send(t, h, p)
++	send(t, p, h)
++	send(t, h, p)
++	if h.Complete() {
++		t.Fatal("early ACK")
++	}
++	send(t, p, h)
++	if !h.Complete() || p.Complete() {
++		t.Fatal("directional completion")
++	}
++}
++func dispose(h, p *Connection, k RoleKey) { h.Close(); p.Close(); k.Close() }
++func TestIndependentOwnersAndWire(t *testing.T) {
++	s := session(t, 1)
++	h, p, k := pair(t, s, Docker, 7)
++	defer dispose(h, p, k)
++	hello, e := h.EncodeNext()
++	if e != nil {
++		t.Fatal(e)
++	}
++	want := make([]byte, 155)
++	want[0] = 2
++	want[2] = byte(Docker)
++	want[3] = 1
++	d := sha256.Sum256([]byte("canonical profile"))
++	copy(want[19:51], d[:])
++	want[51] = 7
++	binary.LittleEndian.PutUint64(want[115:123], 1)
++	master := make([]byte, 32)
++	master[0] = 1
++	deriveMAC := hmac.New(sha256.New, master)
++	deriveMAC.Write([]byte("orbwin-selected-guest-session-v2\x00"))
++	deriveMAC.Write([]byte{byte(Docker)})
++	deriveMAC.Write(want[3:19])
++	mac := hmac.New(sha256.New, deriveMAC.Sum(nil))
++	mac.Write([]byte("host-hello\x00"))
++	mac.Write(want[:123])
++	copy(want[123:], mac.Sum(nil))
++	if !bytes.Equal(hello, want) {
++		t.Fatal("independent wire/MAC")
++	}
++	if h.state.gn != ([32]byte{}) || p.state.id != 0 {
++		t.Fatal("pre-adopted context")
++	}
++	if p.Accept(hello) != nil || p.state.id != h.state.id {
++		t.Fatal("peer ID adoption")
++	}
++	send(t, p, h)
++	send(t, h, p)
++	if h.Complete() {
++		t.Fatal("before ack")
++	}
++	send(t, p, h)
++	if !h.Complete() || p.Complete() {
++		t.Fatal("direction")
++	}
++}
++func TestDirectionReplayAndMACBeforePublish(t *testing.T) {
++	s := session(t, 1)
++	h, p, k := pair(t, s, Docker, 1)
++	hello, _ := h.EncodeNext()
++	if h.Accept(hello) == nil || h.Complete() {
++		t.Fatal("host self-feed")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 2)
++	if _, e := p.EncodeNext(); e == nil {
++		t.Fatal("peer originates hello")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 3)
++	send(t, h, p)
++	challenge, _ := p.EncodeNext()
++	challenge[154] ^= 1
++	if h.Accept(challenge) == nil || h.state.gn != ([32]byte{}) {
++		t.Fatal("unauth nonce published")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 4)
++	hello, _ = h.EncodeNext()
++	hello[154] ^= 1
++	if p.Accept(hello) == nil || p.state.id != 0 || p.state.hn != ([32]byte{}) {
++		t.Fatal("unauth peer context")
++	}
++	dispose(h, p, k)
++	h, p, k = pair(t, s, Docker, 5)
++	old := send(t, h, p)
++	if p.Accept(old) == nil {
++		t.Fatal("duplicate hello")
++	}
++	dispose(h, p, k)
++	oldH, oldP, oldK := pair(t, s, Docker, 6)
++	send(t, oldH, oldP)
++	oldChallenge, _ := oldP.EncodeNext()
++	dispose(oldH, oldP, oldK)
++	h, p, k = pair(t, s, Docker, 6)
++	h.EncodeNext()
++	if h.Accept(oldChallenge) == nil {
++		t.Fatal("attempt ID replay")
++	}
++	dispose(h, p, k)
++}
++func TestWrongContextAndPartialACKLocalOnly(t *testing.T) {
++	for _, what := range []string{"key", "role", "session", "profile", "direction"} {
++		t.Run(what, func(t *testing.T) {
++			s := session(t, 1)
++			h, e := s.Host(Docker, [32]byte{1})
++			if e != nil {
++				t.Fatal(e)
++			}
++			other := session(t, 1)
++			r := Docker
++			switch what {
++			case "key":
++				other.state.master[1] = 2
++			case "role":
++				r = Containerd
++			case "session":
++				other.state.id[1] = 2
++			case "profile":
++				other.state.digest[1] = 2
++			}
++			k, _ := other.DeriveRole(r)
++			p, _ := NewPeer(k, [32]byte{2})
++			b, _ := h.EncodeNext()
++			if what == "direction" {
++				b[1] = 2
++			}
++			if p.Accept(b) == nil {
++				t.Fatal("foreign input")
++			}
++			dispose(h, p, k)
++			a, bp, bk := pair(t, s, Docker, 3)
++			exchange(t, a, bp)
++			dispose(a, bp, bk)
++		})
++	}
++	for _, cut := range []int{0, 1, 122, 123, 154, 155} {
++		t.Run(fmt.Sprint(cut), func(t *testing.T) {
++			s := session(t, 1)
++			h, p, k := pair(t, s, Docker, 1)
++			send(t, h, p)
++			send(t, p, h)
++			send(t, h, p)
++			ack, _ := p.EncodeNext()
++			bad := append([]byte(nil), ack...)
++			if cut == 155 {
++				bad[154] ^= 1
++			} else {
++				bad = bad[:cut]
++			}
++			if h.Accept(bad) == nil || h.Complete() || h.Accept(ack) == nil {
++				t.Fatal("ACK retry/forgery")
++			}
++			dispose(h, p, k)
++		})
++	}
++}
++func TestWrapperRebindZeroAndAliasAccounting(t *testing.T) {
++	original := session(t, 1)
++	alias := *original
++	other := session(t, 2)
++	h, p, k := pair(t, original, Docker, 1)
++	*original = *other
++	exchange(t, h, p)
++	if original.ObserveReady(h) == nil {
++		t.Fatal("wrong original ready")
++	}
++	if alias.ObserveReady(h) != ErrProtocol {
++		t.Fatal("Docker before provision")
++	}
++	h.Close()
++	if alias.state.live != 0 || other.state.live != 0 {
++		t.Fatal("wrong close accounting")
++	}
++	p.Close()
++	k.Close()
++	h, p, k = pair(t, &alias, Docker, 2)
++	*original = Session{}
++	exchange(t, h, p)
++	dispose(h, p, k)
++	h, p, k = pair(t, &alias, NetworkControl, 3)
++	exchange(t, h, p)
++	copyAlias := alias
++	if copyAlias.ObserveReady(h) != nil {
++		t.Fatal("same original alias ready")
++	}
++	alias.Close()
++	*original = *other
++	if h.Complete() {
++		t.Fatal("revived after wrapper overwrite")
++	}
++	if _, e := h.EncodeNext(); e == nil {
++		t.Fatal("revived encode")
++	}
++	dispose(h, p, k)
++	s := session(t, 4)
++	h, p, k = pair(t, s, Docker, 1)
++	send(t, h, p)
++	old := k
++	replacement, _ := other.DeriveRole(Docker)
++	k = replacement
++	old.Close()
++	if _, e := p.EncodeNext(); e == nil {
++		t.Fatal("retargeted peer key")
++	}
++	h.Close()
++	p.Close()
++	k.Close()
++	var zero Session
++	var conn Connection
++	if zero.ObserveReady(&conn) == nil || conn.Accept(nil) == nil || conn.Complete() {
++		t.Fatal("zero values")
++	}
++	zero.Close()
++	conn.Close()
++}
++func TestParallelOutOfOrderTwoEnginesAndLiveBudgets(t *testing.T) {
++	a, b := session(t, 1), session(t, 2)
++	var wg sync.WaitGroup
++	for _, s := range []*Session{a, b} {
++		hs := make([]*Connection, 128)
++		ps := make([]*Connection, 128)
++		ks := make([]RoleKey, 128)
++		for i := range hs {
++			hs[i], ps[i], ks[i] = pair(t, s, Docker, byte(i+1))
++		}
++		for i := 127; i >= 0; i-- {
++			h, p, k := hs[i], ps[i], ks[i]
++			wg.Add(1)
++			go func() { defer wg.Done(); exchange(t, h, p); dispose(h, p, k) }()
++		}
++	}
++	wg.Wait()
++	for i := 0; i < 5000; i++ {
++		h, p, k := pair(t, a, Docker, 1)
++		exchange(t, h, p)
++		dispose(h, p, k)
++	}
++	if a.state.live != 0 {
++		t.Fatal("lifetime exhaustion/leak")
++	}
++	a.state.next = ^uint64(0)
++	if _, e := a.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("overflow")
++	}
++	s := session(t, 3)
++	var hs []*Connection
++	for i := 0; i < 256; i++ {
++		h, _ := s.Host(Docker, [32]byte{1})
++		hs = append(hs, h)
++	}
++	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("host live bound")
++	}
++	hs[0].Close()
++	hs[0].Close()
++	h, e := s.Host(Docker, [32]byte{1})
++	if e != nil {
++		t.Fatal("live slot reuse")
++	}
++	h.Close()
++	k, _ := s.DeriveRole(Docker)
++	for i := 0; i < 256; i++ {
++		p, e := NewPeer(k, [32]byte{1})
++		if e != nil {
++			t.Fatal(e)
++		}
++		defer p.Close()
++	}
++	if _, e := NewPeer(k, [32]byte{1}); e == nil {
++		t.Fatal("peer live bound")
++	}
++}
++func TestProvisionOrderAndStreamBudgets(t *testing.T) {
++	s := session(t, 1)
++	ready := func(r Role) error {
++		h, p, k := pair(t, s, r, 1)
++		exchange(t, h, p)
++		defer dispose(h, p, k)
++		return s.ObserveReady(h)
++	}
++	if ready(SSHBinding) == nil || ready(Docker) == nil || s.ObserveProvisionJoin() == nil {
++		t.Fatal("early gates")
++	}
++	for _, r := range []Role{NetworkControl, NetworkData, SSHBinding} {
++		if ready(r) != nil {
++			t.Fatal("SSH cycle")
++		}
++	}
++	if s.ObserveProvisionJoin() != nil {
++		t.Fatal("provision")
++	}
++	for _, r := range []Role{Docker, Containerd, Guestagent} {
++		if ready(r) != nil {
++			t.Fatal("final role")
++		}
++	}
++	if s.Ordered(Bootstrap, 1, false) == nil {
++		t.Fatal("gap")
++	}
++	for i := uint64(0); i < 16; i++ {
++		if s.Ordered(Bootstrap, i, false) != nil {
++			t.Fatal("startup")
++		}
++	}
++	if s.Ordered(Bootstrap, 16, false) == nil {
++		t.Fatal("startup bound")
++	}
++	for i := uint64(0); i < 8; i++ {
++		if s.Ordered(Bootstrap, i, true) != nil {
++			t.Fatal("drain")
++		}
++	}
++	if s.Ordered(Bootstrap, 8, true) == nil {
++		t.Fatal("drain bound")
++	}
++	if _, e := s.Host(Docker, [32]byte{1}); e == nil {
++		t.Fatal("drain new host")
++	}
++}
++func TestSecretRedactionAndClose(t *testing.T) {
++	s := session(t, 77)
++	h, p, k := pair(t, s, Docker, 1)
++	for _, obj := range []any{s, *s, h, *h, k, secret{77}} {
++		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
++			if !bytes.Contains([]byte(fmt.Sprintf(verb, obj)), []byte("REDACTED")) {
++				t.Fatal("secret format", verb)
++			}
++		}
++		if _, e := json.Marshal(obj); e == nil {
++			t.Fatal("secret JSON")
++		}
++	}
++	hello, _ := h.EncodeNext()
++	s.Close()
++	if p.Accept(hello) != nil {
++		t.Fatal("derived peer depends on master owner")
++	}
++	challenge, e := p.EncodeNext()
++	if e != nil || h.Accept(challenge) == nil {
++		t.Fatal("independent peer/master lifetime")
++	}
++	if s.state.master != (secret{}) {
++		t.Fatal("master erasure")
++	}
++	if _, e := h.EncodeNext(); e == nil {
++		t.Fatal("closed master host")
++	}
++	k.Close()
++	if k.state.key != (secret{}) {
++		t.Fatal("role erasure")
++	}
++	if p.Accept(nil) == nil {
++		t.Fatal("closed peer")
++	}
++	h.Close()
++	p.Close()
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/transport.go
+@@ -0,0 +1,208 @@
++package guestsession
++
++import (
++	"context"
++	"crypto/rand"
++	"errors"
++	"fmt"
++	"io"
++	"net"
++	"sync"
++	"time"
++)
++
++var ErrTransportUnknown = errors.New("guest authentication transport completion unknown")
++
++// PeerExchange retains the original managed connection and wire backing. The
++// actual caller publishes this object in its original stream BEFORE Run. It is
++// protocol/managed-I/O custody, never a raw FD completion or native authority.
++type PeerExchange struct{ state *peerExchangeState }
++type peerExchangeState struct {
++	host      *Session
++	role      Role
++	seal      <-chan struct{}
++	mu        sync.Mutex
++	conn      net.Conn
++	key       RoleKey
++	ctx       context.Context
++	input     [MessageSize]byte
++	output    []byte
++	nonce     [32]byte
++	peer      *Connection
++	attempted bool
++	result    error
++}
++
++func NewPeerExchange(conn net.Conn, key RoleKey) *PeerExchange {
++	return &PeerExchange{state: &peerExchangeState{conn: conn, key: key}}
++}
++
++// NewHostExchange uses the SAME codec; conn/session are not native capabilities.
++func NewHostExchange(conn net.Conn, s *Session, r Role) *PeerExchange {
++	return &PeerExchange{state: &peerExchangeState{conn: conn, host: s, role: r}}
++}
++func negativeSeal(seal <-chan struct{}) bool {
++	if seal == nil {
++		return false
++	}
++	select {
++	case <-seal:
++		return true
++	default:
++		return false
++	}
++}
++func (PeerExchange) Format(f fmt.State, _ rune)   { _, _ = f.Write([]byte("[REDACTED guest exchange]")) }
++func (PeerExchange) MarshalJSON() ([]byte, error) { return nil, ErrSecretJSON }
++
++func setHandshakeDeadline(conn net.Conn, t time.Time) (err error) {
++	defer func() {
++		if recover() != nil {
++			err = ErrTransportUnknown
++		}
++	}()
++	if conn.SetDeadline(t) != nil {
++		return ErrTransportUnknown
++	}
++	return nil
++}
++
++// Run exchanges exact existing-codec messages before payload. Success means a
++// local complete ACK write on peer, or authentic received ACK on host. Neither
++// is native readiness. No connection close or retry.
++// On ErrTransportUnknown caller must retain this SAME operation and connection.
++func (p *PeerExchange) Run(ctx context.Context) error { return p.RunWithFence(ctx, nil) }
++
++// RunWithFence accepts only a negative admission seal, never authority.
++func (p *PeerExchange) RunWithFence(ctx context.Context, seal <-chan struct{}) (result error) {
++	if p == nil || p.state == nil {
++		return ErrProtocol
++	}
++	o := p.state
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.attempted {
++		return o.result
++	}
++	o.attempted = true
++	o.result = ErrTransportUnknown
++	o.ctx = ctx
++	o.seal = seal
++	defer func() {
++		if recover() != nil {
++			result = ErrTransportUnknown
++		}
++		o.result = result
++		// Unknown wire storage and parser remain on the original operation.
++		if result != ErrTransportUnknown {
++			clear(o.input[:])
++			clear(o.output)
++			clear(o.nonce[:])
++			if o.peer != nil {
++				o.peer.Close()
++			}
++		}
++	}()
++	if negativeSeal(o.seal) {
++		return ErrTransportUnknown
++	}
++	if ctx == nil || o.conn == nil || ctx.Err() != nil {
++		return ErrProtocol
++	}
++	if _, err := rand.Read(o.nonce[:]); err != nil {
++		return ErrProtocol
++	}
++	var err error
++	if o.host != nil {
++		o.peer, err = o.host.Host(o.role, o.nonce)
++	} else {
++		o.peer, err = NewPeer(o.key, o.nonce)
++	}
++	if err != nil {
++		return err
++	}
++	deadline := time.Now().Add(10 * time.Second)
++	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
++		deadline = d
++	}
++	if negativeSeal(o.seal) {
++		return ErrTransportUnknown
++	}
++	if setHandshakeDeadline(o.conn, deadline) != nil {
++		return ErrTransportUnknown
++	}
++	done := make(chan error, 1)
++	stop := context.AfterFunc(ctx, func() {
++		if negativeSeal(o.seal) {
++			done <- ErrTransportUnknown
++			return
++		}
++		done <- setHandshakeDeadline(o.conn, time.Now())
++	})
++	defer func() {
++		// Observe panic BEFORE any cleanup suffix. Stop/join only the original
++		// callback; never reset deadlines after unknown/panic.
++		if recover() != nil {
++			result = ErrTransportUnknown
++		}
++		if !stop() {
++			if <-done != nil {
++				result = ErrTransportUnknown
++			}
++		}
++		if negativeSeal(o.seal) {
++			result = ErrTransportUnknown
++		}
++		if result != ErrTransportUnknown && setHandshakeDeadline(o.conn, time.Time{}) != nil {
++			result = ErrTransportUnknown
++		}
++	}()
++	for step := 0; step < 2; step++ {
++		if negativeSeal(o.seal) {
++			return ErrTransportUnknown
++		}
++		if o.host != nil {
++			o.output, err = o.peer.EncodeNext()
++			if err != nil {
++				return err
++			}
++			if negativeSeal(o.seal) {
++				return ErrTransportUnknown
++			}
++			if err = writeExact(o.conn, o.output); err != nil {
++				return err
++			}
++			clear(o.output)
++		}
++		if negativeSeal(o.seal) {
++			return ErrTransportUnknown
++		}
++		if _, err = io.ReadFull(o.conn, o.input[:]); err != nil {
++			return ErrProtocol
++		}
++		if err = o.peer.Accept(o.input[:]); err != nil {
++			return err
++		}
++		if o.host == nil {
++			o.output, err = o.peer.EncodeNext()
++			if err != nil {
++				return err
++			}
++			if negativeSeal(o.seal) {
++				return ErrTransportUnknown
++			}
++			if err = writeExact(o.conn, o.output); err != nil {
++				return err
++			}
++			clear(o.output)
++		}
++	}
++	if o.host != nil && !o.peer.Complete() {
++		return ErrProtocol
++	}
++
++	if ctx.Err() != nil {
++		return ErrProtocol
++	}
++	return nil
++}
+--- /dev/null
++++ b/pkg/proxyguestprotocol/guestsession/transport_test.go
+@@ -0,0 +1,343 @@
++package guestsession
++
++import (
++	"bytes"
++	"context"
++	"io"
++	"net"
++	"testing"
++	"time"
++)
++
++func testPeerHandshake(ctx context.Context, c net.Conn, k RoleKey) error {
++	return NewPeerExchange(c, k).Run(ctx)
++}
++
++func exportedKey(t *testing.T, s *Session, r Role) (RoleKey, []byte) {
++	t.Helper()
++	k, e := s.DeriveRole(r)
++	if e != nil {
++		t.Fatal(e)
++	}
++	defer k.Close()
++	var b bytes.Buffer
++	if e = k.WriteCredential(&b); e != nil {
++		t.Fatal(e)
++	}
++	raw := append([]byte(nil), b.Bytes()...)
++	imported, e := ReadRoleCredential(bytes.NewReader(raw), r)
++	if e != nil {
++		t.Fatal(e)
++	}
++	return imported, raw
++}
++func TestRoleCredentialBoundariesAndRedaction(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	k, raw := exportedKey(t, s, Docker)
++	defer k.Close()
++	if len(raw) != CredentialSize {
++		t.Fatal("bound")
++	}
++	for _, cut := range []int{0, 1, 8, 12, 60, 91} {
++		if _, e := ReadRoleCredential(bytes.NewReader(raw[:cut]), Docker); e == nil {
++			t.Fatal("truncation", cut)
++		}
++	}
++	cases := [][]byte{append(append([]byte{}, raw...), 0)}
++	for _, offset := range []int{0, 8, 9, 10, 11} {
++		b := append([]byte{}, raw...)
++		b[offset] ^= 255
++		cases = append(cases, b)
++	}
++	for _, b := range cases {
++		if _, e := ReadRoleCredential(bytes.NewReader(b), Docker); e == nil {
++			t.Fatal("malformed accepted")
++		}
++	}
++	if _, e := ReadRoleCredential(bytes.NewReader(raw), Containerd); e == nil {
++		t.Fatal("role confusion")
++	}
++	k.Close()
++	if k.WriteCredential(io.Discard) == nil {
++		t.Fatal("closed credential exported")
++	}
++}
++
++func hostExchange(s *Session, role Role, c net.Conn) error {
++	h, e := s.Host(role, [32]byte{2})
++	if e != nil {
++		return e
++	}
++	defer h.Close()
++	var input [MessageSize]byte
++	for i := 0; i < 2; i++ {
++		b, e := h.EncodeNext()
++		if e != nil {
++			return e
++		}
++		e = writeExact(c, b)
++		clear(b)
++		if e != nil {
++			return e
++		}
++		if _, e = io.ReadFull(c, input[:]); e != nil {
++			return e
++		}
++		if e = h.Accept(input[:]); e != nil {
++			return e
++		}
++	}
++	if !h.Complete() {
++		return ErrProtocol
++	}
++	return nil
++}
++func TestPeerHandshakeExactPayloadBoundary(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	key, _ := exportedKey(t, s, Docker)
++	defer key.Close()
++	host, peer := net.Pipe()
++	defer host.Close()
++	defer peer.Close()
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	defer cancel()
++	done := make(chan error, 1)
++	go func() { done <- testPeerHandshake(ctx, peer, key) }()
++	if e := hostExchange(s, Docker, host); e != nil {
++		t.Fatal(e)
++	}
++	if e := <-done; e != nil {
++		t.Fatal(e)
++	}
++	// No read-ahead consumed the first application byte, nor did authentication
++	// invent an extra framing layer around the existing streaming connection.
++	payload := []byte("first Docker/BuildKit application bytes")
++	go func() { _, _ = host.Write(payload) }()
++	b := make([]byte, len(payload))
++	if _, e := io.ReadFull(peer, b); e != nil || !bytes.Equal(b, payload) {
++		t.Fatal("payload boundary", e)
++	}
++}
++func TestPeerHandshakeWrongOwnerRefusesBeforePayload(t *testing.T) {
++	for _, wrong := range []string{"role", "key", "context"} {
++		t.Run(wrong, func(t *testing.T) {
++			s := session(t, 1)
++			defer s.Close()
++			other := s
++			if wrong == "key" {
++				other = session(t, 2)
++				defer other.Close()
++			}
++			if wrong == "context" {
++				var e error
++				other, e = New([32]byte{1}, [16]byte{1}, []byte("other endpoint profile"))
++				if e != nil {
++					t.Fatal(e)
++				}
++				defer other.Close()
++			}
++			key, _ := exportedKey(t, other, Docker)
++			defer key.Close()
++			role := Docker
++			if wrong == "role" {
++				role = Containerd
++			}
++			h, p := net.Pipe()
++			defer h.Close()
++			defer p.Close()
++			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++			defer cancel()
++			done := make(chan error, 1)
++			go func() { done <- testPeerHandshake(ctx, p, key) }()
++			c, e := s.Host(role, [32]byte{2})
++			if e != nil {
++				t.Fatal(e)
++			}
++			defer c.Close()
++			hello, e := c.EncodeNext()
++			if e != nil {
++				t.Fatal(e)
++			}
++			if _, e = h.Write(hello); e != nil {
++				t.Fatal(e)
++			}
++			if e = <-done; e == nil {
++				t.Fatal("wrong binding accepted")
++			}
++			if c.Complete() {
++				t.Fatal("host ready from refusal")
++			}
++		})
++	}
++}
++func TestPeerHandshakeCancellationAndTruncation(t *testing.T) {
++	for _, partial := range []bool{false, true} {
++		s := session(t, 1)
++		key, _ := exportedKey(t, s, Docker)
++		h, p := net.Pipe()
++		ctx, cancel := context.WithCancel(context.Background())
++		done := make(chan error, 1)
++		go func() { done <- testPeerHandshake(ctx, p, key) }()
++		if partial {
++			_, _ = h.Write([]byte{2, 0, byte(Docker)})
++			_ = h.Close()
++		} else {
++			cancel()
++		}
++		select {
++		case e := <-done:
++			if e == nil {
++				t.Fatal("partial/cancel accepted")
++			}
++		case <-time.After(time.Second):
++			t.Fatal("cancellation didn't join")
++		}
++		cancel()
++		h.Close()
++		p.Close()
++		key.Close()
++		s.Close()
++	}
++}
++
++// Controlled DATA-only connection fault: no native handle or provider exists.
++type handshakeFaultConn struct {
++	net.Conn
++	panicDeadline bool
++	closes        int
++}
++
++func (c *handshakeFaultConn) SetDeadline(t time.Time) error {
++	if c.panicDeadline {
++		panic("controlled deadline")
++	}
++	return c.Conn.SetDeadline(t)
++}
++func (c *handshakeFaultConn) Close() error { c.closes++; return c.Conn.Close() }
++func TestPeerDeadlinePanicReturnsUnknownWithoutClosingOriginal(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	k, _ := exportedKey(t, s, Docker)
++	defer k.Close()
++	h, p := net.Pipe()
++	defer h.Close()
++	defer p.Close()
++	original := &handshakeFaultConn{Conn: p, panicDeadline: true}
++	if e := testPeerHandshake(context.Background(), original, k); e != ErrTransportUnknown {
++		t.Fatal("panic not unknown", e)
++	}
++	if original.closes != 0 {
++		t.Fatal("unknown original was closed")
++	}
++}
++
++func TestPeerOperationUnknownRetainsOriginalAndNeverRetries(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	key, _ := exportedKey(t, s, Docker)
++	defer key.Close()
++	h, p := net.Pipe()
++	defer h.Close()
++	defer p.Close()
++	original := &handshakeFaultConn{Conn: p, panicDeadline: true}
++	op := NewPeerExchange(original, key)
++	if op.Run(context.Background()) != ErrTransportUnknown {
++		t.Fatal("missing original uncertainty")
++	}
++	frame := op.state
++	if frame.conn != original || frame.peer == nil || frame.nonce == ([32]byte{}) {
++		t.Fatal("lost original graph/backing")
++	}
++	original.panicDeadline = false
++	if op.Run(context.Background()) != ErrTransportUnknown || op.state != frame || original.closes != 0 {
++		t.Fatal("retried or closed original")
++	}
++}
++
++func TestOwnedHostAndPeerRepeatedConnectionsNoHistoryCap(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	key, _ := exportedKey(t, s, Docker)
++	defer key.Close()
++	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
++	defer cancel()
++	for i := 0; i < 300; i++ {
++		h, p := net.Pipe()
++		host := NewHostExchange(h, s, Docker)
++		peer := NewPeerExchange(p, key)
++		done := make(chan error, 1)
++		go func() { done <- peer.Run(ctx) }()
++		if err := host.Run(ctx); err != nil {
++			t.Fatal(i, err)
++		}
++		if err := <-done; err != nil {
++			t.Fatal(i, err)
++		}
++		if err := h.Close(); err != nil {
++			t.Fatal(err)
++		}
++		if err := p.Close(); err != nil {
++			t.Fatal(err)
++		}
++	}
++	if s.state.live != 0 || key.state.live != 0 {
++		t.Fatal("successful history consumed live slots")
++	}
++}
++func TestMalformedConnectionThenValidKeepsRoleUsable(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	key, _ := exportedKey(t, s, Docker)
++	defer key.Close()
++	h, p := net.Pipe()
++	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
++	defer cancel()
++	done := make(chan error, 1)
++	peer := NewPeerExchange(p, key)
++	go func() {
++		e := peer.Run(ctx)
++		if p.Close() != nil {
++			e = ErrTransportUnknown
++		}
++		done <- e
++	}()
++	if _, err := h.Write(make([]byte, MessageSize)); err != nil {
++		t.Fatal(err)
++	}
++	if err := <-done; err == nil || err == ErrTransportUnknown {
++		t.Fatal("malformed not known refused", err)
++	}
++	if err := h.Close(); err != nil {
++		t.Fatal(err)
++	}
++	h, p = net.Pipe()
++	defer h.Close()
++	defer p.Close()
++	host := NewHostExchange(h, s, Docker)
++	peer = NewPeerExchange(p, key)
++	go func() { done <- peer.Run(ctx) }()
++	if err := host.Run(ctx); err != nil {
++		t.Fatal("valid connection poisoned by prior refusal", err)
++	}
++	if err := <-done; err != nil {
++		t.Fatal(err)
++	}
++}
++func TestHostOriginalNegativeSealDoesNotStartIO(t *testing.T) {
++	s := session(t, 1)
++	defer s.Close()
++	h, p := net.Pipe()
++	defer h.Close()
++	defer p.Close()
++	seal := make(chan struct{})
++	close(seal)
++	op := NewHostExchange(h, s, Docker)
++	if op.RunWithFence(context.Background(), seal) != ErrTransportUnknown {
++		t.Fatal("seal ignored")
++	}
++	if op.state.peer != nil || op.state.conn != h || op.Run(context.Background()) != ErrTransportUnknown {
++		t.Fatal("sealed attempt retried or lost original")
++	}
++}
+--- a/src/rdd-guest/main.go
++++ b/src/rdd-guest/main.go
+@@ -1,3 +1,5 @@
++//go:build !orbwin_selected_guest
++
+ // SPDX-License-Identifier: Apache-2.0
+ // SPDX-FileCopyrightText: SUSE LLC
+ // SPDX-FileCopyrightText: The Rancher Desktop Authors
+--- /dev/null
++++ b/src/rdd-guest/main_selected_linux.go
+@@ -0,0 +1,25 @@
++//go:build linux && orbwin_selected_guest
++
++package main
++
++import (
++	"context"
++	"os"
++	"os/signal"
++	"syscall"
++)
++
++// Selected product entry has no default legacy port, WSL-client environment or
++// proxy-transaction dispatch. Genuine private role delivery is a prerequisite.
++func main() {
++	role, err := selectedRoleFromArgs(os.Args[1:])
++	if err != nil {
++		os.Exit(125)
++	}
++	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++	defer stop()
++	// Unknown never returns: same original actor remains in its timer keeper.
++	if runSelectedRoleMode(ctx, role) != nil {
++		os.Exit(125)
++	}
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_entry.go
+@@ -0,0 +1,21 @@
++//go:build orbwin_selected_guest
++
++package main
++
++import auth "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/proxyguestprotocol/guestsession"
++
++// Only public role selectors appear in argv. Every actual secret still arrives
++// through the original private stdin92+EOF consumed by the actual role actor.
++func selectedRoleFromArgs(args []string) (auth.Role, error) {
++	if len(args) != 1 {
++		return 0, auth.ErrProtocol
++	}
++	switch args[0] {
++	case "selected-docker-session-v2":
++		return auth.Docker, nil
++	case "selected-containerd-session-v2":
++		return auth.Containerd, nil
++	default:
++		return 0, auth.ErrProtocol
++	}
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_entry_test.go
+@@ -0,0 +1,27 @@
++//go:build orbwin_selected_guest
++
++package main
++
++import (
++	auth "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/proxyguestprotocol/guestsession"
++	"testing"
++)
++
++func TestSelectedEntryOnlyFixedRoles(t *testing.T) {
++	for _, test := range []struct {
++		arg  string
++		role auth.Role
++	}{{"selected-docker-session-v2", auth.Docker}, {"selected-containerd-session-v2", auth.Containerd}} {
++		got, e := selectedRoleFromArgs([]string{test.arg})
++		if e != nil || got != test.role {
++			t.Fatal(test.arg, got, e)
++		}
++	}
++}
++func TestSelectedEntryRefusesEveryLegacyAndSecretArgument(t *testing.T) {
++	for _, args := range [][]string{nil, {}, {"wsl-client"}, {"network-proxy-transaction"}, {"selected-docker-session-v2", "key"}, {"Docker"}, {"selected-docker-session-v2=secret"}, {"/arbitrary/file"}, {"--role=docker"}, {"selected-docker-session-v2\x00"}} {
++		if _, e := selectedRoleFromArgs(args); e == nil {
++			t.Fatal("unsupported entry accepted", args)
++		}
++	}
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_session_keeper.go
+@@ -0,0 +1,9 @@
++package main
++
++import "time"
++
++// A positive pending timer keeps the original unknown actor alive even when
++// there is no remaining managed IO. This is not a native liveness/release proof.
++const selectedRoleKeeperDelay = time.Second
++
++func selectedRoleKeeperPause() { time.Sleep(selectedRoleKeeperDelay) }
+--- /dev/null
++++ b/src/rdd-guest/selected_session_keeper_test.go
+@@ -0,0 +1,111 @@
++package main
++
++import (
++	"go/ast"
++	"go/parser"
++	"go/token"
++	"runtime"
++	"testing"
++	"time"
++)
++
++func TestSelectedKeeperControlledTimerRetainsOriginal(t *testing.T) {
++	original := &struct{ marker int }{marker: 7}
++	entered := make(chan struct{})
++	stop := make(chan struct{})
++	done := make(chan *struct{ marker int }, 1)
++	start := time.Now()
++	go func() {
++		close(entered)
++		// Only this DATA model has stop. Actual actor loop has no exit/cancel.
++		for {
++			selectedRoleKeeperPause()
++			runtime.KeepAlive(original)
++			select {
++			case <-stop:
++				done <- original
++				return
++			default:
++			}
++		}
++	}()
++	<-entered
++	select {
++	case <-done:
++		t.Fatal("timer model exited before explicit test stop")
++	default:
++	}
++	close(stop)
++	select {
++	case got := <-done:
++		if got != original || got.marker != 7 || time.Since(start) < selectedRoleKeeperDelay {
++			t.Fatal("original/timer lost")
++		}
++	case <-time.After(4 * time.Second):
++		t.Fatal("controlled model did not finish after timer")
++	}
++}
++func TestSelectedActorKeeperBoundToTimerAndSameOriginal(t *testing.T) {
++	f, e := parser.ParseFile(token.NewFileSet(), "selected_session_linux.go", nil, 0)
++	if e != nil {
++		t.Fatal(e)
++	}
++	var keeper *ast.FuncDecl
++	for _, d := range f.Decls {
++		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "keep" && fn.Recv != nil {
++			keeper = fn
++		}
++	}
++	if keeper == nil || len(keeper.Body.List) != 2 {
++		t.Fatal("unrecognized actual keeper")
++	}
++	first, ok := keeper.Body.List[0].(*ast.ExprStmt)
++	if !ok {
++		t.Fatal("keeper lost negative marking")
++	}
++	mark, ok := first.X.(*ast.CallExpr)
++	if !ok {
++		t.Fatal("negative mark not a call")
++	}
++	selector, ok := mark.Fun.(*ast.SelectorExpr)
++	if !ok || selector.Sel.Name != "markUnknown" {
++		t.Fatal("negative mark changed")
++	}
++	receiver, ok := selector.X.(*ast.Ident)
++	if !ok || receiver.Name != "a" {
++		t.Fatal("negative mark rebound")
++	}
++	loop, ok := keeper.Body.List[1].(*ast.ForStmt)
++	if !ok || loop.Cond != nil || loop.Init != nil || loop.Post != nil || len(loop.Body.List) != 2 {
++		t.Fatal("actual keeper isn't non-exiting fixed loop")
++	}
++	pause, ok := loop.Body.List[0].(*ast.ExprStmt)
++	if !ok {
++		t.Fatal("missing timer")
++	}
++	call, ok := pause.X.(*ast.CallExpr)
++	if !ok || len(call.Args) != 0 {
++		t.Fatal("timer call changed")
++	}
++	name, ok := call.Fun.(*ast.Ident)
++	if !ok || name.Name != "selectedRoleKeeperPause" {
++		t.Fatal("timer helper changed")
++	}
++	keep, ok := loop.Body.List[1].(*ast.ExprStmt)
++	if !ok {
++		t.Fatal("missing KeepAlive")
++	}
++	call, ok = keep.X.(*ast.CallExpr)
++	if !ok || len(call.Args) != 1 {
++		t.Fatal("KeepAlive call changed")
++	}
++	selector, ok = call.Fun.(*ast.SelectorExpr)
++	if !ok || selector.Sel.Name != "KeepAlive" {
++		t.Fatal("missing KeepAlive")
++	}
++	pkg, ok := selector.X.(*ast.Ident)
++	arg, aok := call.Args[0].(*ast.Ident)
++	if !ok || pkg.Name != "runtime" || !aok || arg.Name != "a" || selectedRoleKeeperDelay <= 0 {
++		t.Fatal("not same original actor/positive timer")
++	}
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_session_linux.go
+@@ -0,0 +1,296 @@
++//go:build linux
++
++package main
++
++import (
++	"context"
++	"encoding/binary"
++	"errors"
++	"net"
++	"os"
++	"runtime"
++	"sync"
++	"time"
++
++	"github.com/mdlayher/vsock"
++	auth "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/proxyguestprotocol/guestsession"
++)
++
++var selectedRoleLifetime struct {
++	sync.Mutex
++	original *selectedRoleActor
++}
++
++type selectedRoleActor struct {
++	mu           sync.Mutex
++	role         auth.Role
++	key          auth.RoleKey
++	listener     *vsock.Listener
++	streams      map[*selectedRoleStream]struct{}
++	slots        chan struct{}
++	workers      *selectedWorkerLifetime
++	seal         chan struct{}
++	sealed       bool
++	stopping     bool
++	listenerStop func() bool
++	listenerDone chan error
++}
++type selectedRoleStream struct {
++	remote                      net.Conn
++	backend                     net.Conn
++	handshake                   *auth.PeerExchange
++	duplex                      *auth.Duplex
++	closeEntered, closeReturned bool
++	closeErr                    error
++}
++
++func (a *selectedRoleActor) fenced() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.sealed }
++func (a *selectedRoleActor) markUnknown() {
++	a.mu.Lock()
++	if !a.sealed {
++		a.sealed = true
++		close(a.seal)
++	}
++	a.mu.Unlock()
++}
++func (a *selectedRoleActor) keep() {
++	a.markUnknown()
++	// Same actual owner/slots/frames/workers remain. Existing in-flight managed
++	// calls may finish; no post-seal concurrency/release proof is claimed.
++	for {
++		selectedRoleKeeperPause()
++		runtime.KeepAlive(a)
++	}
++}
++func (a *selectedRoleActor) admit(ctx context.Context) *selectedRoleStream {
++	select {
++	case a.slots <- struct{}{}:
++	case <-ctx.Done():
++		return nil
++	case <-a.seal:
++		return nil
++	}
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	if a.sealed || a.stopping || ctx.Err() != nil {
++		<-a.slots
++		return nil
++	}
++	s := &selectedRoleStream{}
++	a.streams[s] = struct{}{}
++	return s
++}
++func (a *selectedRoleActor) release(s *selectedRoleStream) {
++	a.mu.Lock()
++	defer a.mu.Unlock()
++	if a.sealed {
++		return
++	} // Never discard even a locally settled slot after seal.
++	if _, ok := a.streams[s]; !ok {
++		panic("original selected stream slot missing")
++	}
++	delete(a.streams, s)
++	<-a.slots
++}
++func (a *selectedRoleActor) closeRejected(s *selectedRoleStream) {
++	if a.fenced() {
++		a.keep()
++	}
++	s.closeEntered = true
++	s.closeErr = auth.ErrTransportUnknown
++	s.closeErr = s.remote.Close()
++	s.closeReturned = true
++	if s.closeErr != nil {
++		a.keep()
++	}
++	a.release(s)
++}
++
++// Dormant: no main/unit/builder argv wiring. The selected product must make
++// authenticated entry mandatory only after genuine private Windows delivery.
++func runSelectedRoleMode(ctx context.Context, role auth.Role) error {
++	if ctx == nil || ctx.Err() != nil || role != auth.Docker && role != auth.Containerd {
++		return auth.ErrProtocol
++	}
++	a := &selectedRoleActor{role: role, streams: make(map[*selectedRoleStream]struct{}), slots: make(chan struct{}, 256), seal: make(chan struct{})}
++	selectedRoleLifetime.Lock()
++	if selectedRoleLifetime.original != nil {
++		selectedRoleLifetime.Unlock()
++		return auth.ErrProtocol
++	}
++	selectedRoleLifetime.original = a
++	selectedRoleLifetime.Unlock()
++	a.workers = newSelectedWorkerLifetime(ctx, a.seal)
++	workerCtx := a.workers.ctx
++	defer func() {
++		// Guard settlement itself as well as the body panic; no panic may unwind
++		// through original listener/worker/key cleanup.
++		defer func() {
++			if recover() != nil {
++				a.keep()
++			}
++		}()
++		if recover() != nil {
++			a.keep()
++		}
++		// Stop actual admission first; known stopping is NOT unknown seal.
++		a.mu.Lock()
++		if a.sealed {
++			a.mu.Unlock()
++			a.keep()
++		}
++		a.stopping = true
++		a.mu.Unlock()
++		// Same original cancellation precedes every actual worker join, including
++		// non-context Accept failure. No actor lock spans cancellation/wait/IO.
++		if a.workers.stopAndJoinKnown() != nil {
++			a.keep()
++		}
++		if a.listenerStop != nil && !a.listenerStop() {
++			if <-a.listenerDone != nil {
++				a.keep()
++			}
++		}
++		if a.fenced() {
++			a.keep()
++		}
++		a.finish()
++	}()
++	var err error
++	a.key, err = auth.ReadRoleCredential(os.Stdin, role)
++	if err != nil {
++		return auth.ErrProtocol
++	}
++	if workerCtx.Err() != nil {
++		return workerCtx.Err()
++	}
++	// Normal-return provider boundary only: hidden pre-return ignored closes in
++	// mdlayher's constructor remain a separate native-qualification hard gate.
++	a.listener, err = vsock.Listen(0, nil)
++	if err != nil || a.listener == nil {
++		a.keep()
++	}
++	addr, ok := a.listener.Addr().(*vsock.Addr)
++	if !ok || addr == nil || addr.Port == 0 || addr.Port == ^uint32(0) {
++		return auth.ErrProtocol
++	}
++	var report [16]byte
++	copy(report[:8], []byte("ORBPORT2"))
++	report[8] = 2
++	report[9] = byte(role)
++	binary.LittleEndian.PutUint32(report[12:], addr.Port)
++	if n, e := os.Stdout.Write(report[:]); e != nil || n != len(report) {
++		return auth.ErrProtocol
++	}
++	// Locator report is DATA, never authentication/readiness.
++	a.listenerDone = make(chan error, 1)
++	a.listenerStop = context.AfterFunc(workerCtx, func() {
++		var e error
++		defer func() {
++			if recover() != nil {
++				e = auth.ErrTransportUnknown
++			}
++			if e != nil {
++				a.markUnknown()
++			}
++			a.listenerDone <- e
++		}()
++		if a.fenced() {
++			e = auth.ErrTransportUnknown
++			return
++		}
++		e = a.listener.SetDeadline(time.Now())
++	})
++
++	for workerCtx.Err() == nil {
++		s := a.admit(workerCtx)
++		if s == nil {
++			break
++		}
++		// The exact slot exists before Accept writes the original output cell.
++		s.remote, err = a.listener.Accept()
++		if err != nil {
++			if s.remote != nil {
++				a.keep()
++			}
++			a.release(s)
++			if workerCtx.Err() != nil {
++				break
++			}
++			return auth.ErrProtocol
++		}
++		if s.remote == nil || a.fenced() {
++			a.keep()
++		}
++		a.workers.wait.Add(1)
++		go func() { defer a.workers.wait.Done(); a.stream(workerCtx, s) }()
++	}
++	return ctx.Err()
++}
++func (a *selectedRoleActor) finish() {
++	if a.fenced() {
++		a.keep()
++	}
++	if a.listener != nil {
++		if a.listener.Close() != nil {
++			a.keep()
++		}
++		a.listener = nil
++	}
++	a.key.Close()
++	// Role actor itself remains consumed; successful STREAM slots are reusable.
++}
++func (a *selectedRoleActor) stream(ctx context.Context, s *selectedRoleStream) {
++	defer func() {
++		if recover() != nil {
++			a.keep()
++		}
++	}()
++	if a.fenced() {
++		a.keep()
++	}
++	s.handshake = auth.NewPeerExchange(s.remote, a.key)
++	if err := s.handshake.RunWithFence(ctx, a.seal); err != nil {
++		if errors.Is(err, auth.ErrTransportUnknown) || a.fenced() {
++			a.keep()
++		}
++		a.closeRejected(s)
++		return
++	}
++	if ctx.Err() != nil {
++		a.closeRejected(s)
++		return
++	}
++	if a.fenced() {
++		a.keep()
++	}
++	path := "/run/orbwin/moby-internal.sock"
++	if a.role == auth.Containerd {
++		path = "/run/k3s/containerd/containerd.sock"
++	}
++	var err error
++	s.backend, err = (&net.Dialer{}).DialContext(ctx, "unix", path)
++	if err != nil {
++		if s.backend != nil {
++			a.keep()
++		}
++		a.closeRejected(s)
++		return
++	}
++	if s.backend == nil || a.fenced() {
++		a.keep()
++	}
++	remote, rok := s.remote.(auth.HalfConn)
++	backend, bok := s.backend.(auth.HalfConn)
++	if !rok || !bok {
++		a.keep()
++	} // No TCP/full-close fallback for missing half-close.
++	s.duplex = auth.NewDuplex(remote, backend)
++	err = s.duplex.Run(ctx, a.seal)
++	if errors.Is(err, auth.ErrTransportUnknown) || !s.duplex.Settled() || a.fenced() {
++		a.keep()
++	}
++	// Known copy/halfclose/cancel errors were returned by actual workers, joined,
++	// and both original Close calls settled positively. Refuse only this stream.
++	a.release(s)
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_session_workers.go
+@@ -0,0 +1,94 @@
++package main
++
++import (
++	"context"
++	"errors"
++	"sync"
++)
++
++var errSelectedWorkersUnknown = errors.New("selected guest worker settlement unknown")
++
++// One original actor's context/WaitGroup lifetime, never native authority.
++// Installed before first actor effect; ctx/cancel/seal remain immutable.
++type selectedWorkerLifetime struct {
++	ctx           context.Context
++	cancel        context.CancelFunc
++	seal          <-chan struct{}
++	wait          sync.WaitGroup
++	joinMu        sync.Mutex
++	joinAttempted bool
++	joinErr       error
++	resultDone    chan struct{}
++	joined        chan struct{}
++}
++
++func newSelectedWorkerLifetime(parent context.Context, seal <-chan struct{}) *selectedWorkerLifetime {
++	ctx, cancel := context.WithCancel(parent)
++	return &selectedWorkerLifetime{ctx: ctx, cancel: cancel, seal: seal}
++}
++func (w *selectedWorkerLifetime) unknown() bool {
++	select {
++	case <-w.seal:
++		return true
++	default:
++		return false
++	}
++}
++
++// Called only after original actor admission/Add stops. Short state locks are
++// never held over cancellation, original callback IO, or worker waits. Observed
++// unknown refuses suffix; raced prior admission is not post-seal prevention.
++func (w *selectedWorkerLifetime) stopAndJoinKnown() (result error) {
++	w.joinMu.Lock()
++	if w.joinAttempted {
++		done := w.resultDone
++		w.joinMu.Unlock()
++		if w.unknown() {
++			return errSelectedWorkersUnknown
++		}
++		select {
++		case <-w.seal:
++			return errSelectedWorkersUnknown
++		case <-done:
++		}
++		w.joinMu.Lock()
++		result = w.joinErr
++		w.joinMu.Unlock()
++		return result
++	}
++	w.joinAttempted = true
++	w.joinErr = errSelectedWorkersUnknown
++	w.resultDone = make(chan struct{})
++	w.joinMu.Unlock()
++	result = errSelectedWorkersUnknown
++	defer func() {
++		p := recover()
++		if p != nil {
++			result = errSelectedWorkersUnknown
++		}
++		w.joinMu.Lock()
++		w.joinErr = result
++		close(w.resultDone)
++		w.joinMu.Unlock()
++		if p != nil {
++			panic(p)
++		}
++	}()
++	if w.unknown() {
++		return result
++	}
++	w.cancel()
++	// Original join backing exists before the sole waiter runs. On unknown the
++	// actual waiter/WaitGroup/context remain held by this same retained lifetime.
++	w.joined = make(chan struct{})
++	go func() { w.wait.Wait(); close(w.joined) }()
++	select {
++	case <-w.seal:
++		return result
++	case <-w.joined:
++		if w.unknown() {
++			return result
++		}
++		return nil
++	}
++}
+--- /dev/null
++++ b/src/rdd-guest/selected_session_workers_test.go
+@@ -0,0 +1,178 @@
++package main
++
++import (
++	"context"
++	"errors"
++	"net"
++	"sync"
++	"testing"
++	"time"
++
++	auth "github.com/rancher-sandbox/rancher-desktop-daemon/pkg/proxyguestprotocol/guestsession"
++)
++
++type selectedReadNotice struct {
++	net.Conn
++	once    sync.Once
++	entered chan struct{}
++}
++
++func (c *selectedReadNotice) Read(b []byte) (int, error) {
++	c.once.Do(func() { close(c.entered) })
++	return c.Conn.Read(b)
++}
++func awaitSelected(t *testing.T, ch <-chan error) error {
++	t.Helper()
++	select {
++	case e := <-ch:
++		return e
++	case <-time.After(2 * time.Second):
++		t.Fatal("original worker join stalled")
++		return nil
++	}
++}
++func TestSelectedKnownAdmissionFailureCancelsIdleHandshakeWithLiveParent(t *testing.T) {
++	parent, releaseParent := context.WithCancel(context.Background())
++	defer releaseParent()
++	seal := make(chan struct{})
++	life := newSelectedWorkerLifetime(parent, seal)
++	s, e := auth.New([32]byte{1}, [16]byte{1}, []byte("owned test profile"))
++	if e != nil {
++		t.Fatal(e)
++	}
++	defer s.Close()
++	key, e := s.DeriveRole(auth.Docker)
++	if e != nil {
++		t.Fatal(e)
++	}
++	defer key.Close()
++	host, guest := net.Pipe()
++	defer host.Close()
++	defer guest.Close()
++	original := &selectedReadNotice{Conn: guest, entered: make(chan struct{})}
++	operation := auth.NewPeerExchange(original, key)
++	result := make(chan error, 1)
++	life.wait.Add(1)
++	go func() {
++		defer life.wait.Done()
++		err := operation.RunWithFence(life.ctx, seal)
++		if original.Close() != nil {
++			err = auth.ErrTransportUnknown
++		}
++		result <- err
++	}()
++	select {
++	case <-original.entered:
++	case <-time.After(time.Second):
++		t.Fatal("handshake never entered original idle read")
++	}
++	// This is a known listener/admission error, not cancellation from parent/UI.
++	settled := make(chan error, 1)
++	go func() { settled <- life.stopAndJoinKnown() }()
++	if e := awaitSelected(t, settled); e != nil {
++		t.Fatal(e)
++	}
++	if e := awaitSelected(t, result); e == nil || errors.Is(e, auth.ErrTransportUnknown) {
++		t.Fatal("idle worker did not complete known cancellation", e)
++	}
++	if parent.Err() != nil || life.ctx.Err() != context.Canceled {
++		t.Fatal("parent canceled or child cancellation missing")
++	}
++	select {
++	case <-life.joined:
++	default:
++		t.Fatal("worker wasn't joined")
++	}
++	joined := life.joined
++	if life.stopAndJoinKnown() != nil || life.joined != joined {
++		t.Fatal("known join replay changed original")
++	}
++}
++func TestSelectedPresealedUnknownNeverCancelsOrStartsJoin(t *testing.T) {
++	parent, release := context.WithCancel(context.Background())
++	defer release()
++	seal := make(chan struct{})
++	close(seal)
++	life := newSelectedWorkerLifetime(parent, seal)
++	if life.stopAndJoinKnown() != errSelectedWorkersUnknown {
++		t.Fatal("unknown accepted")
++	}
++	if life.ctx.Err() != nil || parent.Err() != nil || life.joined != nil {
++		t.Fatal("unknown cancellation/join suffix")
++	}
++	if life.stopAndJoinKnown() != errSelectedWorkersUnknown {
++		t.Fatal("unknown replay reset")
++	}
++}
++func TestSelectedUnknownDuringJoinRetainsOriginalUnjoinedBacking(t *testing.T) {
++	parent, release := context.WithCancel(context.Background())
++	defer release()
++	seal := make(chan struct{})
++	life := newSelectedWorkerLifetime(parent, seal)
++	life.wait.Add(1)
++	result := make(chan error, 1)
++	go func() { result <- life.stopAndJoinKnown() }()
++	<-life.ctx.Done()
++	close(seal)
++	if e := awaitSelected(t, result); e != errSelectedWorkersUnknown {
++		t.Fatal(e)
++	}
++	if life.joined == nil || parent.Err() != nil {
++		t.Fatal("lost original waiter/context")
++	}
++	select {
++	case <-life.joined:
++		t.Fatal("unjoined worker falsely completed")
++	default:
++	}
++	// Release only this pure test-owned DATA count after proving retention.
++	life.wait.Done()
++	<-life.joined
++	if life.stopAndJoinKnown() != errSelectedWorkersUnknown {
++		t.Fatal("late join reset cached uncertainty")
++	}
++}
++func TestSelectedStopPanicPrearmsCachedUnknown(t *testing.T) {
++	parent, release := context.WithCancel(context.Background())
++	defer release()
++	life := newSelectedWorkerLifetime(parent, make(chan struct{}))
++	life.cancel = func() { panic("controlled original cancel panic") }
++	panicked := false
++	func() {
++		defer func() {
++			if recover() != nil {
++				panicked = true
++			}
++		}()
++		_ = life.stopAndJoinKnown()
++	}()
++	if !panicked || life.stopAndJoinKnown() != errSelectedWorkersUnknown || life.joined != nil {
++		t.Fatal("panic allowed default success or retry")
++	}
++}
++
++func TestSelectedConcurrentKnownStopSharesOriginalJoin(t *testing.T) {
++	parent, release := context.WithCancel(context.Background())
++	defer release()
++	life := newSelectedWorkerLifetime(parent, make(chan struct{}))
++	life.wait.Add(1)
++	results := make(chan error, 16)
++	for i := 0; i < 16; i++ {
++		go func() { results <- life.stopAndJoinKnown() }()
++	}
++	<-life.ctx.Done()
++	select {
++	case <-results:
++		t.Fatal("returned before original worker joined")
++	default:
++	}
++	life.wait.Done()
++	for i := 0; i < 16; i++ {
++		if e := awaitSelected(t, results); e != nil {
++			t.Fatal(e)
++		}
++	}
++	if parent.Err() != nil {
++		t.Fatal("parent cancelled")
++	}
++}
+--- a/src/rdd-guest/wsl_client.go
++++ b/src/rdd-guest/wsl_client.go
+@@ -1,3 +1,5 @@
++//go:build !orbwin_selected_guest
++
+ // SPDX-License-Identifier: Apache-2.0
+ // OrbWin's Unix client entrypoint in the existing rdd guest bridge. It carries
+ // bytes to the same Windows Docker adapter, retaining upgrades and half-close.
+--- a/src/rdd-guest/wsl_client_test.go
++++ b/src/rdd-guest/wsl_client_test.go
+@@ -1,3 +1,5 @@
++//go:build !orbwin_selected_guest
++
+ // SPDX-License-Identifier: Apache-2.0
+ package main
+ 

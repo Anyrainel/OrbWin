@@ -1,0 +1,12 @@
+[
+  {
+    "path": "src-tauri/src/native_persistent_setup.rs",
+    "bytes": 28874,
+    "sha256": "a2b8afedfc390d860ecf2436e5698575b8e28de444e320e0f7cb1b57d3627054"
+  },
+  {
+    "path": "src-tauri/src/persistent_setup_model.rs",
+    "bytes": 13743,
+    "sha256": "031f26c35a7dee94269059875fe37c6ea8c356c95395af5cb066549a6ee3ae41"
+  }
+]

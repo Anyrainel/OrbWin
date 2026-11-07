@@ -1,0 +1,42 @@
+[
+  {
+    "path": "scripts/backend-guest-input.mjs",
+    "bytes": 10429,
+    "sha256": "559533c1a69f1cdf3ac7bf0a621ee64c11fb4e9f4d1c9757a150b05cd2801a44"
+  },
+  {
+    "path": "scripts/build-backend.mjs",
+    "bytes": 16342,
+    "sha256": "fea3c660c560d5797acc048a30fdda01f5b27cbf9c8e75d99c20806189cfcdbd"
+  },
+  {
+    "path": "scripts/winio-build-input-fs.mjs",
+    "bytes": 15649,
+    "sha256": "14f8b6ac127210319035fcbb2aa604a9efb49e88c98db622221569fdabff2289"
+  },
+  {
+    "path": "scripts/winio-build-input.mjs",
+    "bytes": 27774,
+    "sha256": "b0a437c6e40c78e6a1cf57001484b14603c18317fddaae644369d7ae7c4071c0"
+  },
+  {
+    "path": "scripts/winio-build-input.test.mjs",
+    "bytes": 16362,
+    "sha256": "401f735ff2ae338bb679a948dea790dc2b47b0d17951a7a3ca28e1b36a3ae1ba"
+  },
+  {
+    "path": "src-tauri/src/runtime_winio_provenance.rs",
+    "bytes": 19796,
+    "sha256": "2c0635226440e89b81721887762d47b74f99cb7406f955b2ea1d2e2c92513add"
+  },
+  {
+    "path": "winio-custody.lock.json",
+    "bytes": 41540,
+    "sha256": "33182ccdd2a3a603c5793af424ebdfd447da63182af5a60dc908c6f9ce788687"
+  },
+  {
+    "path": "winio-runtime-offer.json",
+    "bytes": 1740,
+    "sha256": "b302421aaa81072469f477551a0922d1382c8991967750524e28598cc3e96f6b"
+  }
+]

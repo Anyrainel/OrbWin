@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "component": "setup-parent-source2-desktop",
+  "selected": false,
+  "orderedSeries": false,
+  "parents": {
+    "parentFullContextManifestSHA256": "35cbe228d6a61216d021b994dfbca7accf1507230e2c0e96e46104b360368c76",
+    "targetHistoricalFullContextManifestSHA256": "cb7508547183b2a7c68d74672528921a9d9794d8e2ed71beb248640d7f0dc974",
+    "requiredActualContext": "only exact two LF Rust preimages; full ignored icons/schema context NOT required",
+    "sourceReceiptSHA256": "593d0af514b877d52c7445fbbedc353af86a661047509e76c2a1db0363dba7c0",
+    "source2Peer": "pending-separate"
+  },
+  "projection": "byte-exact declared repository input subset",
+  "excluded": [],
+  "beforeFiles": 2,
+  "afterFiles": 2,
+  "beforeManifestSHA256": "a423fc95c4eb08004ea99a82d0ea70097a0d0512651832654ed5fd516ad1f1e7",
+  "afterManifestSHA256": "84c2446e3fa37aea64737b94c44025f6734738877603b53affbbf70e3b49af29",
+  "patchSHA256": "73b963bf5cb7330a001cc5652a361cc2e404b687e922d6fc185019dccccc75c2",
+  "changedFiles": 2,
+  "changes": [
+    {
+      "path": "src-tauri/src/native_persistent_setup.rs",
+      "before": {
+        "bytes": 24685,
+        "sha256": "2be2488a543c5686249e8d0e356fbbb8c2d5da53e7e1f0a922f5dd88f917fed4"
+      },
+      "after": {
+        "bytes": 28874,
+        "sha256": "a2b8afedfc390d860ecf2436e5698575b8e28de444e320e0f7cb1b57d3627054"
+      },
+      "rawBefore": {
+        "bytes": 24685,
+        "sha256": "2be2488a543c5686249e8d0e356fbbb8c2d5da53e7e1f0a922f5dd88f917fed4"
+      },
+      "rawAfter": {
+        "bytes": 28874,
+        "sha256": "a2b8afedfc390d860ecf2436e5698575b8e28de444e320e0f7cb1b57d3627054"
+      }
+    },
+    {
+      "path": "src-tauri/src/persistent_setup_model.rs",
+      "before": {
+        "bytes": 12925,
+        "sha256": "d8931f4d191783fdf4b7badff9a23da586f31f290223d07183c718ebefe6b99d"
+      },
+      "after": {
+        "bytes": 13743,
+        "sha256": "031f26c35a7dee94269059875fe37c6ea8c356c95395af5cb066549a6ee3ae41"
+      },
+      "rawBefore": {
+        "bytes": 12925,
+        "sha256": "d8931f4d191783fdf4b7badff9a23da586f31f290223d07183c718ebefe6b99d"
+      },
+      "rawAfter": {
+        "bytes": 13743,
+        "sha256": "031f26c35a7dee94269059875fe37c6ea8c356c95395af5cb066549a6ee3ae41"
+      }
+    }
+  ],
+  "strictPatchReplay": true,
+  "freshFilesystemExactTarget": true
+}
