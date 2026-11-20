@@ -7,7 +7,6 @@ use std::{ffi::OsString, io::Write, sync::mpsc, time::Instant};
 
 const REQUEST: &[u8] = b"{\"schema\":2,\"operation\":\"setup\"}";
 const CANCEL: &[u8] = b"{\"schema\":2,\"operation\":\"cancel\"}";
-#[cfg(test)]
 const EVENT_LIMIT: usize = 256;
 #[cfg(test)]
 const ARGV: [&str; 2] = ["private-runtime-operation", "setup"];

@@ -49,6 +49,21 @@ automatic update distribution and a broader compatibility matrix are later
 release work. Installed first-run, restart, replacement and uninstall/state
 retention require actual qualification before Phase 1 acceptance.
 
+The Phase 2 checkout uses the [coherent build inputs](coherent-build-inputs.md)
+recipe. A fresh GitHub runner can compile the source, but the installer needs
+the selected Docker CLI, Compose and Buildx binaries and their matching
+provenance, the offline guest assets, and the maintenance image. Those files
+currently live in generated build directories outside Git.
+
+The selected openSUSE v0.2.11 guest image contains `emSign ECC Root CA - G3` in
+its default trust store. The checksum-verified v0.2.13 base image removes that
+root. Qualify both fresh setup and trust-store repair for existing guest disks
+before installer publication. The release runtime also needs a rebuild with
+the reviewed Go security update and a supported Alpine maintenance image.
+[Upstream guest image update](https://github.com/rancher-sandbox/rancher-desktop-2/commit/74c5695ffc5228f4d0fd7492ee34b897d8b795ed) ·
+[Go release history](https://go.dev/doc/devel/release) ·
+[Alpine support schedules](https://alpinelinux.org/releases/)
+
 The English custom language file retains all strings from pinned Tauri CLI
 2.12.6 (`9319e539f34237035cb4693bed9246660bc0a926`), under its Apache-2.0/MIT
 terms, with the uninstall checkbox narrowed to window preferences. Custom NSIS
