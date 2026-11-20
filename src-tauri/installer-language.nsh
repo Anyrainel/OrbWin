@@ -1,10 +1,11 @@
-; Adapted from Tauri CLI 2.12.4, commit 993038c49185307dfc895ab7657d77ca0d5ed7c7.
+; Adapted from Tauri CLI 2.12.6, commit 9319e539f34237035cb4693bed9246660bc0a926.
 ; Source: crates/tauri-bundler/src/bundle/windows/nsis/languages/English.nsh
 ; Tauri contributors, Apache-2.0 OR MIT. Retain all strings: custom languages replace the entire default file.
 LangString addOrReinstall ${LANG_ENGLISH} "Add/Reinstall components"
 LangString alreadyInstalled ${LANG_ENGLISH} "Already Installed"
 LangString alreadyInstalledLong ${LANG_ENGLISH} "${PRODUCTNAME} ${VERSION} is already installed. Select the operation you want to perform and click Next to continue."
 LangString appRunning ${LANG_ENGLISH} "${PRODUCTNAME} is running! Please close it first then try again."
+LangString noPermissionToCloseApp ${LANG_ENGLISH} "Insufficient permissions to close {{product_name}}, please close it and try again"
 LangString appRunningOkKill ${LANG_ENGLISH} "${PRODUCTNAME} is running!$\nClick OK to kill it"
 LangString chooseMaintenanceOption ${LANG_ENGLISH} "Choose the maintenance option to perform."
 LangString chooseHowToInstall ${LANG_ENGLISH} "Choose how you want to install ${PRODUCTNAME}."

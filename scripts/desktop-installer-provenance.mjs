@@ -6,15 +6,15 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export const desktopInstallerPins = Object.freeze({
-  cliVersion: "2.12.4",
-  commit: "993038c49185307dfc895ab7657d77ca0d5ed7c7",
+  cliVersion: "2.12.6",
+  commit: "9319e539f34237035cb4693bed9246660bc0a926",
   files: Object.freeze({
     "installer-template.upstream.nsi":
       "d00089d3b1a2c4a30d7b6e098079100cb8f25e980f84d4515aca4597b95e967d",
     "installer-template.nsi":
       "6fa293accfe30f24e42a20cc53a368dbefd8ceb81a98c99d36000a2c8aeecf9e",
     "installer-template.provenance.json":
-      "dd7a742c5c9a92b58852f7c06aae6863dcfe84fb5d29d59417d6e5453f044b98",
+      "157bfed45b55d06dabc0a9eb7a4f80a863fa5d7ca8bffa00f76cd177c70ed42c",
     "installer-template-LICENSE_MIT":
       "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d",
     "installer-template-LICENSE_APACHE-2.0":

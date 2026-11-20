@@ -14,7 +14,7 @@ import { nodeTestcontainersEndpoint as frameworkEndpoint } from "../../src/model
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const label = "org.orbwin.qualification";
-// Testcontainers 12.2.1 parses DOCKER_HOST through WHATWG URL. The canonical
+// Testcontainers parses DOCKER_HOST through WHATWG URL. The canonical
 // CLI form loses its /./ segment there. Backslash pipe separators preserve the
 // native Windows pipe path; keep this client-specific and verify its daemon.
 assert.equal(
@@ -64,6 +64,9 @@ async function worker(mode, runId) {
   const { GenericContainer, Wait, getContainerRuntimeClient } = await import(
     "testcontainers"
   );
+  const {
+    default: { version: frameworkVersion },
+  } = await import("testcontainers/package.json", { with: { type: "json" } });
   const client = await getContainerRuntimeClient();
   const info = await client.container.dockerode.info();
   assert.equal(
@@ -185,7 +188,7 @@ async function worker(mode, runId) {
   progress({
     stage: "passed",
     daemonId: info.ID,
-    framework: "12.2.1",
+    framework: frameworkVersion,
     logBytes: log.length,
   });
   process.exit(0);

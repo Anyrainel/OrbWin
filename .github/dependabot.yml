@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories: [/, /tests/testcontainers]
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directories: [/backend-tools/cli, /backend-tools/credentials, /tests/registry]
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

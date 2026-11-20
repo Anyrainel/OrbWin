@@ -83,6 +83,10 @@ test("uninstall cleanup is closed, runs before deletion, and errors abort withou
   assert.equal(config.bundle.windows.nsis.template, "installer-template.nsi");
   assert.equal(config.bundle.windows.nsis.installMode, "currentUser");
   assert.match(
+    read(config.bundle.windows.nsis.customLanguageFiles.English),
+    /^LangString noPermissionToCloseApp \$\{LANG_ENGLISH\} .*\{\{product_name\}\}/m,
+  );
+  assert.match(
     hooks,
     /!macro NSIS_HOOK_PREINSTALL\s+!insertmacro ORBWIN_REQUIRE_QUIESCENCE/,
   );

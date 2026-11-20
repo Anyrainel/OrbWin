@@ -29,36 +29,42 @@ replacement, uninstall and reinstall retained the separate engine data.
 See [packaging](docs/architecture/packaging.md) and
 [current scope](docs/phase-1-coverage.md) for boundaries and evidence.
 
-Build the local installer after the backend/helper/tool steps below:
-
-```powershell
-npm run package:prepare
-npm run package:build
-```
-
-The output is `src-tauri/target/release/bundle/nsis/OrbWin_0.1.0_x64-setup.exe`.
+The Phase 2 development source uses the
+[coherent packaging recipe](docs/architecture/coherent-build-inputs.md) with
+explicit, verified component inputs. That recipe currently supports application
+compilation. Installer generation follows installed-runtime qualification.
 Before replacing an installed build, use Settings → Docker engine → Prepare for
 application update, then close OrbWin. This stops owned workloads and retains
 their data in `%LOCALAPPDATA%/OrbWinData`; application files are separate.
 
+## GitHub builds and source prereleases
+
+[GitHub Actions](https://github.com/Anyrainel/OrbWin/actions/workflows/build.yml)
+checks pull requests and `master` pushes on Windows x64. It runs the Node source
+tests, compiles the desktop and its Rust test targets, and compiles the repository's
+Go modules. The compiled desktop requires the separately packaged runtime to
+manage an engine. Dependabot opens update pull requests for npm, Cargo, GitHub
+Actions and the standalone Go modules. The backend and SDK dependency profiles
+are updated through their reviewed patch and provenance process.
+
+Push a tag such as `v0.1.0-source.1` for a commit on `master` that declares the
+matching application version in `package.json`. After the same Windows build
+passes, GitHub creates a [prerelease](https://github.com/Anyrainel/OrbWin/releases)
+with the source archives. The Windows installer still requires reviewed runtime
+artifacts, installed acceptance, and publisher signing for public distribution.
+
 ## Local development (Windows x64)
 
 Node 24/npm, Git, the MSVC/Windows SDK build tools and WebView2 are required.
-`rust-toolchain.toml` pins Rust 1.90.0; Rustup installs that toolchain without
+`rust-toolchain.toml` pins Rust 1.100.0; Rustup installs that toolchain without
 changing the user's default. Go and MinGW compiler packages are project-local.
 
 ```powershell
 npm ci
-npm run tools:bootstrap
-npm run upstream:prepare
 npm test
-npm run upstream:test
-npm run session:build
-npm run credentials:build
-npm run tools:stage-runtime
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri -- build --debug --no-bundle
+cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+cargo build --locked --manifest-path src-tauri/Cargo.toml
 ```
 
 Run `src-tauri/target/debug/orbwin.exe` for the native UI or `npm run dev` for a
@@ -67,11 +73,14 @@ development adapter targets only a previously verified, product-owned engine.
 Reads never start a backend or fall back to Docker Desktop; explicit Start/Stop
 controls forward lifecycle requests to the owned rdd instance.
 
-`npm run backend:build` builds the native management binary and all guest
-components. `npm run backend:bundle` also stages checksum-verified upstream
-guest dependencies and overlays the WSL rootfs. Bundling needs XZ Utils (tested
-with 5.8.1 at `C:/msys64/usr/bin/xz.exe`; set `ORBWIN_XZ` for another installation).
-The build writes source/patch/binary provenance to `artifacts/backend/build-manifest.json`.
+For a component build, run `npm run tools:bootstrap` and follow the
+[coherent build recipe](docs/architecture/coherent-build-inputs.md) for input and
+output directories. `npm run backend:build` builds the management binary and guest
+components. `npm run backend:bundle` also stages checksum-verified upstream guest
+dependencies and overlays the WSL rootfs. Bundling needs XZ Utils (tested with
+5.8.1 at `C:/msys64/usr/bin/xz.exe`; set `ORBWIN_XZ` for another installation).
+The build writes source, patch and binary provenance to its output's
+`build-manifest.json`.
 
 `npm run backend:proof` runs the management-only proof in a fresh task-owned home.
 `npm run backend:guest-proof` refuses any existing `lima-orbwin` registration,

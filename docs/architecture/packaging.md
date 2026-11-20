@@ -50,7 +50,7 @@ release work. Installed first-run, restart, replacement and uninstall/state
 retention require actual qualification before Phase 1 acceptance.
 
 The English custom language file retains all strings from pinned Tauri CLI
-2.12.4 (`993038c49185307dfc895ab7657d77ca0d5ed7c7`), under its Apache-2.0/MIT
+2.12.6 (`9319e539f34237035cb4693bed9246660bc0a926`), under its Apache-2.0/MIT
 terms, with the uninstall checkbox narrowed to window preferences. Custom NSIS
 language files replace the defaults rather than merging a single override;
 native maintenance-page inspection caught and corrected an incomplete file.

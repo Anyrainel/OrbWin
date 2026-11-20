@@ -1,0 +1,87 @@
+name: Build and source release
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*-source.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 source build
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CGO_ENABLED: '0'
+      GOTOOLCHAIN: local
+    steps:
+      - name: Enable long checkout paths
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Validate the source release tag
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $expectedTag = '^v' + [regex]::Escape($version) + '-source\.[1-9][0-9]*$'
+          if ($env:GITHUB_REF_NAME -cnotmatch $expectedTag) {
+            throw "Expected a source prerelease tag for application version $version"
+          }
+          git merge-base --is-ancestor HEAD refs/remotes/origin/master
+          if ($LASTEXITCODE -ne 0) { throw 'Source releases must come from master' }
+      - run: npm ci
+      - run: npm test
+      - name: Compile desktop application and test targets
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      - name: Build desktop application without runtime components
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - name: Read pinned Go version
+        id: go
+        run: |
+          $version = (Get-Content upstream.lock.json -Raw | ConvertFrom-Json).go.version
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+          cache: false
+      - name: Compile Go source modules
+        run: |
+          $output = New-Item -ItemType Directory (Join-Path $env:RUNNER_TEMP 'orbwin-go')
+          foreach ($module in @('backend-tools/cli', 'backend-tools/credentials', 'backend-tools/session', 'tests/registry')) {
+            go -C $module build -mod=readonly -o $output.FullName ./...
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+  source-release:
+    name: Publish source prerelease
+    needs: windows
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Create GitHub prerelease for the existing tag
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --prerelease --latest=false \
+            --title "OrbWin $GITHUB_REF_NAME" \
+            --notes 'Development source snapshot. The Windows source build passed. The installer and installed runtime are pending qualification.'

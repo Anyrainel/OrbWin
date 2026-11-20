@@ -19,14 +19,15 @@ fn require(value: bool, message: &str) -> Check<()> {
 fn io<T>(result: std::io::Result<T>) -> Check<T> {
     result.map_err(|e| e.to_string())
 }
-fn marker() -> RegValue {
+fn marker() -> RegValue<'static> {
     RegValue {
         vtype: REG_SZ,
         bytes: NONCE
             .encode_utf16()
             .chain(Some(0))
             .flat_map(u16::to_le_bytes)
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
     }
 }
 // RegSetValueExW requires terminated string data. Keep the oversized case
@@ -52,10 +53,10 @@ fn oversized_fixture_is_valid_terminated_utf16_above_production_read_limit() {
         "A".repeat(4096)
     );
 }
-fn raw_value(value: &RegValue) -> StartupValue {
+fn raw_value(value: &RegValue<'_>) -> StartupValue {
     StartupValue {
         kind: value.vtype.clone() as u32,
-        bytes: value.bytes.clone(),
+        bytes: value.bytes.to_vec(),
     }
 }
 // Larger fixture-only read limit accommodates the intentional 8194-byte case.
@@ -331,35 +332,35 @@ fn owned_startup_registry_guarded_operations() {
                 "foreign-sz",
                 RegValue {
                     vtype: REG_SZ,
-                    bytes: foreign_command.bytes,
+                    bytes: foreign_command.bytes.into(),
                 },
             ),
             (
                 "foreign-expand-type",
                 RegValue {
                     vtype: REG_EXPAND_SZ,
-                    bytes: expected.bytes.clone(),
+                    bytes: expected.bytes.as_slice().into(),
                 },
             ),
             (
                 "foreign-dword",
                 RegValue {
                     vtype: REG_DWORD,
-                    bytes: 1u32.to_le_bytes().to_vec(),
+                    bytes: 1u32.to_le_bytes().to_vec().into(),
                 },
             ),
             (
                 "malformed-sz",
                 RegValue {
                     vtype: REG_SZ,
-                    bytes: vec![65],
+                    bytes: (&[65][..]).into(),
                 },
             ),
             (
                 "oversize-sz",
                 RegValue {
                     vtype: REG_SZ,
-                    bytes: oversized_string_bytes(),
+                    bytes: oversized_string_bytes().into(),
                 },
             ),
         ] {

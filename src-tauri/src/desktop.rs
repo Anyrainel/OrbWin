@@ -179,7 +179,7 @@ mod startup {
         }
         fn write(&mut self, value: Option<&StartupValue>) -> Result<(), String> {
             match value {
-                Some(value) => self.key.set_raw_value(VALUE, &RegValue { vtype: REG_SZ, bytes: value.bytes.clone() }),
+                Some(value) => self.key.set_raw_value(VALUE, &RegValue { vtype: REG_SZ, bytes: value.bytes.as_slice().into() }),
                 None => self.key.delete_value(VALUE),
             }.map_err(|_| "Sign-in registration write failed or its result is uncertain. Read the setting again; no automatic retry or rollback was made.".into())
         }

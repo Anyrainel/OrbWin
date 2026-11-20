@@ -43,7 +43,7 @@ test("exact pinned installer sources/licenses stage twice including readonly out
     fs.chmodSync(source, 0o444);
     const before = fs.statSync(source, { bigint: true });
     const first = stageDesktopInstallerNotices(root, destination);
-    assert.equal(first.version, "2.12.4");
+    assert.equal(first.version, desktopInstallerPins.cliVersion);
     assert.equal(first.notices.length, 2);
     assert.equal(first.sourceFiles.length, 5);
     for (const name of Object.keys(desktopInstallerPins.files))

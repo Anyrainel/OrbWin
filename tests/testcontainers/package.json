@@ -2,5 +2,12 @@
   "name": "orbwin-testcontainers-qualification",
   "private": true,
   "type": "module",
-  "dependencies": { "testcontainers": "12.2.1" }
+  "dependencies": {
+    "testcontainers": "12.2.2"
+  },
+  "overrides": {
+    "archiver-utils": {
+      "glob": "14.0.6"
+    }
+  }
 }
