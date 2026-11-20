@@ -40,14 +40,15 @@ their data in `%LOCALAPPDATA%/OrbWinData`; application files are separate.
 ## GitHub builds and source prereleases
 
 [GitHub Actions](https://github.com/Anyrainel/OrbWin/actions/workflows/build.yml)
-checks pull requests and `master` pushes on Windows x64. It runs the Node source
-tests, compiles the desktop and its Rust test targets, and compiles the repository's
-Go modules. The compiled desktop requires the separately packaged runtime to
-manage an engine. Dependabot opens update pull requests for npm, Cargo, GitHub
+checks pull requests and `master` pushes on Windows x64. It replays the pinned
+Rancher source patches, runs the Node source tests, compiles the desktop and its
+Rust test targets, and compiles the repository's Go modules. The compiled desktop
+requires the separately packaged runtime to manage an engine. Dependabot opens
+update pull requests for npm, Cargo, GitHub
 Actions and the standalone Go modules. The backend and SDK dependency profiles
 are updated through their reviewed patch and provenance process.
 
-Push a tag such as `v0.1.0-source.1` for a commit on `master` that declares the
+Push a tag such as `v0.1.0-source.2` for a commit on `master` that declares the
 matching application version in `package.json`. After the same Windows build
 passes, GitHub creates a [prerelease](https://github.com/Anyrainel/OrbWin/releases)
 with the source archives. The Windows installer still requires reviewed runtime
@@ -61,6 +62,7 @@ changing the user's default. Go and MinGW compiler packages are project-local.
 
 ```powershell
 npm ci
+npm run upstream:prepare
 npm test
 npm run build
 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml

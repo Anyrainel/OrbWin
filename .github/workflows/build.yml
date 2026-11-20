@@ -42,6 +42,8 @@ jobs:
           git merge-base --is-ancestor HEAD refs/remotes/origin/master
           if ($LASTEXITCODE -ne 0) { throw 'Source releases must come from master' }
       - run: npm ci
+      - name: Replay the pinned Rancher source patches
+        run: npm run upstream:prepare
       - run: npm test
       - name: Compile desktop application and test targets
         run: |
